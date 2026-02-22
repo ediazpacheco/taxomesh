@@ -37,6 +37,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Claude Code / Specify
+.claude/settings.local.json
+
 # taxomesh runtime files (when using file-based backends)
 *.taxomesh.json
 *.taxomesh.yaml
