@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Distribution
+*.whl
+*.tar.gz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# taxomesh runtime files (when using file-based backends)
+*.taxomesh.json
+*.taxomesh.yaml
+*.taxomesh.db
