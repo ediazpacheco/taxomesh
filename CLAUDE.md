@@ -46,6 +46,11 @@ Before every commit:
 2. List the files to be staged.
 3. Wait for the user to approve before running `git commit`.
 
+**Spec artifacts must always be committed.** After every speckit command
+(`/speckit.specify`, `/speckit.plan`, `/speckit.tasks`, `/speckit.implement`),
+stage and propose a commit for all generated files under `specs/` and
+`.specify/memory/`. Never leave spec artifacts as untracked files.
+
 ## Task Scope
 
 - Only touch what is explicitly in the current task or spec.
