@@ -72,7 +72,15 @@ pytest --cov=taxomesh --cov-fail-under=80           # tests ≥ 80% coverage
 
 Run these locally before proposing a commit.
 
+**Code style**: line length is **119** (set in `pyproject.toml [tool.ruff]`). Never use 88.
+
 ## Response Language
 
 Respond in **English** in all conversations, regardless of the language the user writes in.
 Code, comments, docstrings, and documentation are always in English.
+
+## Active Technologies
+- Python ≥ 3.11 + fastapi ≥ 0.110 (runtime); pytest, pytest-cov, ruff, mypy (dev) (001-pytest-setup)
+
+## Recent Changes
+- 001-pytest-setup: Added Python ≥ 3.11 + fastapi ≥ 0.110 (runtime); pytest, pytest-cov, ruff, mypy (dev)

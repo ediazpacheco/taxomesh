@@ -1,9 +1,9 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.1 → 1.1.0
-Bump type: MINOR — new Core Principle IX added (Pluggable REST Views); FastAPI promoted
-to mandatory core runtime dependency; Public API Surface and Toolchain updated accordingly.
+Version change: 1.0.1 → 1.1.1
+Bump type: MINOR+PATCH — v1.1.0 added Principle IX (Pluggable REST Views); v1.1.1 adds
+Code Style section with line-length = 119 as project-wide standard.
 
 Modified principles:
   - Principle I: adapters layer explicitly names `adapters/api/` alongside `adapters/repositories/`
@@ -199,6 +199,19 @@ Runtime dependencies: `fastapi` (mandatory — pulls in `pydantic` v2 transitive
 
 ---
 
+## Code Style
+
+| Setting | Value | Applies to |
+|---|---|---|
+| Line length | **119** | ruff format, ruff lint (E501) |
+| Target Python | **py311** | ruff, mypy |
+| Import style | **isort-compatible** (ruff `I` rules) | all source files |
+
+`line-length = 119` MUST be set in `[tool.ruff]` in `pyproject.toml`. No exceptions —
+do not use 88 (black default) or any other value.
+
+---
+
 ## Public API Surface
 
 `taxomesh/__init__.py` exports exactly:
@@ -260,4 +273,4 @@ between this document and any other guideline, this document wins.
 All amendments MUST be proposed as a PR with an updated constitution file and
 a brief rationale. The amendment takes effect on merge to `main`.
 
-**Version**: 1.1.0 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-22
+**Version**: 1.1.1 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-22
