@@ -43,7 +43,7 @@ This lets the same category appear at different positions depending on which par
 - [x] Per-parent sort index for categories
 - [x] Cycle detection in category hierarchies
 - [x] Free-form tags on items
-- [x] Pluggable repository interface (`TaxomeshRepository`)
+- [x] Pluggable repository interface (`TaxomeshRepositoryBase`)
 - [x] Built-in repository backends: **JSON**, **YAML**, **SQLite3**
 - [x] Python SDK for common operations
 
