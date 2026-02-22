@@ -18,12 +18,13 @@ black).
 **Rationale**: Constitutionally mandated (Principle VIII). ruff is 10–100× faster than
 the tools it replaces and consolidates configuration into a single `pyproject.toml` section.
 
-**Rule selection** — `["E", "F", "I", "UP", "B", "SIM"]`:
+**Rule selection** — `["E", "F", "I", "UP", "B", "SIM", "PL"]`:
 - `E` / `F` — pycodestyle errors and pyflakes (core correctness)
 - `I` — isort-compatible import sorting
 - `UP` — pyupgrade: enforce modern Python syntax (aligned with Python ≥ 3.11 target)
 - `B` — flake8-bugbear: common bug patterns
 - `SIM` — flake8-simplify: simplification opportunities
+- `PL` — pylint-equivalent checks (see dedicated decision below)
 
 **Alternatives considered**: Starting with `select = ["ALL"]` — rejected; too noisy for
 initial setup. Starting with only `["E", "F"]` — rejected; misses import ordering and
@@ -47,18 +48,17 @@ constitution mandates `--strict`, not a partial approximation.
 
 ---
 
-## Decision: pytest-cov with term-missing report, no fail-under threshold yet
+## Decision: pytest-cov with term-missing report and --cov-fail-under=80
 
-**Decision**: `addopts = "--cov=taxomesh --cov-report=term-missing"` — coverage always
-runs, threshold not enforced at this stage.
+**Decision**: `addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"` —
+coverage always runs and fails the suite if coverage drops below 80%.
 
-**Rationale**: The smoke test covers 100% of the current (minimal) source, so the
-threshold would pass anyway. However, removing it now and adding it as a separate task
-when domain code lands is cleaner than having an artificially low or missing threshold.
-The spec explicitly permits this (Assumptions section).
+**Rationale**: Constitution Principle VIII mandates `pytest --cov=taxomesh
+--cov-fail-under=80` unconditionally. The smoke test achieves 100% coverage on the
+current minimal codebase, so the gate passes immediately.
 
-**Alternatives considered**: Adding `--cov-fail-under=80` now — rejected; premature for
-an almost-empty package, and the spec documents this as intentional.
+**Alternatives considered**: Deferring `--cov-fail-under=80` until domain code lands —
+rejected; constitution Principle VIII allows no exceptions.
 
 ---
 
@@ -86,6 +86,38 @@ v2 support via compatibility layer. Cleaner to require 0.110+.
 **Rationale**: When a contributor installs with `uv sync --extra dev`, they get a fully
 functional environment including the runtime dep. This is idiomatic for Python libraries
 where the library itself is installed in editable mode alongside dev tools.
+
+---
+
+## Decision: ruff PL rule set for pylint-equivalent coverage
+
+**Decision**: Add `"PL"` to `[tool.ruff.lint] select`.
+
+**Rationale**: ruff implements pylint checks natively under the `PL` prefix —
+`PLC` (convention), `PLE` (error), `PLR` (refactor), `PLW` (warning). Verified via
+`uv run ruff linter | grep -i pylint` which confirms `PL Pylint` is a supported rule
+set. Constitution Principle VIII states `ruff check .` replaces pylint; enabling PL
+rules fulfils that intent without installing pylint as a separate tool (FR-007).
+
+**Alternatives considered**: Installing pylint separately — rejected; contradicts
+constitution Principle VIII explicitly.
+
+---
+
+## Decision: PLC0415 violation in smoke test — module-level import
+
+**Decision**: Move `import taxomesh` to module level in `tests/test_smoke.py`.
+
+**Rationale**: Enabling `PL` reveals one violation — `PLC0415`
+(import-outside-top-level) on the in-function import. Moving it to module level is the
+idiomatic pytest pattern: collection fails with `ImportError` if `taxomesh/__init__.py`
+is broken, satisfying US2:AS2 without any `noqa` suppression. The existing `# noqa: F401`
+is also no longer needed because the module-level `taxomesh` name is used in the assert.
+
+**Alternatives considered**:
+- `# noqa: PLC0415` inline (rejected: suppresses a valid rule for a structural reason
+  that disappears after the refactor).
+- Global `ignore = ["PLC0415"]` (rejected: project-wide suppression defeats the rule).
 
 ---
 

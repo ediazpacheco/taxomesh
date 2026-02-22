@@ -3,7 +3,7 @@
 **Feature Branch**: `001-pytest-setup`
 **Created**: 2026-02-22
 **Status**: Implemented
-**Input**: User description: "add pytest and basic dependencies. Run pytest and test that it's working"
+**Input**: User description: "add pytest and basic dependencies. Run pytest and test that it's working; enable pylint-equivalent rules (PL) in ruff"
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -50,7 +50,9 @@ imports without errors.
    test, **Then** it reports 1 test passed with no errors.
 2. **Given** the library package is broken (e.g., syntax error in `__init__.py`), **When**
    the smoke test runs, **Then** it fails with an import error — proving the test is
-   actually exercising the library.
+   actually exercising the library. *(Covered implicitly by T011/T012: `import taxomesh`
+   in `test_taxomesh_importable` raises `ImportError` on a broken package — no separate
+   negative test task required.)*
 
 ---
 
@@ -60,8 +62,6 @@ imports without errors.
   with a clear error from the package manager, not silently pollute the global environment.
 - Running the test suite with no test files (beyond the smoke test) must not exit with a
   failure — zero additional tests collected is a valid state during initial setup.
-- The coverage report must not fail the run when coverage is below 80% at this stage —
-  the threshold enforcement applies only once domain code exists.
 
 ## Requirements *(mandatory)*
 
@@ -80,6 +80,9 @@ imports without errors.
   requiring additional flags from the developer.
 - **FR-006**: All four quality gates (lint, format check, type check, test suite) MUST pass
   with zero errors on the initial codebase.
+- **FR-007**: The linter configuration MUST enable pylint-equivalent rule checks (convention,
+  error, refactor, and warning categories) so that pylint-class violations are caught without
+  requiring pylint to be installed as a separate tool.
 
 ## Success Criteria *(mandatory)*
 
@@ -92,13 +95,15 @@ imports without errors.
 - **SC-003**: Coverage output is displayed automatically alongside test results; no extra
   flags or post-processing required.
 - **SC-004**: The smoke test suite contains at least 1 test and 0 failures after setup.
+- **SC-005**: Running the linter enforces pylint-equivalent checks (convention, error,
+  refactor, and warning categories) with no additional tools installed beyond the existing
+  linter — a single linter command covers both style and pylint-class violations.
 
 ## Assumptions
 
 - `uv` is the package manager used to install and manage the virtual environment.
-- The coverage threshold enforcement (`--cov-fail-under=80`) is intentionally disabled for
-  this feature since no domain code exists yet; it will be enforced once domain models land.
 - `fastapi` is the mandatory core runtime dependency (per constitution Principle IX); it
   pulls in `pydantic` v2 transitively. Both must be available in the dev environment.
-- `ruff` and `mypy` are added to the dev group (they are not yet declared there despite
-  being constitutional quality gate tools).
+- `ruff` and `mypy` are declared in the dev group as required by the constitution.
+- The linter's native pylint rule set (PLC, PLE, PLR, PLW) covers the pylint-class checks
+  required by the project; pylint is not installed as a separate dependency.

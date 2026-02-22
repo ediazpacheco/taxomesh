@@ -22,12 +22,7 @@ Template alignment:
   ⚠ README.md — "Architecture overview" section is still TBD; should be updated once the
     API adapter design is finalized in a feature spec. Also: roadmap v0.3 async conflict
     from v1.0.1 still pending manual resolution.
-  ⚠ specs/001-pytest-setup/spec.md — Assumptions section references pydantic as the only
-    runtime dep; should be updated to reflect FastAPI as core dep.
-
 Follow-up TODOs:
-  - Update specs/001-pytest-setup/spec.md Assumptions to reference fastapi (not pydantic)
-    as the primary runtime dep.
   - Resolve README.md roadmap async mention (carried from v1.0.1).
   - README.md Architecture section: fill once API adapter spec is written.
 

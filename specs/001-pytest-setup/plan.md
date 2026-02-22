@@ -10,9 +10,10 @@ to a fully green quality suite in two commands. This means:
 
 1. Adding `fastapi` as the core runtime dependency and `ruff`, `mypy` to the dev group.
 2. Wiring pytest, ruff, and mypy configuration into `pyproject.toml` (no extra config files).
-3. Writing one smoke test that verifies `import taxomesh` works.
-4. Confirming all four quality gates (`ruff check`, `ruff format --check`, `mypy --strict`,
-   `pytest --cov`) pass on the resulting minimal codebase.
+3. Enabling pylint-equivalent rule checks (PL prefix) in the ruff linter configuration.
+4. Writing one smoke test that verifies `import taxomesh` works.
+5. Confirming all four quality gates (`ruff check`, `ruff format --check`, `mypy --strict`,
+   `pytest --cov=taxomesh --cov-fail-under=80`) pass on the resulting minimal codebase.
 
 ## Technical Context
 
@@ -40,7 +41,7 @@ to a fully green quality suite in two commands. This means:
 | V. Exception hierarchy | ✅ N/A | No exceptions introduced |
 | VI. DAG integrity | ✅ N/A | No category logic |
 | VII. Spec-driven | ✅ Pass | Spec exists at `specs/001-pytest-setup/spec.md` |
-| VIII. Quality gates | ✅ Required | This feature IS the quality gates setup |
+| VIII. Quality gates | ✅ Required | This feature IS the quality gates setup; PL rules extend lint coverage |
 | IX. Pluggable REST Views | ✅ N/A | No REST views introduced here |
 
 No violations. No complexity tracking required.
@@ -63,9 +64,9 @@ No `contracts/` — this feature defines no external interfaces.
 ### Source Code (repository root)
 
 ```text
-pyproject.toml           ← modified: add fastapi dep, ruff/mypy/pytest config sections
+pyproject.toml           ← modified: add fastapi dep, ruff/mypy/pytest config sections; add PL to ruff select
 tests/
-└── test_smoke.py        ← new: import smoke test
+└── test_smoke.py        ← new: import smoke test (module-level import; no noqa needed)
 ```
 
 No new source directories. The existing `taxomesh/__init__.py` and `tests/__init__.py`
@@ -108,9 +109,12 @@ target-version = "py311"
 line-length = 119
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
 ignore = []
 ```
+
+`PL` enables all four pylint rule categories: `PLC` (convention), `PLE` (error),
+`PLR` (refactor), `PLW` (warning). No separate pylint installation required.
 
 **Mypy configuration** (`[tool.mypy]`):
 ```toml
@@ -124,21 +128,28 @@ warn_unused_configs = true
 **Pytest configuration** (`[tool.pytest.ini_options]`):
 ```toml
 [tool.pytest.ini_options]
-addopts = "--cov=taxomesh --cov-report=term-missing"
+addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
 ```
 
-Note: `--cov-fail-under=80` is intentionally omitted here. It will be added once domain
-code exists and coverage is meaningful.
-
 ### Smoke test
+
+Enabling `PL` rules surfaces `PLC0415` (import-outside-top-level) on the original
+in-function import. The fix is to move the import to module level — this is more
+idiomatic pytest and still validates importability: if `taxomesh/__init__.py` is
+broken, pytest collection fails with an `ImportError` before any test runs.
 
 `tests/test_smoke.py`:
 ```python
+import taxomesh
+
+
 def test_taxomesh_importable() -> None:
-    import taxomesh  # noqa: F401
     assert taxomesh.__version__ is not None
 ```
+
+No `noqa` suppressions required. F401 does not trigger because `taxomesh` is used
+in the assertion.
 
 ### Quickstart
 

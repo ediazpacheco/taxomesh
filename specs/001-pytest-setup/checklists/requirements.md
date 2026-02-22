@@ -33,6 +33,7 @@
 
 - SC-003 references "coverage output" — this is a process outcome, not an implementation
   detail, and is acceptable.
-- Coverage threshold (80%) is intentionally not enforced in SC-004 at this stage;
-  rationale documented in Assumptions.
+- FR-007 and SC-005 added 2026-02-22: enable pylint-equivalent rules in ruff (PL prefix).
+  Both are technology-agnostic at the spec level (no mention of ruff or PL prefix);
+  implementation detail lives in plan.md.
 - All items pass. Ready for `/speckit.plan`.

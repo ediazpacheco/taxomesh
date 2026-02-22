@@ -45,7 +45,7 @@ target-version = "py311"
 line-length = 119
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
 ignore = []
 
 [tool.mypy]
@@ -55,5 +55,5 @@ warn_return_any = true
 warn_unused_configs = true
 
 [tool.pytest.ini_options]
-addopts = "--cov=taxomesh --cov-report=term-missing"
+addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
