@@ -1,33 +1,35 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.0 → 1.0.1
-Bump type: PATCH — consistency propagation pass; sync report added; no principle content changed.
+Version change: 1.0.1 → 1.1.0
+Bump type: MINOR — new Core Principle IX added (Pluggable REST Views); FastAPI promoted
+to mandatory core runtime dependency; Public API Surface and Toolchain updated accordingly.
 
-Modified principles: none
+Modified principles:
+  - Principle I: adapters layer explicitly names `adapters/api/` alongside `adapters/repositories/`
 
-Added sections: none
+Added sections:
+  - Core Principle IX: Pluggable REST Views — FastAPI View Functions
 
 Removed sections: none
 
 Template alignment:
-  ✅ .specify/templates/plan-template.md — Constitution Check section uses runtime instruction
-     "[Gates determined based on constitution file]"; intentional, no static content to update.
-  ✅ .specify/templates/spec-template.md — generic feature-level template; no constitution-specific
-     content; aligned.
-  ✅ .specify/templates/tasks-template.md — generic task template; path conventions are runtime
-     instructions adapted per project at generation time; aligned.
-  ✅ .specify/templates/checklist-template.md — generic template; no constitution-specific
-     content; aligned.
-  ✅ .specify/templates/agent-file-template.md — auto-generated guidance template; no
-     constitution-specific content; aligned.
-  ✅ README.md — fixed: `TaxomeshRepository` → `TaxomeshRepositoryBase` (Principle III).
+  ✅ .specify/templates/plan-template.md — no constitution-specific static content; aligned.
+  ✅ .specify/templates/spec-template.md — generic; aligned.
+  ✅ .specify/templates/tasks-template.md — generic; aligned.
+  ✅ .specify/templates/checklist-template.md — generic; aligned.
+  ✅ .specify/templates/agent-file-template.md — generic; aligned.
+  ⚠ README.md — "Architecture overview" section is still TBD; should be updated once the
+    API adapter design is finalized in a feature spec. Also: roadmap v0.3 async conflict
+    from v1.0.1 still pending manual resolution.
+  ⚠ specs/001-pytest-setup/spec.md — Assumptions section references pydantic as the only
+    runtime dep; should be updated to reflect FastAPI as core dep.
 
-Follow-up TODOs (manual):
-  ⚠ README.md line 89: Roadmap lists "v0.3 — Async repository interface" which contradicts
-    the constitution decision that async is out of scope. The roadmap should be updated to
-    remove or defer the async milestone. Flagged for manual review — do not auto-rewrite
-    roadmap without project owner decision.
+Follow-up TODOs:
+  - Update specs/001-pytest-setup/spec.md Assumptions to reference fastapi (not pydantic)
+    as the primary runtime dep.
+  - Resolve README.md roadmap async mention (carried from v1.0.1).
+  - README.md Architecture section: fill once API adapter spec is written.
 
 Deferred placeholders: none
 -->
@@ -47,7 +49,8 @@ adapters → application → domain
 - `domain/` — pure models and business rules; no imports from adapters or ports
 - `ports/` — structural interfaces (`Protocol`) the application depends on
 - `application/` — `TaxomeshService`; orchestrates domain logic + port calls
-- `adapters/` — concrete implementations of ports (repositories, future: REST, CLI)
+- `adapters/repositories/` — concrete repository implementations (JSON, YAML, SQLite)
+- `adapters/api/` — FastAPI view functions; the REST interface adapter
 
 No layer may import from a layer further out than itself.
 
@@ -124,6 +127,59 @@ All code merged to `main` MUST pass:
 
 These gates run in CI (GitHub Actions) on every PR. No exceptions.
 
+### IX. Pluggable REST Views — The Library Ships FastAPI View Functions
+taxomesh provides FastAPI view functions in `taxomesh/adapters/api/`. These are
+plain async functions — not a mountable router — that consumer FastAPI applications
+call from their own route handlers.
+
+**The callable contract is mandatory and per-call:**
+Every view function that returns item data MUST accept an `item_fetcher` argument.
+`item_fetcher` is a callable `(item_id: str | int | UUID) -> dict` supplied by the
+consumer at the call site. taxomesh never knows what an item *is*; it only knows
+how items are categorized and tagged.
+
+```python
+# taxomesh provides the view function
+async def category_items(
+    category_id: str,
+    service: TaxomeshService,
+    item_fetcher: Callable[[str | int | UUID], dict],
+) -> list[ItemResponse]: ...
+
+# Consumer wires it into their own routes
+@app.get("/v1/songs/category/{category_id}/items/")
+async def songs_by_category(category_id: str):
+    return await taxomesh_views.category_items(
+        category_id=category_id,
+        service=my_taxomesh_service,
+        item_fetcher=song_service.fetch,     # Songs
+    )
+
+@app.get("/v1/authors/category/{category_id}/items/")
+async def authors_by_category(category_id: str):
+    return await taxomesh_views.category_items(
+        category_id=category_id,
+        service=my_taxomesh_service,
+        item_fetcher=author_service.fetch,   # Authors — same view, different callable
+    )
+```
+
+**Standard item response shape** (every item-listing view MUST return this structure):
+
+```json
+{
+  "category_id": "<str | int | UUID>",
+  "item_id":     "<str | int | UUID>",
+  "item_data":   { ...consumer-provided dict... }
+}
+```
+
+The consumer owns: the URL, the callable, and the item data shape.
+taxomesh owns: the query logic, the category/tag graph, and the response envelope.
+
+FastAPI is a **mandatory core runtime dependency** — not an optional extra. It is the
+primary delivery mechanism for the taxomesh REST surface and ships with every install.
+
 ---
 
 ## Toolchain
@@ -133,13 +189,13 @@ These gates run in CI (GitHub Actions) on every PR. No exceptions.
 | **ruff** | Lint + format | `pyproject.toml [tool.ruff]` |
 | **mypy** | Static type checking (strict) | `pyproject.toml [tool.mypy]` |
 | **pytest** | Unit and integration tests | `pyproject.toml [tool.pytest.ini_options]` |
-| **pydantic** | Domain model definition and validation | runtime dependency |
+| **fastapi** | REST view functions + Pydantic v2 (core runtime dep) | `pyproject.toml [project.dependencies]` |
+| **pydantic** | Domain model definition and validation (pulled in by fastapi) | transitive via fastapi |
 | **hatchling** | Build backend | `pyproject.toml [build-system]` |
 | **uv** | Package and virtual environment manager | `uv.lock` |
 
-Runtime dependencies are minimal. `pydantic` is the only mandatory runtime
-dependency. `pyyaml` is optional (`pip install taxomesh[yaml]`). SQLite3 is
-stdlib.
+Runtime dependencies: `fastapi` (mandatory — pulls in `pydantic` v2 transitively).
+`pyyaml` is optional (`pip install taxomesh[yaml]`). SQLite3 is stdlib.
 
 ---
 
@@ -155,9 +211,12 @@ stdlib.
 Advanced users who need it for explicit type annotations can import it directly:
 `from taxomesh.ports.repository import TaxomeshRepositoryBase`.
 
-Concrete adapters (`JsonRepository`, `SqliteRepository`, `YamlRepository`) are
-**not** re-exported from `__init__.py`. They are accessed via their full module
-path (e.g. `from taxomesh.adapters.repositories.sqlite import SqliteRepository`).
+Concrete adapters are accessed via their full module path:
+
+- **Repository adapters**: `from taxomesh.adapters.repositories.sqlite import SqliteRepository`
+- **REST view functions**: `from taxomesh.adapters.api import views as taxomesh_views`
+
+Neither repository adapters nor API views are re-exported from `__init__.py`.
 
 ---
 
@@ -168,9 +227,11 @@ path (e.g. `from taxomesh.adapters.repositories.sqlite import SqliteRepository`)
 | Abstract interfaces / Protocols | `Base` suffix | `TaxomeshRepositoryBase` |
 | Domain models | PascalCase, no suffix | `Category`, `Item`, `Tag` |
 | Junction / link models | `Link` suffix | `CategoryParentLink` |
-| Concrete adapters | Descriptive prefix | `SqliteRepository`, `JsonRepository` |
+| Concrete repository adapters | Descriptive prefix | `SqliteRepository`, `JsonRepository` |
 | Application service | `Service` suffix | `TaxomeshService` |
 | Exceptions | Descriptive + `Error` | `CyclicDependencyError` |
+| API response models | Descriptive + `Response` | `ItemResponse`, `CategoryResponse` |
+| API view modules | `views.py` per adapter package | `adapters/api/views.py` |
 
 ---
 
@@ -199,4 +260,4 @@ between this document and any other guideline, this document wins.
 All amendments MUST be proposed as a PR with an updated constitution file and
 a brief rationale. The amendment takes effect on merge to `main`.
 
-**Version**: 1.0.1 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-22
+**Version**: 1.1.0 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-22
