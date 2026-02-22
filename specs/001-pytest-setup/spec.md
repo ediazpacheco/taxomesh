@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-pytest-setup`
 **Created**: 2026-02-22
-**Status**: Draft
+**Status**: Implemented
 **Input**: User description: "add pytest and basic dependencies. Run pytest and test that it's working"
 
 ## User Scenarios & Testing *(mandatory)*

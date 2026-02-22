@@ -49,7 +49,7 @@ before any user story verification can begin.
 
 - [ ] T002 Add `fastapi>=0.110` to `[project.dependencies]` in `pyproject.toml` (replace `dependencies = []`)
 - [ ] T003 Add `ruff>=0.4` and `mypy>=1.10` to `[project.optional-dependencies] dev` in `pyproject.toml` (also add `fastapi>=0.110` to dev group; keep existing pytest and pytest-cov entries)
-- [ ] T004 Add `[tool.ruff]` and `[tool.ruff.lint]` config sections to `pyproject.toml` per plan.md Phase 1 design (`target-version = "py311"`, `line-length = 88`, `select = ["E", "F", "I", "UP", "B", "SIM"]`)
+- [ ] T004 Add `[tool.ruff]` and `[tool.ruff.lint]` config sections to `pyproject.toml` per plan.md Phase 1 design (`target-version = "py311"`, `line-length = 119`, `select = ["E", "F", "I", "UP", "B", "SIM"]`)
 - [ ] T005 Add `[tool.mypy]` config section to `pyproject.toml` per plan.md Phase 1 design (`python_version = "3.11"`, `strict = true`, `warn_return_any = true`, `warn_unused_configs = true`)
 - [ ] T006 Add `[tool.pytest.ini_options]` config section to `pyproject.toml` per plan.md Phase 1 design (`addopts = "--cov=taxomesh --cov-report=term-missing"`, `testpaths = ["tests"]`)
 - [ ] T007 Run `uv sync --extra dev` from repo root and confirm zero errors — all dependencies resolved and installed
