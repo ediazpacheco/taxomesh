@@ -44,3 +44,4 @@ Thumbs.db
 *.taxomesh.json
 *.taxomesh.yaml
 *.taxomesh.db
+/.run/
