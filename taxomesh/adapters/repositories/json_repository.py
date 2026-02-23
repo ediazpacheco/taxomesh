@@ -1,0 +1,297 @@
+"""File-backed JSON repository for taxomesh.
+
+Reads the full data set from a single JSON file at initialisation and writes
+the full current state back after every mutating operation. Writes are atomic:
+a sibling temporary file is flushed with ``os.fsync`` and then renamed into
+place with ``os.replace`` so the target file is never in a partial state.
+"""
+
+import json
+import os
+import tempfile
+from pathlib import Path
+from typing import Any
+from uuid import UUID
+
+from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemTagLink, Tag
+from taxomesh.exceptions import TaxomeshRepositoryError
+
+
+class JsonRepository:
+    """Repository that persists taxomesh data to a JSON file on disk.
+
+    All four entity collections (categories, items, tags, tag-item links)
+    are stored as a single JSON document. The file is read once at
+    construction and written atomically after every mutation.
+
+    Args:
+        path: Path to the JSON storage file. Defaults to ``taxomesh.json`` in
+            the current working directory. Missing parent directories are
+            created automatically.
+
+    Raises:
+        TaxomeshRepositoryError: If ``path`` is a directory, or if the file
+            exists but cannot be parsed as valid storage content.
+    """
+
+    def __init__(self, path: Path | str = Path("taxomesh.json")) -> None:
+        """Initialise the repository from an existing file or create a new one.
+
+        Args:
+            path: Path to the JSON storage file. Defaults to ``taxomesh.json``
+                in the current working directory.
+
+        Raises:
+            TaxomeshRepositoryError: If the path is a directory, or if the
+                file exists but cannot be parsed.
+        """
+        self._path = Path(path)
+        self._categories: dict[UUID, Category] = {}
+        self._items: dict[UUID, Item] = {}
+        self._tags: dict[UUID, Tag] = {}
+        self._links: list[ItemTagLink] = []
+        self._category_parent_links: list[CategoryParentLink] = []
+
+        if self._path.is_dir():
+            raise TaxomeshRepositoryError(f"path is a directory, not a file: {self._path}")
+
+        if self._path.exists():
+            self._load()
+        else:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._flush()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _load(self) -> None:
+        """Load state from the JSON file into in-memory collections.
+
+        Raises:
+            TaxomeshRepositoryError: If the file cannot be read or parsed.
+        """
+        try:
+            raw: Any = json.loads(self._path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("expected a JSON object at the top level")
+            data: dict[str, Any] = raw
+            self._categories = {UUID(k): Category.model_validate(v) for k, v in data.get("categories", {}).items()}
+            self._items = {UUID(k): Item.model_validate(v) for k, v in data.get("items", {}).items()}
+            self._tags = {UUID(k): Tag.model_validate(v) for k, v in data.get("tags", {}).items()}
+            self._links = [ItemTagLink.model_validate(lnk) for lnk in data.get("item_tag_links", [])]
+            self._category_parent_links = [
+                CategoryParentLink.model_validate(lnk) for lnk in data.get("category_parent_links", [])
+            ]
+        except TaxomeshRepositoryError:
+            raise
+        except Exception as exc:
+            raise TaxomeshRepositoryError(f"could not load repository from {self._path}: {exc}") from exc
+
+    def _flush(self) -> None:
+        """Atomically write the current in-memory state to disk.
+
+        Serialises all collections to JSON, writes to a sibling temp file,
+        calls ``os.fsync`` to flush OS buffers, then replaces the target file
+        via ``os.replace`` (POSIX atomic rename).
+        """
+        data: dict[str, Any] = {
+            "categories": {str(k): v.model_dump(mode="json") for k, v in self._categories.items()},
+            "items": {str(k): v.model_dump(mode="json") for k, v in self._items.items()},
+            "tags": {str(k): v.model_dump(mode="json") for k, v in self._tags.items()},
+            "item_tag_links": [lnk.model_dump(mode="json") for lnk in self._links],
+            "category_parent_links": [lnk.model_dump(mode="json") for lnk in self._category_parent_links],
+        }
+        payload = json.dumps(data, indent=2, ensure_ascii=False)
+        dir_ = self._path.parent
+        fd, tmp_path_str = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+        tmp_path = Path(tmp_path_str)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, self._path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    # ------------------------------------------------------------------
+    # Category
+    # ------------------------------------------------------------------
+
+    def save_category(self, category: Category) -> None:
+        """Insert or update a category record.
+
+        Args:
+            category: The Category instance to persist.
+        """
+        self._categories[category.category_id] = category
+        self._flush()
+
+    def get_category(self, category_id: UUID) -> Category | None:
+        """Retrieve a category by its identifier.
+
+        Args:
+            category_id: The library-assigned UUID of the category.
+
+        Returns:
+            The matching Category, or None if it does not exist.
+        """
+        return self._categories.get(category_id)
+
+    def list_categories(self) -> list[Category]:
+        """Return all stored categories.
+
+        Returns:
+            List of all categories; empty list if the store is empty.
+        """
+        return list(self._categories.values())
+
+    def delete_category(self, category_id: UUID) -> bool:
+        """Delete a category by its identifier.
+
+        Args:
+            category_id: The library-assigned UUID of the category to delete.
+
+        Returns:
+            True if the category was found and deleted; False if it did not exist.
+        """
+        if category_id not in self._categories:
+            return False
+        del self._categories[category_id]
+        self._flush()
+        return True
+
+    # ------------------------------------------------------------------
+    # Item
+    # ------------------------------------------------------------------
+
+    def save_item(self, item: Item) -> None:
+        """Insert or update an item record.
+
+        Args:
+            item: The Item instance to persist.
+        """
+        self._items[item.item_id] = item
+        self._flush()
+
+    def get_item(self, item_id: UUID) -> Item | None:
+        """Retrieve an item by its internal identifier.
+
+        Args:
+            item_id: The library-assigned UUID of the item.
+
+        Returns:
+            The matching Item, or None if it does not exist.
+        """
+        return self._items.get(item_id)
+
+    def list_items(self) -> list[Item]:
+        """Return all stored items.
+
+        Returns:
+            List of all items; empty list if the store is empty.
+        """
+        return list(self._items.values())
+
+    def delete_item(self, item_id: UUID) -> bool:
+        """Delete an item by its internal identifier.
+
+        Args:
+            item_id: The library-assigned UUID of the item to delete.
+
+        Returns:
+            True if the item was found and deleted; False if it did not exist.
+        """
+        if item_id not in self._items:
+            return False
+        del self._items[item_id]
+        self._flush()
+        return True
+
+    # ------------------------------------------------------------------
+    # Tag
+    # ------------------------------------------------------------------
+
+    def save_tag(self, tag: Tag) -> None:
+        """Insert or update a tag record.
+
+        Args:
+            tag: The Tag instance to persist.
+        """
+        self._tags[tag.tag_id] = tag
+        self._flush()
+
+    def get_tag(self, tag_id: UUID) -> Tag | None:
+        """Retrieve a tag by its identifier.
+
+        Args:
+            tag_id: The library-assigned UUID of the tag.
+
+        Returns:
+            The matching Tag, or None if it does not exist.
+        """
+        return self._tags.get(tag_id)
+
+    def list_tags(self) -> list[Tag]:
+        """Return all stored tags.
+
+        Returns:
+            List of all tags; empty list if the store is empty.
+        """
+        return list(self._tags.values())
+
+    # ------------------------------------------------------------------
+    # Tag ↔ Item association
+    # ------------------------------------------------------------------
+
+    def assign_tag(self, tag_id: UUID, item_id: UUID) -> None:
+        """Associate a tag with an item. Idempotent — no-op if already linked.
+
+        Args:
+            tag_id: The library-assigned UUID of the tag.
+            item_id: The library-assigned UUID of the item.
+        """
+        already_linked = any(lnk.tag_id == tag_id and lnk.item_id == item_id for lnk in self._links)
+        if not already_linked:
+            self._links.append(ItemTagLink(tag_id=tag_id, item_id=item_id))
+            self._flush()
+
+    # ------------------------------------------------------------------
+    # Category parent links
+    # ------------------------------------------------------------------
+
+    def save_category_parent_link(self, link: CategoryParentLink) -> None:
+        """Persist a category-parent relationship.
+
+        Args:
+            link: The CategoryParentLink to persist.
+        """
+        self._category_parent_links.append(link)
+        self._flush()
+
+    def list_category_parent_links(self) -> list[CategoryParentLink]:
+        """Return all stored category-parent relationships.
+
+        Returns:
+            List of all CategoryParentLink records; empty list if none exist.
+        """
+        return list(self._category_parent_links)
+
+    def remove_tag(self, tag_id: UUID, item_id: UUID) -> bool:
+        """Remove the association between a tag and an item.
+
+        Args:
+            tag_id: The library-assigned UUID of the tag.
+            item_id: The library-assigned UUID of the item.
+
+        Returns:
+            True if the association was found and removed; False if it did not exist.
+        """
+        before = len(self._links)
+        self._links = [lnk for lnk in self._links if not (lnk.tag_id == tag_id and lnk.item_id == item_id)]
+        if len(self._links) < before:
+            self._flush()
+            return True
+        return False

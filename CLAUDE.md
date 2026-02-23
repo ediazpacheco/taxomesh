@@ -134,6 +134,26 @@ Line length: 119 (set in `pyproject.toml [tool.ruff]`). Never use 88.
 
 ---
 
+## Testing Rules
+
+### TDD is mandatory — no exceptions
+Every implementation task MUST have a corresponding test task
+that runs before it.
+
+Never implement a function, method, or class without writing
+the failing test first.
+
+If the task list has no test task for an implementation:
+  STOP — do not implement
+  Report: "Task X has no corresponding test task.
+           Should I add one before proceeding?"
+
+### Definition of done always includes pytest
+No task is complete until:
+  pytest [relevant test file] → all tests pass
+
+---
+
 ## Response Language
 
 Respond in English in all conversations, regardless of the language
@@ -162,9 +182,22 @@ Pending:
 
 ---
 
+## README Updates
+After every completed spec cycle, propose README.md updates
+that reflect new public API additions.
+Do NOT update README during implement — only after
+/speckit.analyze passes.
+
+---
+
 ## Active Technologies
+- Python 3.11 (`requires-python = ">=3.11"`) + pydantic v2 (transitive via `fastapi ≥ 0.110`); stdlib `json`, (003-service-repository)
+- `JsonRepository` — single JSON file, atomic writes via `os.replace()` (003-service-repository)
 
 | Spec | Runtime | Dev |
 |---|---|---|
 | 001-pytest-setup | Python ≥ 3.11, fastapi ≥ 0.110 | pytest, pytest-cov, ruff, mypy |
 | 002-domain-models | Python ≥ 3.11, pydantic v2 | — |
+
+## Recent Changes
+- 003-service-repository: Added Python 3.11 (`requires-python = ">=3.11"`) + pydantic v2 (transitive via `fastapi ≥ 0.110`); stdlib `json`,
