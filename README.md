@@ -50,6 +50,24 @@ This lets the same category appear at different positions depending on which par
 
 ---
 
+## Domain Models
+
+taxomesh defines seven domain model classes in `taxomesh/domain/models.py`:
+
+| Class | Description |
+|---|---|
+| **`Item`** | A generic reference to any external entity, identified by an auto-generated UUID (`item_id`) and a user-supplied `external_id` (UUID, str, or int) |
+| **`Category`** | A named node in the taxonomy DAG, with an optional description and metadata |
+| **`Tag`** | A short free-form label (max 25 chars) that can be attached to items |
+| **`CategoryParentLink`** | Junction record linking a category to one of its parent categories, with an independent sort index |
+| **`ItemParentLink`** | Junction record placing an item under a category, with a sort index |
+| **`ItemTagLink`** | Junction record associating a tag with an item |
+| **`ModelBase`** | Shared Pydantic base with `populate_by_name=True` and `validate_assignment=True` |
+
+All models are `pydantic.BaseModel` subclasses. Every direct `str` field carries an explicit `max_length` constraint.
+
+---
+
 ## Architecture overview
 
 TBD

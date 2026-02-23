@@ -61,8 +61,8 @@ to the test file. All collected tests must pass; coverage must stay at 100%.
 - [x] T005 [P] Run `uv run ruff format --check .` — must report all files formatted
 - [x] T006 [P] Run `uv run mypy --strict .` — must report no issues in 8 source files
 - [x] T007 Run `uv run pytest --cov=taxomesh --cov-fail-under=80` — must pass all collected tests at ≥ 80% coverage (depends on T004–T006 all passing)
-- [ ] T008 Commit spec artifacts: `specs/002-domain-models/plan.md`, `specs/002-domain-models/research.md`, `specs/002-domain-models/data-model.md`, `specs/002-domain-models/contracts/python-api.md`, `specs/002-domain-models/quickstart.md`, `specs/002-domain-models/spec.md`, `specs/002-domain-models/tasks.md`, `CLAUDE.md`
-- [ ] T009 Commit implementation: `taxomesh/domain/types.py`, `taxomesh/domain/models.py`
+- [x] T008 Commit spec artifacts: `specs/002-domain-models/plan.md`, `specs/002-domain-models/research.md`, `specs/002-domain-models/data-model.md`, `specs/002-domain-models/contracts/python-api.md`, `specs/002-domain-models/quickstart.md`, `specs/002-domain-models/spec.md`, `specs/002-domain-models/tasks.md`, `CLAUDE.md`
+- [x] T009 Commit implementation: `taxomesh/domain/types.py`, `taxomesh/domain/models.py`
 
 ---
 
