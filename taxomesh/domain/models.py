@@ -26,7 +26,7 @@ class Category(ModelBase):
     @field_validator("description", mode="before")
     @classmethod
     def _coerce_none_description(cls, v: object) -> object:
-        return "" if v is None else v
+        return v or ""
 
 
 class Tag(ModelBase):
