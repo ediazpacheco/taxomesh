@@ -18,7 +18,10 @@ classifiers = [
     "Topic :: Database",
     "Typing :: Typed",
 ]
-dependencies = ["fastapi>=0.110"]
+dependencies = [
+    "fastapi>=0.110",
+    "typer>=0.12",
+]
 
 [project.optional-dependencies]
 yaml = ["pyyaml>=6.0"]
@@ -31,6 +34,9 @@ dev = [
     "pyyaml>=6.0",
     "pre-commit>=3.0",
 ]
+
+[project.scripts]
+taxomesh = "taxomesh.adapters.cli.main:app"
 
 [project.urls]
 Homepage = "https://github.com/ediazpacheco/taxomesh"
@@ -49,8 +55,12 @@ line-length = 119
 select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
 ignore = []
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["PLR2004"]  # magic-value comparisons are idiomatic in test assertions
+"taxomesh/adapters/cli/main.py" = ["PLR0913"]  # CLI functions intentionally have many options
 
 [tool.mypy]
 python_version = "3.11"

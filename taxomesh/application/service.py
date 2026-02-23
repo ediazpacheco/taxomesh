@@ -277,6 +277,14 @@ class TaxomeshService:
         self._repo.save_tag(tag)
         return tag
 
+    def list_tags(self) -> list[Tag]:
+        """Return all stored tags.
+
+        Returns:
+            List of all tags; empty list if none exist.
+        """
+        return self._repo.list_tags()
+
     def update_tag(self, tag_id: UUID, name: str | None = None) -> Tag:
         """Update a tag's name.
 

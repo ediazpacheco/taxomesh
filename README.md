@@ -63,6 +63,45 @@ Requires Python 3.11 or later. No extra dependencies needed for the default JSON
 
 ---
 
+## CLI
+
+taxomesh ships with a command-line interface. After installation, the `taxomesh` command is available:
+
+```toml
+# taxomesh.toml (optional — place in project root)
+[repository]
+type = "json"
+path = "data/taxonomy.json"
+```
+
+```sh
+# Create a category
+taxomesh category add --name "Music"
+
+# Register an item (integer, string slug, or UUID external ID)
+taxomesh item add --external-id 42
+taxomesh item add --external-id "my-article-slug"
+
+# Create a tag and assign it to an item
+taxomesh tag add --name "live"
+taxomesh item add-to-tag <item-uuid> --tag-id <tag-uuid>
+
+# Show help for any command
+taxomesh --help
+taxomesh category --help
+taxomesh item add --help
+```
+
+Override the config file path per-invocation:
+
+```sh
+taxomesh --config /etc/taxomesh.toml category list
+```
+
+The full Python API is documented below.
+
+---
+
 ## Quick start
 
 ### Default storage (JSON file in current directory)
@@ -215,15 +254,16 @@ assert same.name == "Electronic"
 
 ### Repository interface
 
-`TaxomeshRepositoryBase` is a `typing.Protocol` with 15 methods:
+`TaxomeshRepositoryBase` is a `typing.Protocol` with 18 methods:
 
 | Group | Methods |
 |---|---|
 | Category CRUD | `save_category`, `get_category`, `list_categories`, `delete_category` |
 | Item CRUD | `save_item`, `get_item`, `list_items`, `delete_item` |
-| Tag CRUD | `save_tag`, `get_tag`, `list_tags` |
+| Tag CRUD | `save_tag`, `get_tag`, `list_tags`, `delete_tag` |
 | Tag ↔ Item association | `assign_tag`, `remove_tag` |
 | Category parent links | `save_category_parent_link`, `list_category_parent_links` |
+| Item → Category placement | `save_item_parent_link`, `list_item_parent_links` |
 
 Import path for advanced use (e.g., type annotations on a custom backend):
 
@@ -233,7 +273,7 @@ from taxomesh.ports.repository import TaxomeshRepositoryBase
 
 ### Plugging in a custom backend
 
-No inheritance from `TaxomeshRepositoryBase` is required. Implement all 15 methods and pass the instance at construction time:
+No inheritance from `TaxomeshRepositoryBase` is required. Implement all 18 methods and pass the instance at construction time:
 
 ```python
 from taxomesh import TaxomeshService
