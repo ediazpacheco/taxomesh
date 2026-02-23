@@ -35,3 +35,25 @@ def test_service_delegates_tag_writes_to_custom_backend() -> None:
     svc = TaxomeshService(repository=repo)
     tag = svc.create_tag(name="ctag")
     assert tag.tag_id in repo._tags
+
+
+# ---------------------------------------------------------------------------
+# T-06: custom backend delegation for delete_tag, place_item_in_category
+# ---------------------------------------------------------------------------
+
+
+def test_service_delegates_delete_tag_to_backend() -> None:
+    repo = InMemoryRepository()
+    svc = TaxomeshService(repository=repo)
+    tag = svc.create_tag(name="del")
+    svc.delete_tag(tag.tag_id)
+    assert tag.tag_id not in repo._tags
+
+
+def test_service_delegates_place_item_in_category_to_backend() -> None:
+    repo = InMemoryRepository()
+    svc = TaxomeshService(repository=repo)
+    item = svc.create_item(external_id="x")
+    cat = svc.create_category(name="C")
+    svc.place_item_in_category(item.item_id, cat.category_id)
+    assert len(repo._item_parent_links) == 1

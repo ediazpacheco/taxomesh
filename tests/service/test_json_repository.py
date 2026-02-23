@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -98,3 +99,99 @@ def test_json_repository_persists_category_parent_links(tmp_json_path: Path) -> 
     # Verify the service can also detect the existing cycle after reload
     with pytest.raises(TaxomeshCyclicDependencyError):
         svc2.add_category_parent(cat_b.category_id, cat_a.category_id)
+
+
+# ---------------------------------------------------------------------------
+# T-04: JsonRepository new methods (delete_tag, save/list item_parent_links)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_tag_removes_it(tmp_json_path: Path) -> None:
+    repo = JsonRepository(tmp_json_path)
+    svc = TaxomeshService(repository=repo)
+    tag = svc.create_tag(name="gone")
+    result = repo.delete_tag(tag.tag_id)
+    assert result is True
+    assert repo.get_tag(tag.tag_id) is None
+
+
+def test_delete_tag_missing_returns_false(tmp_json_path: Path) -> None:
+    repo = JsonRepository(tmp_json_path)
+    assert repo.delete_tag(uuid4()) is False
+
+
+def test_delete_tag_persists_to_file(tmp_json_path: Path) -> None:
+    repo = JsonRepository(tmp_json_path)
+    svc = TaxomeshService(repository=repo)
+    tag = svc.create_tag(name="temp")
+    repo.delete_tag(tag.tag_id)
+    content = json.loads(tmp_json_path.read_text())
+    assert str(tag.tag_id) not in content["tags"]
+
+
+def test_save_item_parent_link_persists(tmp_json_path: Path) -> None:
+    repo = JsonRepository(tmp_json_path)
+    svc = TaxomeshService(repository=repo)
+    item = svc.create_item(external_id="x")
+    cat = svc.create_category(name="C")
+    svc.place_item_in_category(item.item_id, cat.category_id)
+    content = json.loads(tmp_json_path.read_text())
+    assert len(content["item_parent_links"]) == 1
+
+
+def test_save_item_parent_link_upserts_sort_index(tmp_json_path: Path) -> None:
+    repo = JsonRepository(tmp_json_path)
+    svc = TaxomeshService(repository=repo)
+    item = svc.create_item(external_id="x")
+    cat = svc.create_category(name="C")
+    svc.place_item_in_category(item.item_id, cat.category_id, sort_index=1)
+    svc.place_item_in_category(item.item_id, cat.category_id, sort_index=99)
+    links = repo.list_item_parent_links()
+    assert len(links) == 1
+    assert links[0].sort_index == 99
+
+
+def test_list_item_parent_links_empty(tmp_json_path: Path) -> None:
+    repo = JsonRepository(tmp_json_path)
+    assert repo.list_item_parent_links() == []
+
+
+def test_item_parent_links_survive_restart(tmp_json_path: Path) -> None:
+    svc1 = TaxomeshService(repository=JsonRepository(tmp_json_path))
+    item = svc1.create_item(external_id="x")
+    cat = svc1.create_category(name="C")
+    svc1.place_item_in_category(item.item_id, cat.category_id, sort_index=3)
+    repo2 = JsonRepository(tmp_json_path)
+    links = repo2.list_item_parent_links()
+    assert len(links) == 1
+    assert links[0].sort_index == 3
+
+
+def test_legacy_json_without_item_parent_links_loads_empty(tmp_json_path: Path) -> None:
+    legacy: dict[str, object] = {
+        "categories": {},
+        "items": {},
+        "tags": {},
+        "item_tag_links": [],
+        "category_parent_links": [],
+    }
+    tmp_json_path.write_text(json.dumps(legacy), encoding="utf-8")
+    repo = JsonRepository(tmp_json_path)
+    assert repo.list_item_parent_links() == []
+
+
+def test_legacy_category_description_null_loads_empty_string(tmp_json_path: Path) -> None:
+    cat_id = str(uuid4())
+    legacy: dict[str, object] = {
+        "categories": {cat_id: {"category_id": cat_id, "name": "X", "description": None, "metadata": {}}},
+        "items": {},
+        "tags": {},
+        "item_tag_links": [],
+        "category_parent_links": [],
+        "item_parent_links": [],
+    }
+    tmp_json_path.write_text(json.dumps(legacy), encoding="utf-8")
+    repo = JsonRepository(tmp_json_path)
+    cat = repo.get_category(UUID(cat_id))
+    assert cat is not None
+    assert cat.description == ""

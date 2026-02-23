@@ -1,8 +1,8 @@
 # Data Model: CLI (004-cli)
 
 **Date**: 2026-02-23
-**Last Updated**: 2026-02-23 (rev 2)
-**Source**: `specs/004-cli/spec.md` (FR-001 – FR-038)
+**Last Updated**: 2026-02-23 (rev 3)
+**Source**: `specs/004-cli/spec.md` (FR-001 – FR-039)
 
 ---
 
@@ -13,7 +13,7 @@ taxomesh/
 ├── exceptions.py                       ← unchanged
 ├── domain/
 │   ├── types.py                        ← unchanged
-│   ├── models.py                       ← EXTENDED: Item gains name + description fields
+│   ├── models.py                       ← MODIFIED: Category.description → str = ""
 │   └── dag.py                          ← unchanged
 ├── ports/
 │   └── repository.py                   ← EXTENDED: +delete_tag, +save_item_parent_link,
@@ -21,7 +21,9 @@ taxomesh/
 ├── application/
 │   └── service.py                      ← EXTENDED: +update_category, +update_item,
 │                                                   +update_tag, +delete_tag,
-│                                                   +place_item_in_category
+│                                                   +place_item_in_category;
+│                                                   list_items / list_categories
+│                                                   gain optional keyword filter
 └── adapters/
     ├── repositories/
     │   └── json_repository.py          ← EXTENDED: +delete_tag, +save_item_parent_link,
@@ -38,21 +40,36 @@ taxomesh/
 
 ---
 
-## `Item` Domain Model — New Fields (`taxomesh/domain/models.py`)
+## `Category` Domain Model — Modified Field (`taxomesh/domain/models.py`)
 
 ```python
-class Item(ModelBase):
-    item_id: UUID = Field(default_factory=uuid4)
-    external_id: ExternalId
-    name: Annotated[str, Field(max_length=256)] = ""             # NEW — default "" for migration compat
-    description: Annotated[str, Field(max_length=100_000)] = ""  # NEW — default "" for migration compat
-    enabled: bool = True
+class Category(ModelBase):
+    category_id: UUID
+    name: Annotated[str, Field(max_length=256)]                        # unchanged (required)
+    description: Annotated[str, Field(max_length=100_000)] = ""        # CHANGED: was Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 ```
 
-**Migration note**: Existing `taxomesh.json` files written by spec 003 do not contain `name`
-or `description`. Pydantic's `model_validate` applies both defaults (`""`) transparently —
-no data migration is required.
+**Migration note**: Existing `taxomesh.json` files written by spec 003 store
+`"description": null` for categories where description was not provided. A Pydantic
+`BeforeValidator` on the `description` field coerces `None` → `""` at load time — no
+data file migration is required.
+
+```python
+from typing import Annotated, Any
+from pydantic import Field, field_validator
+
+class Category(ModelBase):
+    category_id: UUID
+    name: Annotated[str, Field(max_length=256)]
+    description: Annotated[str, Field(max_length=100_000)] = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _coerce_none_description(cls, v: object) -> object:
+        return "" if v is None else v
+```
 
 ---
 
@@ -69,7 +86,7 @@ def save_item_parent_link(self, link: ItemParentLink) -> None:
     ...
 
 def list_item_parent_links(self) -> list[ItemParentLink]:
-    """Return all item→category placement records."""
+    """Return all item→category placement records. Internal use by service layer."""
     ...
 ```
 
@@ -86,7 +103,7 @@ Total Protocol methods after this spec: **18**.
 
 ---
 
-## `TaxomeshService` — New Methods
+## `TaxomeshService` — New and Modified Methods
 
 ### `update_category`
 
@@ -109,14 +126,12 @@ def update_category(
 def update_item(
     self,
     item_id: UUID,
-    name: str | None = None,
-    description: str | None = None,
     enabled: bool | None = None,
 ) -> Item:
 ```
 
 - Fetches the item (raises `TaxomeshItemNotFoundError` if absent).
-- Applies only non-`None` fields.
+- Applies `enabled` if not `None`.
 - Saves and returns the updated item.
 
 ### `update_tag`
@@ -158,9 +173,27 @@ def place_item_in_category(
   The repository handles upsert (idempotency).
 - Returns the link.
 
-**Raises**:
-- `TaxomeshItemNotFoundError` if `item_id` does not exist.
-- `TaxomeshCategoryNotFoundError` if `category_id` does not exist.
+### `list_items` (signature extended)
+
+```python
+def list_items(self, *, category_id: UUID | None = None) -> list[Item]:
+```
+
+- When `category_id` is `None`: returns all items (existing behaviour, unordered).
+- When `category_id` is a UUID: validates the category exists (raises
+  `TaxomeshCategoryNotFoundError` if absent), then returns items placed in that category
+  ordered ascending by `sort_index`.
+
+### `list_categories` (signature extended)
+
+```python
+def list_categories(self, *, parent_id: UUID | None = None) -> list[Category]:
+```
+
+- When `parent_id` is `None`: returns all categories (existing behaviour, unordered).
+- When `parent_id` is a UUID: validates the category exists (raises
+  `TaxomeshCategoryNotFoundError` if absent), then returns child categories of that parent
+  ordered ascending by `sort_index`.
 
 ---
 
@@ -212,7 +245,7 @@ _item_parent_links:     list[ItemParentLink]    # NEW
 ```json
 {
   "categories":            { "<uuid>": { ...Category fields... } },
-  "items":                 { "<uuid>": { ...Item fields incl. name, description... } },
+  "items":                 { "<uuid>": { ...Item fields... } },
   "tags":                  { "<uuid>": { ...Tag fields... } },
   "item_tag_links":        [ { "tag_id": "<uuid>", "item_id": "<uuid>" } ],
   "category_parent_links": [ { "category_id": "<uuid>", "parent_category_id": "<uuid>", "sort_index": 0 } ],
@@ -221,7 +254,8 @@ _item_parent_links:     list[ItemParentLink]    # NEW
 ```
 
 **Migration**: Existing files without `"item_parent_links"` will load with an empty list
-(via `data.get("item_parent_links", [])`).
+(via `data.get("item_parent_links", [])`). Category records with `"description": null`
+load as `""` via the `BeforeValidator`.
 
 ---
 
@@ -231,7 +265,7 @@ _item_parent_links:     list[ItemParentLink]    # NEW
 
 | Command | Arguments | Options |
 |---------|-----------|---------|
-| `category list` | — | — |
+| `category list` | — | `[--parent-id UUID]` |
 | `category add` | — | `--name` (req), `--description`, `--parent-id`, `--sort-index` |
 | `category delete` | `CATEGORY_ID` | — |
 | `category update` | `CATEGORY_ID` | `--name`, `--description`, `--parent-id`, `--sort-index` (≥1 req) |
@@ -240,10 +274,10 @@ _item_parent_links:     list[ItemParentLink]    # NEW
 
 | Command | Arguments | Options |
 |---------|-----------|---------|
-| `item list` | — | — |
-| `item add` | — | `--external-id` (req), `--name` (req at CLI), `--description`, `--category-id`, `--sort-index`, `--tag-id` |
+| `item list` | — | `[--category-id UUID]` |
+| `item add` | — | `--external-id` (req), `--category-id`, `--sort-index`, `--tag-id` |
 | `item delete` | `ITEM_ID` | — |
-| `item update` | `ITEM_ID` | `--name`, `--description`, `--enable/--disable`, `--category-id`, `--sort-index`, `--tag-id` (≥1 req) |
+| `item update` | `ITEM_ID` | `--enable/--disable`, `--category-id`, `--sort-index`, `--tag-id` (≥1 req) |
 | `item add-to-category` | `ITEM_ID` | `--category-id` (req), `--sort-index` |
 | `item add-to-tag` | `ITEM_ID` | `--tag-id` (req) |
 

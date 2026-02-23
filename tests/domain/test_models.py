@@ -90,9 +90,9 @@ class TestCategory:
         with pytest.raises(ValidationError):
             Category(category_id=uuid4(), name="x" * 257)
 
-    def test_description_defaults_none(self) -> None:
+    def test_description_defaults_empty_string(self) -> None:
         cat = Category(category_id=uuid4(), name="Jazz")
-        assert cat.description is None
+        assert cat.description == ""
 
     def test_description_accepts_value(self) -> None:
         cat = Category(category_id=uuid4(), name="Jazz", description="A music genre")
@@ -100,7 +100,7 @@ class TestCategory:
 
     def test_description_at_max_length_is_valid(self) -> None:
         cat = Category(category_id=uuid4(), name="Jazz", description="a" * 100_000)
-        assert len(cat.description) == 100_000  # type: ignore[arg-type]  # noqa: PLR2004
+        assert len(cat.description) == 100_000  # noqa: PLR2004
 
     def test_description_exceeding_max_length_raises(self) -> None:
         with pytest.raises(ValidationError):

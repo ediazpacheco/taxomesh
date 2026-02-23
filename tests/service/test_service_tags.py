@@ -68,3 +68,31 @@ def test_assign_both_missing_raises_tag_first(service: TaxomeshService) -> None:
     """Tag existence is validated before item existence (contract guarantee)."""
     with pytest.raises(TaxomeshTagNotFoundError):
         service.assign_tag(uuid4(), uuid4())
+
+
+# ---------------------------------------------------------------------------
+# T-06: update_tag, delete_tag (FR-030, FR-031)
+# ---------------------------------------------------------------------------
+
+
+def test_update_tag_name(service: TaxomeshService) -> None:
+    tag = service.create_tag(name="old")
+    updated = service.update_tag(tag.tag_id, name="new")
+    assert updated.name == "new"
+
+
+def test_update_tag_not_found_raises(service: TaxomeshService) -> None:
+    with pytest.raises(TaxomeshTagNotFoundError):
+        service.update_tag(uuid4(), name="ghost")
+
+
+def test_delete_tag_removes_it(service: TaxomeshService) -> None:
+    tag = service.create_tag(name="gone")
+    service.delete_tag(tag.tag_id)
+    with pytest.raises(TaxomeshTagNotFoundError):
+        service.delete_tag(tag.tag_id)
+
+
+def test_delete_tag_not_found_raises(service: TaxomeshService) -> None:
+    with pytest.raises(TaxomeshTagNotFoundError):
+        service.delete_tag(uuid4())

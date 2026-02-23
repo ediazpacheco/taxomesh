@@ -9,7 +9,7 @@ structurally at type-check time.
 from typing import Protocol
 from uuid import UUID
 
-from taxomesh.domain.models import Category, CategoryParentLink, Item, Tag
+from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
 
 
 class TaxomeshRepositoryBase(Protocol):
@@ -167,5 +167,37 @@ class TaxomeshRepositoryBase(Protocol):
 
         Returns:
             List of all CategoryParentLink records; empty list if none exist.
+        """
+        ...
+
+    # --- Item → Category placement ---
+
+    def delete_tag(self, tag_id: UUID) -> bool:
+        """Delete a tag entity by its identifier.
+
+        Args:
+            tag_id: The library-assigned UUID of the tag.
+
+        Returns:
+            True if the tag was found and deleted; False if it did not exist.
+        """
+        ...
+
+    def save_item_parent_link(self, link: ItemParentLink) -> None:
+        """Upsert an item→category placement.
+
+        If a link with the same (item_id, category_id) pair already exists its
+        sort_index is updated in-place. No duplicate is created.
+
+        Args:
+            link: The ItemParentLink to persist.
+        """
+        ...
+
+    def list_item_parent_links(self) -> list[ItemParentLink]:
+        """Return all item→category placement records.
+
+        Returns:
+            List of all ItemParentLink records; empty list if none exist.
         """
         ...

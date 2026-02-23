@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from taxomesh.domain.dag import check_no_cycle
-from taxomesh.domain.models import Category, CategoryParentLink, Item, Tag
+from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
 from taxomesh.domain.types import ExternalId
 from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
@@ -53,14 +53,14 @@ class TaxomeshService:
     def create_category(
         self,
         name: str,
-        description: str | None = None,
+        description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Category:
         """Create a new category and persist it.
 
         Args:
             name: Category name; max 256 characters.
-            description: Optional description; max 100 000 characters.
+            description: Optional description; max 100 000 characters. Defaults to "".
             metadata: Optional arbitrary key-value pairs; defaults to {}.
 
         Returns:
@@ -92,13 +92,27 @@ class TaxomeshService:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
         return result
 
-    def list_categories(self) -> list[Category]:
-        """Return all stored categories.
+    def list_categories(self, *, parent_id: UUID | None = None) -> list[Category]:
+        """Return stored categories, optionally filtered by parent.
+
+        Args:
+            parent_id: When provided, returns child categories of this parent
+                ordered by sort_index. When None, returns all categories.
 
         Returns:
-            List of all categories; empty list if none exist.
+            List of categories.
+
+        Raises:
+            TaxomeshCategoryNotFoundError: If parent_id is provided but not found.
         """
-        return self._repo.list_categories()
+        if parent_id is None:
+            return self._repo.list_categories()
+        self.get_category(parent_id)
+        links = sorted(
+            [lnk for lnk in self._repo.list_category_parent_links() if lnk.parent_category_id == parent_id],
+            key=lambda lnk: lnk.sort_index,
+        )
+        return [self.get_category(lnk.category_id) for lnk in links]
 
     def delete_category(self, category_id: UUID) -> None:
         """Delete a category by its identifier.
@@ -112,6 +126,33 @@ class TaxomeshService:
         found = self._repo.delete_category(category_id)
         if not found:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
+
+    def update_category(
+        self,
+        category_id: UUID,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Category:
+        """Update a category's name and/or description.
+
+        Args:
+            category_id: The library-assigned UUID of the category to update.
+            name: New name; unchanged if None.
+            description: New description; unchanged if None.
+
+        Returns:
+            The updated Category.
+
+        Raises:
+            TaxomeshCategoryNotFoundError: If no category with the given id exists.
+        """
+        category = self.get_category(category_id)
+        if name is not None:
+            category.name = name
+        if description is not None:
+            category.description = description
+        self._repo.save_category(category)
+        return category
 
     # ------------------------------------------------------------------
     # Item
@@ -156,13 +197,27 @@ class TaxomeshService:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
         return result
 
-    def list_items(self) -> list[Item]:
-        """Return all stored items.
+    def list_items(self, *, category_id: UUID | None = None) -> list[Item]:
+        """Return stored items, optionally filtered by category.
+
+        Args:
+            category_id: When provided, returns items placed in this category
+                ordered by sort_index. When None, returns all items.
 
         Returns:
-            List of all items; empty list if none exist.
+            List of items.
+
+        Raises:
+            TaxomeshCategoryNotFoundError: If category_id is provided but not found.
         """
-        return self._repo.list_items()
+        if category_id is None:
+            return self._repo.list_items()
+        self.get_category(category_id)
+        links = sorted(
+            [lnk for lnk in self._repo.list_item_parent_links() if lnk.category_id == category_id],
+            key=lambda lnk: lnk.sort_index,
+        )
+        return [self.get_item(lnk.item_id) for lnk in links]
 
     def delete_item(self, item_id: UUID) -> None:
         """Delete an item by its internal identifier.
@@ -176,6 +231,25 @@ class TaxomeshService:
         found = self._repo.delete_item(item_id)
         if not found:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
+
+    def update_item(self, item_id: UUID, enabled: bool | None = None) -> Item:
+        """Update an item's enabled state.
+
+        Args:
+            item_id: The library-assigned UUID of the item to update.
+            enabled: New enabled state; unchanged if None.
+
+        Returns:
+            The updated Item.
+
+        Raises:
+            TaxomeshItemNotFoundError: If no item with the given id exists.
+        """
+        item = self.get_item(item_id)
+        if enabled is not None:
+            item.enabled = enabled
+        self._repo.save_item(item)
+        return item
 
     # ------------------------------------------------------------------
     # Tag
@@ -202,6 +276,40 @@ class TaxomeshService:
         )
         self._repo.save_tag(tag)
         return tag
+
+    def update_tag(self, tag_id: UUID, name: str | None = None) -> Tag:
+        """Update a tag's name.
+
+        Args:
+            tag_id: The library-assigned UUID of the tag to update.
+            name: New name; unchanged if None.
+
+        Returns:
+            The updated Tag.
+
+        Raises:
+            TaxomeshTagNotFoundError: If no tag with the given id exists.
+        """
+        result = self._repo.get_tag(tag_id)
+        if result is None:
+            raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
+        if name is not None:
+            result.name = name
+        self._repo.save_tag(result)
+        return result
+
+    def delete_tag(self, tag_id: UUID) -> None:
+        """Delete a tag by its identifier.
+
+        Args:
+            tag_id: The library-assigned UUID of the tag to delete.
+
+        Raises:
+            TaxomeshTagNotFoundError: If no tag with the given id exists.
+        """
+        found = self._repo.delete_tag(tag_id)
+        if not found:
+            raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
 
     def assign_tag(self, tag_id: UUID, item_id: UUID) -> None:
         """Associate a tag with an item. Idempotent.
@@ -257,6 +365,32 @@ class TaxomeshService:
             sort_index=sort_index,
         )
         self._repo.save_category_parent_link(link)
+        return link
+
+    def place_item_in_category(
+        self,
+        item_id: UUID,
+        category_id: UUID,
+        sort_index: int = 0,
+    ) -> ItemParentLink:
+        """Place an item in a category. Idempotent — updates sort_index if already placed.
+
+        Args:
+            item_id: The library-assigned UUID of the item.
+            category_id: The library-assigned UUID of the category.
+            sort_index: Sort position within the category; defaults to 0.
+
+        Returns:
+            The resulting ItemParentLink.
+
+        Raises:
+            TaxomeshItemNotFoundError: If no item with the given id exists.
+            TaxomeshCategoryNotFoundError: If no category with the given id exists.
+        """
+        self.get_item(item_id)
+        self.get_category(category_id)
+        link = ItemParentLink(item_id=item_id, category_id=category_id, sort_index=sort_index)
+        self._repo.save_item_parent_link(link)
         return link
 
     def remove_tag(self, tag_id: UUID, item_id: UUID) -> None:

@@ -2,7 +2,7 @@
 
 **Type**: CLI command contract + Python library extension contract
 **Date**: 2026-02-23
-**Last Updated**: 2026-02-23 (rev 2)
+**Last Updated**: 2026-02-23 (rev 3)
 **Layer**: `taxomesh.adapters.cli`, `taxomesh.application.service`,
            `taxomesh.ports.repository`, `taxomesh.adapters.repositories.json_repository`
 
@@ -27,10 +27,14 @@ taxomesh [--config PATH] <group> <command> [ARGS] [OPTIONS]
 ### `taxomesh category list`
 
 ```
-taxomesh category list
+taxomesh category list [--parent-id UUID]
 ```
 
-Prints all categories. Exit 0 always.
+| Option | Type | Required | Notes |
+|--------|------|----------|-------|
+| `--parent-id` | UUID | no | Returns child categories of this parent, ordered by `sort_index`. When absent, returns all categories. |
+
+Prints categories. Exit 0 always.
 
 ---
 
@@ -83,25 +87,26 @@ At least one of `--name`, `--description`, or `--parent-id` must be provided.
 ### `taxomesh item list`
 
 ```
-taxomesh item list
+taxomesh item list [--category-id UUID]
 ```
 
-Prints all items. Exit 0 always.
+| Option | Type | Required | Notes |
+|--------|------|----------|-------|
+| `--category-id` | UUID | no | Returns items placed in this category, ordered by `sort_index`. When absent, returns all items. |
+
+Prints items. Exit 0 always.
 
 ---
 
 ### `taxomesh item add`
 
 ```
-taxomesh item add --external-id TEXT --name TEXT [--description TEXT]
-                  [--category-id UUID [--sort-index INT]] [--tag-id UUID]
+taxomesh item add --external-id TEXT [--category-id UUID [--sort-index INT]] [--tag-id UUID]
 ```
 
 | Option | Type | Required | Notes |
 |--------|------|----------|-------|
 | `--external-id` | str (raw) | yes | Parsed as UUID → int → str |
-| `--name` | str | yes (CLI) | max 256 chars; model default `""` for migration compat |
-| `--description` | str | no | max 100 000 chars |
 | `--category-id` | UUID | no | Places item in category after creation |
 | `--sort-index` | int | no | default 0; only meaningful with `--category-id` |
 | `--tag-id` | UUID | no | Assigns tag to item after creation |
@@ -125,8 +130,7 @@ taxomesh item delete ITEM_ID
 ### `taxomesh item update`
 
 ```
-taxomesh item update ITEM_ID [--name TEXT] [--description TEXT]
-                             [--enable | --disable]
+taxomesh item update ITEM_ID [--enable | --disable]
                              [--category-id UUID [--sort-index INT]] [--tag-id UUID]
 ```
 
@@ -228,6 +232,32 @@ Config file is read from CWD by default; overridden with `taxomesh --config <pat
 
 Import: `from taxomesh import TaxomeshService`
 
+### `list_items` (extended)
+
+```python
+service.list_items(*, category_id: UUID | None = None) -> list[Item]
+```
+
+- `category_id=None`: returns all items (existing behaviour).
+- `category_id=<uuid>`: returns items placed in that category, ordered by `sort_index`.
+
+**Raises**: `TaxomeshCategoryNotFoundError` when `category_id` is provided but not found.
+
+---
+
+### `list_categories` (extended)
+
+```python
+service.list_categories(*, parent_id: UUID | None = None) -> list[Category]
+```
+
+- `parent_id=None`: returns all categories (existing behaviour).
+- `parent_id=<uuid>`: returns child categories of that parent, ordered by `sort_index`.
+
+**Raises**: `TaxomeshCategoryNotFoundError` when `parent_id` is provided but not found.
+
+---
+
 ### `update_category`
 
 ```python
@@ -247,8 +277,6 @@ service.update_category(
 ```python
 service.update_item(
     item_id: UUID,
-    name: str | None = None,
-    description: str | None = None,
     enabled: bool | None = None,
 ) -> Item
 ```
@@ -309,24 +337,25 @@ def save_item_parent_link(self, link: ItemParentLink) -> None:
     """Upsert item→category placement. Updates sort_index if (item_id, category_id) exists."""
 
 def list_item_parent_links(self) -> list[ItemParentLink]:
-    """Return all item→category placement records."""
+    """Return all item→category placement records. Internal use by service layer."""
 ```
 
 Custom backend implementors must add all three methods (making 18 Protocol methods total).
 
 ---
 
-## `Item` Domain Model — Updated Shape
+## `Category` Domain Model — Modified Shape
 
 ```python
-class Item(ModelBase):
-    item_id: UUID = Field(default_factory=uuid4)
-    external_id: ExternalId
-    name: Annotated[str, Field(max_length=256)] = ""          # new; default "" for migration
-    description: Annotated[str, Field(max_length=100_000)] = ""           # new; default "" for migration compat
-    enabled: bool = True
+class Category(ModelBase):
+    category_id: UUID
+    name: Annotated[str, Field(max_length=256)]
+    description: Annotated[str, Field(max_length=100_000)] = ""   # changed: was Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 ```
+
+A `BeforeValidator` coerces `None` → `""` on load for backward compatibility with JSON
+files written before this spec.
 
 ---
 

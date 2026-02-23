@@ -2,19 +2,28 @@
 
 **Feature Branch**: `004-cli`
 **Created**: 2026-02-23
-**Last Updated**: 2026-02-23 (rev 2 — added Item.name/description, parent/tag assignment on add/update)
+**Last Updated**: 2026-02-23 (rev 3)
 **Status**: Draft
 **Input**: Add a CLI using Typer. Commands: `taxomesh [category|item|tag] [list|add|update|delete]`.
 Options passed as `--name`, `--description`, etc. Config file (`taxomesh.toml`) selects the
 repository backend. README updated to feature CLI as the primary usage path.
 Errors exit with non-zero status and verbose output. CLI tests required.
 
+**Amendments in rev 3**:
+1. `Item` domain model does NOT gain `name` or `description` fields. Items are registered
+   purely by `external_id`; name/description come from the referenced external system.
+2. `Category.description` changes from `Optional[str] = None` to `str = ""`.
+3. `category list` gains an optional `--parent-id <uuid>` filter to list child categories
+   of a given parent, ordered by `sort_index`. `item list` gains an optional
+   `--category-id <uuid>` filter to list items in a given category, ordered by `sort_index`.
+4. `item_parent_links` and `category_parent_links` are internal repository implementation
+   details. The service exposes `list_items(category_id=…)` and
+   `list_categories(parent_id=…)` so callers never interact with link objects directly.
+
 **Amendments in rev 2**:
-1. `Item` domain model gains mandatory `name` field (default `""` for migration compatibility)
-   and optional `description` field.
-2. `taxomesh category add/update` gains `--parent-id` and `--sort-index` to assign a parent
+1. `taxomesh category add/update` gains `--parent-id` and `--sort-index` to assign a parent
    relationship atomically with the create/update operation.
-3. `taxomesh item add/update` gains optional inline `--category-id [--sort-index]` and
+2. `taxomesh item add/update` gains optional inline `--category-id [--sort-index]` and
    `--tag-id` options. Dedicated `item add-to-category` and `item add-to-tag` sub-commands
    are also added as standalone alternatives.
 
@@ -27,8 +36,8 @@ Errors exit with non-zero status and verbose output. CLI tests required.
 A developer maintains a product catalogue. They want to organise their categories directly
 from a shell without writing Python. They install taxomesh, run `taxomesh category add`
 to create a category (optionally assigning a parent in the same command), `taxomesh category list`
-to inspect what exists, `taxomesh category update` to correct a name or add a parent, and
-`taxomesh category delete` to remove one they no longer need.
+to inspect what exists (optionally filtered by parent), `taxomesh category update` to correct
+a name or add a parent, and `taxomesh category delete` to remove one they no longer need.
 
 **Why this priority**: Category management is the core purpose of the library; the CLI must
 cover it completely before any other entity group.
@@ -56,15 +65,20 @@ without a real filesystem or running process.
    **Then** a descriptive error is printed to stderr and exit code is non-zero.
 7. **Given** the developer runs `taxomesh category --help`,
    **Then** all sub-commands and their options are described in the output.
+8. **Given** a parent category and two child categories exist, **When** the developer runs
+   `taxomesh category list --parent-id <parent-id>`,
+   **Then** only the child categories are printed, ordered by their `sort_index`.
 
 ---
 
 ### User Story 2 — Manage items from the terminal (Priority: P1)
 
 A developer wants to register item references (by integer ID, string slug, or UUID)
-into taxomesh from the shell. Items carry a mandatory name and optional description.
-The developer can optionally assign the item to a category and/or a tag in the same
-`add` command, or use dedicated `add-to-category` / `add-to-tag` sub-commands later.
+into taxomesh from the shell. Items are identified solely by their `external_id`; name,
+description, and other metadata live in the external system referenced by that ID. The
+developer can optionally assign the item to a category and/or a tag in the same `add`
+command, or use dedicated `add-to-category` / `add-to-tag` sub-commands later. The
+developer can list items globally or filtered by category (ordered by sort_index).
 
 **Why this priority**: Items are the atomic units that categories and tags are applied to.
 
@@ -72,10 +86,10 @@ The developer can optionally assign the item to a category and/or a tag in the s
 
 **Acceptance Scenarios**:
 
-1. **Given** the developer runs `taxomesh item add --external-id 42 --name "Song Title"`,
+1. **Given** the developer runs `taxomesh item add --external-id 42`,
    **Then** a new item is printed with its internal UUID and exit code is 0.
 2. **Given** the developer runs
-   `taxomesh item add --external-id "slug" --name "Article" --category-id <id> --sort-index 2 --tag-id <tag-id>`,
+   `taxomesh item add --external-id "slug" --category-id <id> --sort-index 2 --tag-id <tag-id>`,
    **Then** the item is created, placed in the category, and assigned the tag in one step.
 3. **Given** an existing item, **When**
    `taxomesh item add-to-category ITEM_ID --category-id <id> --sort-index 1` is run,
@@ -85,6 +99,9 @@ The developer can optionally assign the item to a category and/or a tag in the s
    **Then** the assignment is persisted and a confirmation is printed.
 5. **Given** an item does not exist, **When** `taxomesh item delete <id>` is run,
    **Then** a descriptive error is printed to stderr and exit code is non-zero.
+6. **Given** a category with two items (sort_index 1 and 2), **When**
+   `taxomesh item list --category-id <id>` is run,
+   **Then** only those two items are printed, ordered by sort_index.
 
 ---
 
@@ -164,7 +181,7 @@ with a non-zero status code and print a clear message to stderr.
   and the CLI exits 1. *(The created category persists — cleanup is a future concern.)*
 - `taxomesh category update <id> --parent-id <same-id>` (self-loop):
   `TaxomeshCyclicDependencyError` is raised; the CLI prints it and exits 1.
-- `taxomesh item add --external-id 42 --name "Song" --category-id <id>` where category does not exist:
+- `taxomesh item add --external-id 42 --category-id <id>` where category does not exist:
   the item IS created first; then the placement fails with `TaxomeshCategoryNotFoundError`;
   the CLI exits 1.
 - Passing a non-UUID string as `<category-id>` / `<item-id>` / `<tag-id>` argument:
@@ -172,8 +189,10 @@ with a non-zero status code and print a clear message to stderr.
 - The `taxomesh.toml` file exists but is missing the `[repository]` section:
   defaults are applied for all missing keys.
 - `[repository] type` value other than `"json"`: config error, exit non-zero.
-- `Item.name` defaults to `""` in the Pydantic model for migration compatibility; the CLI
-  `item add` command requires `--name` explicitly (enforced at the CLI layer, not the model).
+- `taxomesh category list --parent-id <id>` where the category does not exist:
+  raises `TaxomeshCategoryNotFoundError`; the CLI prints it and exits 1.
+- `taxomesh item list --category-id <id>` where the category does not exist:
+  raises `TaxomeshCategoryNotFoundError`; the CLI prints it and exits 1.
 
 ---
 
@@ -202,20 +221,24 @@ with a non-zero status code and print a clear message to stderr.
 **Category sub-commands:**
 - **FR-010**: `taxomesh category add --name <name> [--description <desc>] [--parent-id <uuid> [--sort-index <int>]]`
   MUST create a category and — if `--parent-id` is given — call `add_category_parent` immediately after.
-- **FR-011**: `taxomesh category list` MUST print all categories; exit 0 always.
+- **FR-011**: `taxomesh category list [--parent-id <uuid>]` MUST print all categories when
+  `--parent-id` is absent, or print only the child categories of the given parent ordered by
+  `sort_index` when it is present. Exit 0 always (including when the filter yields no results).
 - **FR-012**: `taxomesh category delete <category-id>` MUST delete the category and print a confirmation.
 - **FR-013**: `taxomesh category update <category-id> [--name <name>] [--description <desc>] [--parent-id <uuid> [--sort-index <int>]]`
   MUST update the specified fields and/or add a parent relationship. At least one option MUST be provided.
 
 **Item sub-commands:**
-- **FR-014**: `taxomesh item add --external-id <id> --name <name> [--description <desc>] [--category-id <uuid> [--sort-index <int>]] [--tag-id <uuid>]`
+- **FR-014**: `taxomesh item add --external-id <id> [--category-id <uuid> [--sort-index <int>]] [--tag-id <uuid>]`
   MUST create an item and — if `--category-id` is given — call `place_item_in_category`; if
   `--tag-id` is given — call `assign_tag`. Assignments are performed after item creation.
-  `--external-id` is parsed: UUID → int → str. `--name` is required at the CLI layer.
-- **FR-015**: `taxomesh item list` MUST print all items. Exit 0 always.
+  `--external-id` is parsed: UUID → int → str.
+- **FR-015**: `taxomesh item list [--category-id <uuid>]` MUST print all items when
+  `--category-id` is absent, or print only items placed in the given category ordered by
+  `sort_index` when it is present. Exit 0 always.
 - **FR-016**: `taxomesh item delete <item-id>` MUST delete the item and print a confirmation.
-- **FR-017**: `taxomesh item update <item-id> [--enable | --disable] [--name <name>] [--description <desc>] [--category-id <uuid> [--sort-index <int>]] [--tag-id <uuid>]`
-  MUST update the specified fields and/or make assignments. At least one option MUST be provided.
+- **FR-017**: `taxomesh item update <item-id> [--enable | --disable] [--category-id <uuid> [--sort-index <int>]] [--tag-id <uuid>]`
+  MUST update the enabled flag and/or make assignments. At least one option MUST be provided.
 - **FR-018**: `taxomesh item add-to-category ITEM_ID --category-id <uuid> [--sort-index <int>]`
   MUST place the item in the category. Idempotent.
 - **FR-019**: `taxomesh item add-to-tag ITEM_ID --tag-id <uuid>`
@@ -232,44 +255,52 @@ with a non-zero status code and print a clear message to stderr.
   message printed to stderr, and the process MUST exit with status code 1.
 - **FR-025**: Any unexpected exception MUST be caught, printed to stderr, and exit with status code 1.
 
-**Domain model extensions:**
-- **FR-026**: `Item` MUST gain a `name` field: `Annotated[str, Field(max_length=256)]` with
-  default `""`. This preserves load compatibility with existing JSON files (migration-safe).
-- **FR-027**: `Item` MUST gain a `description` field:
-  `Annotated[str, Field(max_length=100_000)]` with default `""`. Same migration-safety
-  rationale as `name`: existing JSON files without `description` load with `""` rather than
-  failing validation.
+**Domain model changes:**
+- **FR-026**: `Category.description` MUST change from `Optional[str] = None` to
+  `Annotated[str, Field(max_length=100_000)] = ""`. Existing JSON files that have
+  `"description": null` MUST load cleanly via a Pydantic `BeforeValidator` that coerces
+  `None` → `""`.
 
 **Service layer extensions:**
-- **FR-028**: `TaxomeshService` MUST be extended with `update_category(category_id, name, description) -> Category`.
-- **FR-029**: `TaxomeshService` MUST be extended with `update_item(item_id, name, description, enabled) -> Item`.
-- **FR-030**: `TaxomeshService` MUST be extended with `update_tag(tag_id, name) -> Tag`.
-- **FR-031**: `TaxomeshService` MUST be extended with `delete_tag(tag_id) -> None`.
-- **FR-032**: `TaxomeshService` MUST be extended with
+- **FR-027**: `TaxomeshService` MUST be extended with `update_category(category_id, name, description) -> Category`.
+- **FR-028**: `TaxomeshService` MUST be extended with `update_item(item_id, enabled) -> Item`.
+  Only the `enabled` flag is updatable; items carry no name or description.
+- **FR-029**: `TaxomeshService` MUST be extended with `update_tag(tag_id, name) -> Tag`.
+- **FR-030**: `TaxomeshService` MUST be extended with `delete_tag(tag_id) -> None`.
+- **FR-031**: `TaxomeshService` MUST be extended with
   `place_item_in_category(item_id, category_id, sort_index=0) -> ItemParentLink`.
-  If the placement already exists, this MUST be a no-op (idempotent).
+  If the placement already exists, `sort_index` MUST be updated (upsert, idempotent).
+- **FR-032**: `TaxomeshService.list_items` MUST accept an optional `category_id: UUID | None = None`
+  keyword argument. When `None`, all items are returned (existing behaviour). When a UUID is
+  provided, only items placed in that category are returned, ordered ascending by `sort_index`.
+  `TaxomeshCategoryNotFoundError` MUST be raised if the category does not exist.
+- **FR-033**: `TaxomeshService.list_categories` MUST accept an optional `parent_id: UUID | None = None`
+  keyword argument. When `None`, all categories are returned (existing behaviour). When a UUID
+  is provided, only child categories of that parent are returned, ordered ascending by
+  `sort_index`. `TaxomeshCategoryNotFoundError` MUST be raised if the parent does not exist.
 
 **Repository layer extensions:**
-- **FR-033**: `TaxomeshRepositoryBase` MUST be extended with `delete_tag(tag_id: UUID) -> bool`
+- **FR-034**: `TaxomeshRepositoryBase` MUST be extended with `delete_tag(tag_id: UUID) -> bool`
   (16th Protocol method).
-- **FR-034**: `TaxomeshRepositoryBase` MUST be extended with
+- **FR-035**: `TaxomeshRepositoryBase` MUST be extended with
   `save_item_parent_link(link: ItemParentLink) -> None` (17th Protocol method). Implementations
   MUST be idempotent: if a link with the same `(item_id, category_id)` pair already exists,
   the existing record is updated (sort_index replaced); no duplicate is added.
-- **FR-035**: `TaxomeshRepositoryBase` MUST be extended with
-  `list_item_parent_links() -> list[ItemParentLink]` (18th Protocol method). Required by
-  `place_item_in_category` to check for existing links before saving.
-- **FR-036**: `JsonRepository` MUST implement `delete_tag`, `save_item_parent_link`, and
+- **FR-036**: `TaxomeshRepositoryBase` MUST be extended with
+  `list_item_parent_links() -> list[ItemParentLink]` (18th Protocol method). Used internally
+  by the service layer; callers should not interact with link objects directly.
+- **FR-037**: `JsonRepository` MUST implement `delete_tag`, `save_item_parent_link`, and
   `list_item_parent_links`.
 
 **README:**
-- **FR-037**: `README.md` MUST be updated to show the CLI as the first/primary usage method,
+- **FR-038**: `README.md` MUST be updated to show the CLI as the first/primary usage method,
   above the Python API quick start.
 
 **Tests:**
-- **FR-038**: A `tests/test_cli.py` module MUST be created covering: all sub-commands (happy
+- **FR-039**: A `tests/test_cli.py` module MUST be created covering: all sub-commands (happy
   path), all not-found error paths, config file loading, default-config fallback, inline
-  category/tag assignment on `item add`, and `item add-to-category` / `item add-to-tag`.
+  category/tag assignment on `item add`, `item add-to-category`, `item add-to-tag`,
+  `category list --parent-id`, and `item list --category-id`.
   Tests MUST use Typer's `CliRunner`.
 
 ### Key Entities
@@ -279,8 +310,8 @@ with a non-zero status code and print a clear message to stderr.
   - `main.py`: Typer app and all command implementations.
   - `config.py`: Config file loading; builds `TaxomeshService`.
 - **`taxomesh.toml`**: TOML config file (user-created, not shipped).
-- **`Item`** (extended): gains `name` and `description` fields.
-- **`ItemParentLink`**: existing domain model; now backed by repository methods.
+- **`Category`** (modified): `description` changes from `Optional[str]` to `str = ""`.
+- **`ItemParentLink`**: existing domain model; used internally by the service.
 
 ---
 
@@ -291,10 +322,9 @@ with a non-zero status code and print a clear message to stderr.
 - **SC-001**: `taxomesh category add --name "Music"` prints a `Category` with UUID, exits 0.
 - **SC-002**: `taxomesh category add --name "Jazz" --parent-id <id>` creates category and
   parent link atomically; exits 0.
-- **SC-003**: `taxomesh item add --external-id 99 --name "Song"` prints an `Item` with
-  `external_id=99`, `name="Song"`, exits 0.
-- **SC-004**: `taxomesh item add --external-id 1 --name "X" --category-id <id>` places the
-  item in the category in one command.
+- **SC-003**: `taxomesh item add --external-id 99` prints an `Item` with `external_id=99`, exits 0.
+- **SC-004**: `taxomesh item add --external-id 1 --category-id <id>` places the item in the
+  category in one command; exits 0.
 - **SC-005**: `taxomesh item add-to-category ITEM_ID --category-id <id>` places existing item.
 - **SC-006**: `taxomesh item add-to-tag ITEM_ID --tag-id <id>` assigns tag to existing item.
 - **SC-007**: `taxomesh tag add --name "live"` prints tag, exits 0.
@@ -305,6 +335,8 @@ with a non-zero status code and print a clear message to stderr.
 - **SC-012**: All quality gates pass: `ruff check`, `ruff format --check`, `mypy --strict`,
   `pytest --cov=taxomesh --cov-fail-under=80`.
 - **SC-013**: `taxomesh category update <id>` with no options exits non-zero.
+- **SC-014**: `taxomesh category list --parent-id <id>` returns child categories ordered by sort_index.
+- **SC-015**: `taxomesh item list --category-id <id>` returns items ordered by sort_index.
 
 ---
 
@@ -320,11 +352,14 @@ with a non-zero status code and print a clear message to stderr.
 - `update_*` service methods are partial updates: only non-`None` arguments are applied.
 - Calling an update method with all-`None` arguments is a no-op at the service level; the
   CLI layer guards against it.
-- `Item.name` defaults to `""` in the Pydantic model for migration compatibility with existing
-  JSON files. The CLI enforces `--name` as required at the argument-parsing layer.
 - `place_item_in_category` is idempotent: if `(item_id, category_id)` already exists, the
   sort_index is updated (upsert behaviour).
 - When `item add --category-id` or `--tag-id` is provided and the assignment fails (e.g.,
   category not found), the item has already been created. Cleanup is a future concern.
 - Typer is added as a mandatory runtime dependency.
 - `[repository] type` only supports `"json"` in this spec.
+- `Category.description` existing JSON files may contain `"description": null`; a Pydantic
+  `BeforeValidator` coerces `None` to `""` at load time — no data migration is required.
+- Root categories (categories with no parent) are categories that do not appear as a child
+  in any `CategoryParentLink`. Listing root categories is out of scope; clients can filter
+  client-side from `list_categories()`.

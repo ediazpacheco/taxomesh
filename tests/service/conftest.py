@@ -6,7 +6,7 @@ from uuid import UUID
 import pytest
 
 from taxomesh.application.service import TaxomeshService
-from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemTagLink, Tag
+from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemTagLink, Tag
 
 
 class InMemoryRepository:
@@ -23,6 +23,7 @@ class InMemoryRepository:
         self._tags: dict[UUID, Tag] = {}
         self._links: list[ItemTagLink] = []
         self._category_parent_links: list[CategoryParentLink] = []
+        self._item_parent_links: list[ItemParentLink] = []
 
     # --- Category ---
 
@@ -103,6 +104,29 @@ class InMemoryRepository:
     def list_category_parent_links(self) -> list[CategoryParentLink]:
         """Return all category parent links."""
         return list(self._category_parent_links)
+
+    # --- Tag delete ---
+
+    def delete_tag(self, tag_id: UUID) -> bool:
+        """Delete tag; return True if it existed."""
+        if tag_id not in self._tags:
+            return False
+        del self._tags[tag_id]
+        return True
+
+    # --- Item → Category placement ---
+
+    def save_item_parent_link(self, link: ItemParentLink) -> None:
+        """Upsert item→category placement."""
+        for existing in self._item_parent_links:
+            if existing.item_id == link.item_id and existing.category_id == link.category_id:
+                existing.sort_index = link.sort_index
+                return
+        self._item_parent_links.append(link)
+
+    def list_item_parent_links(self) -> list[ItemParentLink]:
+        """Return all item→category placement records."""
+        return list(self._item_parent_links)
 
 
 @pytest.fixture

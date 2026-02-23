@@ -102,3 +102,49 @@ def test_add_category_parent_missing_category_raises(service: TaxomeshService) -
     cat_a = service.create_category(name="A")
     with pytest.raises(TaxomeshCategoryNotFoundError):
         service.add_category_parent(cat_a.category_id, uuid4())
+
+
+# ---------------------------------------------------------------------------
+# T-06: update_category, list_categories filtered (FR-027, FR-033)
+# ---------------------------------------------------------------------------
+
+
+def test_update_category_name(service: TaxomeshService) -> None:
+    cat = service.create_category(name="Old")
+    updated = service.update_category(cat.category_id, name="New")
+    assert updated.name == "New"
+    assert updated.description == ""  # unchanged
+
+
+def test_update_category_description(service: TaxomeshService) -> None:
+    cat = service.create_category(name="X")
+    assert cat.description == ""  # BeforeValidator coerces None → ""
+    updated = service.update_category(cat.category_id, description="New desc")
+    assert updated.description == "New desc"
+    assert updated.name == "X"  # unchanged
+
+
+def test_update_category_partial_leaves_other_fields(service: TaxomeshService) -> None:
+    cat = service.create_category(name="Keep", description="Also keep")
+    updated = service.update_category(cat.category_id, name="Changed")
+    assert updated.description == "Also keep"
+
+
+def test_update_category_not_found_raises(service: TaxomeshService) -> None:
+    with pytest.raises(TaxomeshCategoryNotFoundError):
+        service.update_category(uuid4(), name="Ghost")
+
+
+def test_list_categories_filtered_by_parent(service: TaxomeshService) -> None:
+    parent = service.create_category(name="P")
+    c1 = service.create_category(name="C1")
+    c2 = service.create_category(name="C2")
+    service.add_category_parent(c2.category_id, parent.category_id, sort_index=1)
+    service.add_category_parent(c1.category_id, parent.category_id, sort_index=2)
+    result = service.list_categories(parent_id=parent.category_id)
+    assert [c.category_id for c in result] == [c2.category_id, c1.category_id]
+
+
+def test_list_categories_parent_not_found_raises(service: TaxomeshService) -> None:
+    with pytest.raises(TaxomeshCategoryNotFoundError):
+        service.list_categories(parent_id=uuid4())

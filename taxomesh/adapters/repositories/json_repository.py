@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemTagLink, Tag
+from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemTagLink, Tag
 from taxomesh.exceptions import TaxomeshRepositoryError
 
 
@@ -51,6 +51,7 @@ class JsonRepository:
         self._tags: dict[UUID, Tag] = {}
         self._links: list[ItemTagLink] = []
         self._category_parent_links: list[CategoryParentLink] = []
+        self._item_parent_links: list[ItemParentLink] = []
 
         if self._path.is_dir():
             raise TaxomeshRepositoryError(f"path is a directory, not a file: {self._path}")
@@ -83,6 +84,7 @@ class JsonRepository:
             self._category_parent_links = [
                 CategoryParentLink.model_validate(lnk) for lnk in data.get("category_parent_links", [])
             ]
+            self._item_parent_links = [ItemParentLink.model_validate(lnk) for lnk in data.get("item_parent_links", [])]
         except TaxomeshRepositoryError:
             raise
         except Exception as exc:
@@ -101,6 +103,7 @@ class JsonRepository:
             "tags": {str(k): v.model_dump(mode="json") for k, v in self._tags.items()},
             "item_tag_links": [lnk.model_dump(mode="json") for lnk in self._links],
             "category_parent_links": [lnk.model_dump(mode="json") for lnk in self._category_parent_links],
+            "item_parent_links": [lnk.model_dump(mode="json") for lnk in self._item_parent_links],
         }
         payload = json.dumps(data, indent=2, ensure_ascii=False)
         dir_ = self._path.parent
@@ -242,6 +245,21 @@ class JsonRepository:
         """
         return list(self._tags.values())
 
+    def delete_tag(self, tag_id: UUID) -> bool:
+        """Delete a tag entity by its identifier.
+
+        Args:
+            tag_id: The library-assigned UUID of the tag.
+
+        Returns:
+            True if the tag was found and deleted; False if it did not exist.
+        """
+        if tag_id not in self._tags:
+            return False
+        del self._tags[tag_id]
+        self._flush()
+        return True
+
     # ------------------------------------------------------------------
     # Tag ↔ Item association
     # ------------------------------------------------------------------
@@ -278,6 +296,35 @@ class JsonRepository:
             List of all CategoryParentLink records; empty list if none exist.
         """
         return list(self._category_parent_links)
+
+    # ------------------------------------------------------------------
+    # Item → Category placement
+    # ------------------------------------------------------------------
+
+    def save_item_parent_link(self, link: ItemParentLink) -> None:
+        """Upsert an item→category placement.
+
+        If a link with the same (item_id, category_id) pair already exists its
+        sort_index is updated in-place. No duplicate is created.
+
+        Args:
+            link: The ItemParentLink to persist.
+        """
+        for i, existing in enumerate(self._item_parent_links):
+            if existing.item_id == link.item_id and existing.category_id == link.category_id:
+                self._item_parent_links[i] = link
+                self._flush()
+                return
+        self._item_parent_links.append(link)
+        self._flush()
+
+    def list_item_parent_links(self) -> list[ItemParentLink]:
+        """Return all item→category placement records.
+
+        Returns:
+            List of all ItemParentLink records; empty list if none exist.
+        """
+        return list(self._item_parent_links)
 
     def remove_tag(self, tag_id: UUID, item_id: UUID) -> bool:
         """Remove the association between a tag and an item.

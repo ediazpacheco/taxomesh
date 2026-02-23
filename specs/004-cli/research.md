@@ -1,7 +1,7 @@
 # Research: Command-Line Interface (004-cli)
 
 **Date**: 2026-02-23
-**Last Updated**: 2026-02-23 (rev 2)
+**Last Updated**: 2026-02-23 (rev 3)
 **Status**: Complete — all design decisions resolved.
 
 ---
@@ -148,24 +148,26 @@ returns a fully configured `TaxomeshService`. Every CLI command calls `build_ser
 
 ---
 
-## Decision 11 — `Item.name` default `""` for migration compatibility
+## Decision 11 — `Item` carries no `name` or `description` fields
 
-**Decision**: `Item.name` is declared as `Annotated[str, Field(max_length=256)]` with
-a default value of `""`. The CLI enforces `--name` as a required argument at the
-argument-parsing layer.
+**Decision**: `Item` has NO `name` or `description` fields. Items are registered solely by
+`external_id` (UUID | int | str). Name, description, and other presentation data live in
+the external system referenced by `external_id`.
 
 **Rationale**:
-- Existing JSON files written by spec 003 do not contain a `name` key on item records.
-  A default of `""` allows `model_validate` to succeed on load without a migration step.
-- Making `name` truly mandatory (no default) would break any existing `taxomesh.json` on
-  the first command after upgrading — unacceptable for a library in active development.
-- The CLI still communicates `--name` as required to the user; the default is an internal
-  persistence compatibility detail, not a signal that an empty name is desirable.
+- taxomesh is a taxonomy/classification layer, not a content management system.
+  Items represent references to external entities; their human-readable data should not
+  be duplicated into taxomesh.
+- Adding `name` and `description` would make `Item` resemble a CMS record, creating
+  synchronisation burden (external system changes → stale taxomesh data).
+- The `metadata: dict[str, Any]` field already exists for caller-specific key-value data
+  should any lightweight annotation be needed without a full schema change.
 
 **Alternatives considered**:
-- Truly mandatory, no default — rejected: breaks existing JSON data files on load.
-- Optional (`name: str | None = None`) — rejected: the spec says `name` is mandatory; `None`
-  would be semantically wrong and require guards everywhere in the service and CLI.
+- `name: str = ""` with CLI `--name` required — rejected (rev 3): creates data duplication
+  and maintenance burden; the authoritative name lives in the external system.
+- `name: str | None = None` — rejected: same duplication concern; also inconsistent with
+  the principle that None means "no value provided" in partial-update methods.
 
 ---
 
@@ -211,7 +213,50 @@ in-place. No duplicate link is created.
 
 ---
 
-## Decision 14 — `category add --parent-id` partial failure behaviour
+## Decision 14 — `Category.description` changes from `Optional[str]` to `str = ""`
+
+**Decision**: `Category.description` changes from `Annotated[str, Field(max_length=100_000)] | None = None`
+to `Annotated[str, Field(max_length=100_000)] = ""`. A Pydantic `BeforeValidator` coerces
+`None` → `""` on load to handle existing JSON files that stored `"description": null`.
+
+**Rationale**:
+- Consistency: all textual string fields on domain models should default to `""` (same as
+  `Tag.name` is required; categories always have some notion of a description, even if empty).
+- Eliminates `Optional` / `None` checks throughout the service and CLI layers.
+- No migration needed: the `BeforeValidator` handles legacy `null` values transparently.
+
+**Alternatives considered**:
+- Keep `Optional[str] = None` — rejected: introduces `None` checks; inconsistent with the
+  design goal of "required fields always have a value, even if empty".
+- True migration script — rejected: over-engineered; the `BeforeValidator` covers this cleanly.
+
+---
+
+## Decision 15 — `list_items` / `list_categories` expose filtered, ordered views
+
+**Decision**: `TaxomeshService.list_items(*, category_id: UUID | None = None)` and
+`TaxomeshService.list_categories(*, parent_id: UUID | None = None)` accept an optional
+filter. When the filter is provided, only records linked to that parent/category are
+returned, ordered ascending by `sort_index`. The repository Protocol's
+`list_item_parent_links()` and `list_category_parent_links()` are used internally.
+
+**Rationale**:
+- Callers should never need to know about `ItemParentLink` or `CategoryParentLink` objects.
+  The service is the only consumer of these internal structures.
+- Extending the existing `list_items` / `list_categories` signatures with keyword-only
+  arguments is backward-compatible (existing callers that pass no arguments continue to work).
+- Sort order by `sort_index` is the primary ordering consumers expect when viewing content
+  within a category.
+
+**Alternatives considered**:
+- Separate `list_items_in_category(category_id)` method — rejected: duplicates the `list_items`
+  concept; results in two methods with similar purpose.
+- Returning `ItemParentLink` / `CategoryParentLink` objects — rejected: leaks internal
+  implementation details to callers.
+
+---
+
+## Decision 16 — `category add --parent-id` partial failure behaviour
 
 **Decision**: When `taxomesh category add --name X --parent-id Y` is run and the category
 is created successfully but the subsequent `add_category_parent` call fails (e.g., `Y` does

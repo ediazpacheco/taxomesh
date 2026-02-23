@@ -1,77 +1,123 @@
 # Implementation Plan: CLI (004-cli)
 
 **Date**: 2026-02-23
-**Spec**: `specs/004-cli/spec.md` (rev 2)
-**Status**: Ready for tasks
+**Last Updated**: 2026-02-23 (rev 3)
+**Spec**: `specs/004-cli/spec.md`
+**Branch**: `004-cli`
 
 ---
 
-## Guiding Principles
+## Tech Stack
 
-- TDD is mandatory: every implementation task is preceded by a failing-test task.
-- Tasks are ordered so that each layer is complete and tested before the next depends on it.
-- No task modifies a file that belongs to a layer above its own.
-- The `InMemoryRepository` in `conftest.py` must be updated before any service test can
-  exercise the new Protocol methods.
+| Layer | Technology |
+|-------|-----------|
+| CLI framework | Typer ≥ 0.12 |
+| Config parsing | stdlib `tomllib` (Python 3.11+) |
+| Type checking | mypy --strict |
+| Linting / formatting | ruff |
+| Tests | pytest + Typer `CliRunner` |
+| Package manager | uv |
 
 ---
 
-## Dependency Graph (high level)
+## Architecture Overview
 
 ```
-1. Domain model extension  (Item.name, Item.description)
-        ↓
-2. Repository Protocol extension  (delete_tag, save_item_parent_link, list_item_parent_links)
-        ↓
-3. conftest.py — update InMemoryRepository to satisfy new Protocol
-        ↓
-4a. Tests: JsonRepository new methods  →  4b. Implement JsonRepository new methods
-        ↓
-5a. Tests: Service new methods         →  5b. Implement Service new methods
-        ↓
-6. pyproject.toml — add typer, entry point
-        ↓
-7a. Tests: CLI config loading          →  7b. Implement taxomesh/adapters/cli/config.py
-        ↓
-8a. Tests: CLI commands                →  8b. Implement taxomesh/adapters/cli/main.py
-        ↓
-9. README update
+taxomesh/
+├── domain/
+│   └── models.py              ← Category.description: str = ""  (BeforeValidator)
+├── ports/
+│   └── repository.py          ← +delete_tag, +save_item_parent_link, +list_item_parent_links
+├── application/
+│   └── service.py             ← +update_category, +update_item, +update_tag, +delete_tag,
+│                                 +place_item_in_category; list_items/list_categories extended
+├── adapters/
+│   ├── repositories/
+│   │   └── json_repository.py ← +delete_tag, +save_item_parent_link, +list_item_parent_links,
+│   │                              _item_parent_links state, item_parent_links in flush/load
+│   └── cli/
+│       ├── __init__.py        ← NEW (empty module docstring)
+│       ├── config.py          ← NEW: build_service(), TOML loading
+│       └── main.py            ← NEW: Typer app, all commands
+tests/
+├── service/
+│   ├── conftest.py            ← InMemoryRepository: +delete_tag, +save/list_item_parent_links
+│   ├── test_json_repository.py ← +10 tests
+│   ├── test_service_categories.py ← +6 tests (update_category, list_categories filter)
+│   ├── test_service_items.py  ← +7 tests (update_item, place_item_in_category, list_items filter)
+│   ├── test_service_tags.py   ← +4 tests (update_tag, delete_tag)
+│   └── test_custom_backend.py ← +2 tests
+└── test_cli.py                ← NEW: 5 config tests + 35 command tests
 ```
 
 ---
 
-## Phase 1 — Domain Model Extension
+## Dependency Graph
 
-### Files modified
-- `taxomesh/domain/models.py`
+```
+Phase 1: models.py          (Category.description change)
+    ↓
+Phase 2: repository.py      (Protocol +3 methods)
+    ↓
+Phase 3: conftest.py        (InMemoryRepository +3 methods)
+    ↓
+Phase 4a: test_json_repository.py  (10 failing tests)
+    ↓
+Phase 4b: json_repository.py       (implement 3 methods)
+    ↓
+Phase 5a: service tests            (13 failing tests across 4 files)
+    ↓
+Phase 5b: service.py               (implement 5 new methods + extend list_items/list_categories)
+    ↓
+Phase 6: pyproject.toml + uv.lock  (add typer)
+    ↓
+Phase 7a: test_cli.py config tests (5 failing)
+    ↓
+Phase 7b: cli/config.py            (implement build_service)
+    ↓
+Phase 8a: test_cli.py command tests (35 failing)
+    ↓
+Phase 8b: cli/main.py              (implement all commands)
+    ↓
+Phase 9: README.md                 (CLI section)
+```
 
-### What changes
-Add two fields to `Item`, inserted between `external_id` and `enabled`:
+---
+
+## Phase 1 — `taxomesh/domain/models.py`
+
+**FRs**: FR-026
+
+Change `Category.description` from `Optional[str] = None` to `str = ""`. Add a
+`BeforeValidator` to coerce `None` → `""` when loading legacy JSON files.
 
 ```python
-name: Annotated[str, Field(max_length=256)] = ""
-description: Annotated[str, Field(max_length=100_000)] = ""
+from typing import Annotated, Any
+from pydantic import Field, field_validator
+from uuid import UUID, uuid4
+
+class Category(ModelBase):
+    category_id: UUID
+    name: Annotated[str, Field(max_length=256)]
+    description: Annotated[str, Field(max_length=100_000)] = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _coerce_none_description(cls, v: object) -> object:
+        return "" if v is None else v
 ```
 
-### Why no dedicated test task
-The existing `tests/domain/test_models.py` and `tests/service/test_service_items.py` provide
-sufficient regression coverage. New tests for these fields are included in Phase 5 (service
-tests exercise them through `create_item` and `update_item`).
-
-### Risk
-`create_item` in the service currently does not pass `name` to `Item(...)`. After this change,
-all `service.create_item(...)` calls in existing tests will work because `name` defaults to `""`.
-Existing JSON files load safely for the same reason.
+**Acceptance**: `mypy --strict .` passes; `pytest tests/domain/ tests/service/` passes with no
+regressions (existing tests that assert `cat.description is None` must be updated to `== ""`).
 
 ---
 
-## Phase 2 — Repository Protocol Extension
+## Phase 2 — `taxomesh/ports/repository.py`
 
-### Files modified
-- `taxomesh/ports/repository.py`
+**FRs**: FR-034, FR-035, FR-036
 
-### What changes
-Add three new method signatures to `TaxomeshRepositoryBase`:
+Add `ItemParentLink` to imports. Append three method stubs to the Protocol:
 
 ```python
 def delete_tag(self, tag_id: UUID) -> bool: ...
@@ -79,24 +125,19 @@ def save_item_parent_link(self, link: ItemParentLink) -> None: ...
 def list_item_parent_links(self) -> list[ItemParentLink]: ...
 ```
 
-Import `ItemParentLink` at the top of the module.
+Section comment: `# --- Tag delete ---` before `delete_tag`; `# --- Item → Category placement ---`
+before the other two.
 
-### Why no dedicated test task
-`TaxomeshRepositoryBase` is a `typing.Protocol`. mypy `--strict` is the verification gate:
-if any concrete repository is missing a method, CI will catch it at type-check time.
-Structural compliance of `InMemoryRepository` is verified by the existing
-`test_in_memory_repository_has_no_taxomesh_base_in_mro` test after Phase 3 updates it.
+**Acceptance**: `mypy --strict .` passes structurally (InMemoryRepository will be updated next).
 
 ---
 
-## Phase 3 — Update `InMemoryRepository` in conftest.py
+## Phase 3 — `tests/service/conftest.py`
 
-### Files modified
-- `tests/service/conftest.py`
+**FRs**: FR-034, FR-035, FR-036
 
-### What changes
-Add the three new methods to `InMemoryRepository` so it satisfies the extended Protocol.
-Also add `_item_parent_links: list[ItemParentLink]` to `__init__`.
+Add `ItemParentLink` to imports. Add `_item_parent_links: list[ItemParentLink] = []` to
+`__init__`. Add three methods:
 
 ```python
 def delete_tag(self, tag_id: UUID) -> bool:
@@ -116,414 +157,378 @@ def list_item_parent_links(self) -> list[ItemParentLink]:
     return list(self._item_parent_links)
 ```
 
-Also add `ItemParentLink` to the imports.
-
-### Why this comes before tests
-All service tests use the `service` fixture which builds `TaxomeshService(InMemoryRepository())`.
-If `InMemoryRepository` is missing the new Protocol methods, mypy will fail and the test runner
-will crash before reaching any test body.
+**Acceptance**: `mypy --strict .` passes; `pytest tests/service/` passes.
 
 ---
 
-## Phase 4 — JsonRepository: Tests then Implementation
+## Phase 4a — `tests/service/test_json_repository.py` (10 failing tests)
 
-### 4a — Write failing tests (file: `tests/service/test_json_repository.py`)
+**FRs**: FR-034, FR-035, FR-036, FR-037
 
-New test cases to add (all will fail until 4b is implemented):
+Append 10 tests after existing ones. Key tests:
 
-| Test | Covers |
-|------|--------|
-| `test_delete_tag_removes_it` | FR-036, happy path |
-| `test_delete_tag_missing_returns_false` | FR-036, not-found path |
-| `test_delete_tag_persists_to_file` | FR-036, flush after delete |
-| `test_save_item_parent_link_persists` | FR-036 |
-| `test_save_item_parent_link_upserts_sort_index` | FR-034 upsert |
-| `test_list_item_parent_links_empty` | FR-035 |
-| `test_item_parent_links_survive_restart` | FR-036, persistence |
-| `test_item_name_description_survive_restart` | FR-026/FR-027 migration/persistence |
-| `test_legacy_json_without_item_parent_links_loads_empty` | migration compatibility |
-| `test_legacy_json_without_item_name_loads_empty_string` | FR-026 migration |
+| Test | What it covers |
+|------|---------------|
+| `test_delete_tag_removes_it` | `repo.delete_tag` returns True; tag gone |
+| `test_delete_tag_missing_returns_false` | unknown tag_id → False |
+| `test_delete_tag_persists_to_file` | JSON file no longer contains tag |
+| `test_save_item_parent_link_persists` | link appears in JSON file |
+| `test_save_item_parent_link_upserts_sort_index` | second call updates sort_index, not duplicates |
+| `test_list_item_parent_links_empty` | fresh repo → empty list |
+| `test_item_parent_links_survive_restart` | links reload from file |
+| `test_legacy_json_without_item_parent_links_loads_empty` | old JSON (no key) → [] |
+| `test_legacy_category_description_null_loads_empty_string` | old JSON `"description": null` → "" |
 
-### 4b — Implement JsonRepository extensions
-
-#### Files modified
-- `taxomesh/adapters/repositories/json_repository.py`
-
-#### Changes
-1. **`__init__`**: add `_item_parent_links: list[ItemParentLink] = []`.
-2. **`_load`**: add deserialization of `"item_parent_links"` key (default to `[]`).
-3. **`_flush`**: add `"item_parent_links"` to the serialized document.
-4. **`delete_tag`**: remove from `self._tags`, flush if found, return bool.
-5. **`save_item_parent_link`**: upsert by `(item_id, category_id)`, flush.
-6. **`list_item_parent_links`**: return copy of `self._item_parent_links`.
-7. Add `ItemParentLink` to the imports from `taxomesh.domain.models`.
+All tests must **fail** before Phase 4b.
 
 ---
 
-## Phase 5 — Service Layer: Tests then Implementation
+## Phase 4b — `taxomesh/adapters/repositories/json_repository.py`
 
-### 5a — Write failing tests
+**FRs**: FR-037
 
-#### New test files / additions
+1. Add `ItemParentLink` to imports.
+2. Add `self._item_parent_links: list[ItemParentLink] = []` to `__init__`.
+3. In `_load`: after `_category_parent_links`, add:
+   ```python
+   self._item_parent_links = [
+       ItemParentLink.model_validate(lnk)
+       for lnk in data.get("item_parent_links", [])
+   ]
+   ```
+4. In `_flush`: add `"item_parent_links": [lnk.model_dump(mode="json") for lnk in self._item_parent_links]` to the `data` dict.
+5. Add `delete_tag` after `list_tags`:
+   ```python
+   def delete_tag(self, tag_id: UUID) -> bool:
+       if tag_id not in self._tags:
+           return False
+       del self._tags[tag_id]
+       self._flush()
+       return True
+   ```
+6. Add `save_item_parent_link` and `list_item_parent_links` in a new section
+   `# --- Item → Category placement ---` after `list_category_parent_links`.
 
-**`tests/service/test_service_categories.py`** — add:
-
-| Test | Covers |
-|------|--------|
-| `test_update_category_name` | FR-028 |
-| `test_update_category_description` | FR-028 |
-| `test_update_category_partial_leaves_other_fields` | FR-028 partial update |
-| `test_update_category_not_found_raises` | FR-028 error path |
-
-**`tests/service/test_service_items.py`** — add:
-
-| Test | Covers |
-|------|--------|
-| `test_create_item_with_name` | FR-026 |
-| `test_create_item_name_defaults_to_empty_string` | FR-026 migration default |
-| `test_create_item_with_description` | FR-027 |
-| `test_update_item_name` | FR-029 |
-| `test_update_item_description` | FR-029 |
-| `test_update_item_enabled` | FR-029 |
-| `test_update_item_partial_leaves_other_fields` | FR-029 partial update |
-| `test_update_item_not_found_raises` | FR-029 error path |
-| `test_place_item_in_category_returns_link` | FR-032 |
-| `test_place_item_in_category_idempotent` | FR-032 idempotency |
-| `test_place_item_in_category_item_not_found_raises` | FR-032 error |
-| `test_place_item_in_category_category_not_found_raises` | FR-032 error |
-
-**`tests/service/test_service_tags.py`** — add:
-
-| Test | Covers |
-|------|--------|
-| `test_update_tag_name` | FR-030 |
-| `test_update_tag_not_found_raises` | FR-030 error path |
-| `test_delete_tag_removes_it` | FR-031 |
-| `test_delete_tag_not_found_raises` | FR-031 error path |
-
-**`tests/service/test_custom_backend.py`** — add:
-
-| Test | Covers |
-|------|--------|
-| `test_service_delegates_delete_tag_to_backend` | FR-033 |
-| `test_service_delegates_place_item_in_category_to_backend` | FR-034/FR-035 |
-
-### 5b — Implement Service extensions
-
-#### Files modified
-- `taxomesh/application/service.py`
-
-#### New methods
-
-**`update_category(category_id, name=None, description=None) -> Category`**:
-```
-get_category(category_id)           # raises if missing
-if name is not None: category.name = name
-if description is not None: category.description = description
-self._repo.save_category(category)
-return category
-```
-
-**`update_item(item_id, name=None, description=None, enabled=None) -> Item`**:
-```
-get_item(item_id)                   # raises if missing
-apply non-None fields via assignment
-self._repo.save_item(item)
-return item
-```
-
-**`update_tag(tag_id, name=None) -> Tag`**:
-```
-get_tag → TaxomeshTagNotFoundError if None
-if name is not None: tag.name = name
-self._repo.save_tag(tag)
-return tag
-```
-
-**`delete_tag(tag_id) -> None`**:
-```
-found = self._repo.delete_tag(tag_id)
-if not found: raise TaxomeshTagNotFoundError(...)
-```
-
-**`place_item_in_category(item_id, category_id, sort_index=0) -> ItemParentLink`**:
-```
-self.get_item(item_id)              # raises TaxomeshItemNotFoundError if missing
-self.get_category(category_id)      # raises TaxomeshCategoryNotFoundError if missing
-link = ItemParentLink(item_id=item_id, category_id=category_id, sort_index=sort_index)
-self._repo.save_item_parent_link(link)
-return link
-```
-
-#### Imports to add
-- `ItemParentLink` from `taxomesh.domain.models`
-- `TaxomeshTagNotFoundError` is already imported
+**Acceptance**: `pytest tests/service/test_json_repository.py` — all 10 new tests pass.
 
 ---
 
-## Phase 6 — pyproject.toml Update
+## Phase 5a — Service tests (13 failing tests)
 
-### Files modified
-- `pyproject.toml`
-- `uv.lock` (via `uv add typer`)
+**FRs**: FR-027 – FR-033
 
-### Changes
-```toml
-[project.dependencies]
-# existing: "fastapi>=0.110"
-# add:
-"typer>=0.12",
+Append to existing service test files. All must **fail** before Phase 5b.
 
-[project.scripts]
-taxomesh = "taxomesh.adapters.cli.main:app"
-```
+### `tests/service/test_service_categories.py` — 6 tests
 
-Run `uv add typer` (or `uv lock --upgrade`) to update `uv.lock`.
-
-### No test task
-Entry point registration is verified implicitly when the CLI tests invoke the app object.
-Typer's presence is verified by the import in `main.py`.
-
----
-
-## Phase 7 — CLI Config Module: Tests then Implementation
-
-### 7a — Write failing tests (file: `tests/test_cli.py`, config section)
-
-| Test | Covers |
-|------|--------|
-| `test_build_service_defaults_when_no_config_file` | FR-006, FR-007 |
-| `test_build_service_reads_json_path_from_config` | FR-006 |
-| `test_build_service_accepts_explicit_config_path` | FR-008 |
-| `test_build_service_invalid_toml_exits` | FR-009 |
-| `test_build_service_unrecognised_repo_type_exits` | config validation |
-
-Tests use `monkeypatch.chdir(tmp_path)` to control CWD and `tmp_path` fixtures
-to write `taxomesh.toml` files. Use `pytest.raises(SystemExit)` where the config
-error is expected to call `sys.exit`.
-
-### 7b — Implement `taxomesh/adapters/cli/config.py`
-
-#### New file
 ```python
-"""CLI configuration loading for taxomesh.
+def test_update_category_name(service):
+def test_update_category_description(service):
+def test_update_category_partial_leaves_other_fields(service):
+def test_update_category_not_found_raises(service):
+def test_list_categories_filtered_by_parent(service):
+def test_list_categories_parent_not_found_raises(service):
+```
 
-Reads taxomesh.toml from the current working directory (or a supplied path),
-constructs the appropriate repository adapter, and returns a TaxomeshService.
-"""
+`test_update_category_description` asserts that `cat.description` starts as `""` (not `None`)
+when created without a description — verifying the Phase 1 model change.
 
-import tomllib
+`test_list_categories_filtered_by_parent`:
+```python
+parent = service.create_category(name="P")
+c1 = service.create_category(name="C1")
+c2 = service.create_category(name="C2")
+service.add_category_parent(c2.category_id, parent.category_id, sort_index=1)
+service.add_category_parent(c1.category_id, parent.category_id, sort_index=2)
+result = service.list_categories(parent_id=parent.category_id)
+assert [c.category_id for c in result] == [c2.category_id, c1.category_id]
+```
+
+### `tests/service/test_service_items.py` — 5 tests
+
+```python
+def test_update_item_enabled(service):
+def test_update_item_not_found_raises(service):
+def test_place_item_in_category_returns_link(service):
+def test_place_item_in_category_idempotent(service):
+def test_place_item_in_category_item_not_found_raises(service):
+def test_place_item_in_category_category_not_found_raises(service):
+def test_list_items_filtered_by_category(service):
+def test_list_items_category_not_found_raises(service):
+```
+
+`test_list_items_filtered_by_category`:
+```python
+cat = service.create_category(name="C")
+i1 = service.create_item(external_id="a")
+i2 = service.create_item(external_id="b")
+service.place_item_in_category(i2.item_id, cat.category_id, sort_index=1)
+service.place_item_in_category(i1.item_id, cat.category_id, sort_index=2)
+result = service.list_items(category_id=cat.category_id)
+assert [i.item_id for i in result] == [i2.item_id, i1.item_id]
+```
+
+### `tests/service/test_service_tags.py` — 4 tests
+
+```python
+def test_update_tag_name(service):
+def test_update_tag_not_found_raises(service):
+def test_delete_tag_removes_it(service):
+def test_delete_tag_not_found_raises(service):
+```
+
+### `tests/service/test_custom_backend.py` — 2 tests
+
+```python
+def test_service_delegates_delete_tag_to_backend():
+def test_service_delegates_place_item_in_category_to_backend():
+```
+
+---
+
+## Phase 5b — `taxomesh/application/service.py`
+
+**FRs**: FR-027 – FR-033
+
+1. Add `ItemParentLink` to imports.
+2. Extend `list_categories` signature:
+   ```python
+   def list_categories(self, *, parent_id: UUID | None = None) -> list[Category]:
+       if parent_id is None:
+           return self._repo.list_categories()
+       self.get_category(parent_id)  # raises if not found
+       links = sorted(
+           [l for l in self._repo.list_category_parent_links() if l.parent_category_id == parent_id],
+           key=lambda l: l.sort_index,
+       )
+       return [self.get_category(l.category_id) for l in links]
+   ```
+3. Add `update_category` after `delete_category`:
+   ```python
+   def update_category(self, category_id: UUID, name: str | None = None, description: str | None = None) -> Category:
+       category = self.get_category(category_id)
+       if name is not None:
+           category.name = name
+       if description is not None:
+           category.description = description
+       self._repo.save_category(category)
+       return category
+   ```
+4. Extend `list_items` signature:
+   ```python
+   def list_items(self, *, category_id: UUID | None = None) -> list[Item]:
+       if category_id is None:
+           return self._repo.list_items()
+       self.get_category(category_id)  # raises if not found
+       links = sorted(
+           [l for l in self._repo.list_item_parent_links() if l.category_id == category_id],
+           key=lambda l: l.sort_index,
+       )
+       return [self.get_item(l.item_id) for l in links]
+   ```
+5. Add `update_item` after `delete_item`:
+   ```python
+   def update_item(self, item_id: UUID, enabled: bool | None = None) -> Item:
+       item = self.get_item(item_id)
+       if enabled is not None:
+           item.enabled = enabled
+       self._repo.save_item(item)
+       return item
+   ```
+6. Add `update_tag` after `create_tag`:
+   ```python
+   def update_tag(self, tag_id: UUID, name: str | None = None) -> Tag:
+       result = self._repo.get_tag(tag_id)
+       if result is None:
+           raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
+       if name is not None:
+           result.name = name
+       self._repo.save_tag(result)
+       return result
+   ```
+7. Add `delete_tag` after `update_tag`:
+   ```python
+   def delete_tag(self, tag_id: UUID) -> None:
+       found = self._repo.delete_tag(tag_id)
+       if not found:
+           raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
+   ```
+8. Add `place_item_in_category` after `add_category_parent`:
+   ```python
+   def place_item_in_category(self, item_id: UUID, category_id: UUID, sort_index: int = 0) -> ItemParentLink:
+       self.get_item(item_id)
+       self.get_category(category_id)
+       link = ItemParentLink(item_id=item_id, category_id=category_id, sort_index=sort_index)
+       self._repo.save_item_parent_link(link)
+       return link
+   ```
+
+**Acceptance**: `pytest tests/service/` — all tests pass; `mypy --strict .` passes.
+
+---
+
+## Phase 6 — `pyproject.toml` + `uv.lock`
+
+**FRs**: FR-001, FR-002
+
+1. Add `"typer>=0.12"` to `[project.dependencies]`.
+2. Add `[project.scripts]` section: `taxomesh = "taxomesh.adapters.cli.main:app"`.
+3. Run `uv add typer` to update `uv.lock`.
+
+**Acceptance**: `uv run taxomesh --help` (or expected ImportError if `main.py` not yet created).
+`uv lock --check` passes.
+
+---
+
+## Phase 7a — `tests/test_cli.py` config tests (5 failing)
+
+**FRs**: FR-006, FR-007, FR-008, FR-009
+
+Create `tests/test_cli.py` with 5 config tests that import `build_service` from
+`taxomesh.adapters.cli.config`. Must **fail** (ImportError acceptable).
+
+```python
+def test_build_service_defaults_when_no_config_file(tmp_path, monkeypatch):
+def test_build_service_reads_json_path_from_config(tmp_path, monkeypatch):
+def test_build_service_accepts_explicit_config_path(tmp_path):
+def test_build_service_invalid_toml_exits(tmp_path, monkeypatch):
+def test_build_service_unrecognised_repo_type_exits(tmp_path, monkeypatch):
+```
+
+---
+
+## Phase 7b — `taxomesh/adapters/cli/config.py`
+
+**FRs**: FR-006, FR-007, FR-008, FR-009
+
+Create `taxomesh/adapters/cli/__init__.py` (docstring only) and `config.py`:
+
+```python
+"""CLI configuration loading for taxomesh."""
 import sys
+import tomllib
 from pathlib import Path
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.json_repository import JsonRepository
 from taxomesh.exceptions import TaxomeshRepositoryError
 
-_DEFAULT_CONFIG_NAME = "taxomesh.toml"
+_CONFIG_FILENAME = "taxomesh.toml"
 _DEFAULT_REPO_TYPE = "json"
 _DEFAULT_REPO_PATH = "taxomesh.json"
 
 def build_service(config_path: Path | None = None) -> TaxomeshService:
-    """Read taxomesh.toml and return a fully-configured TaxomeshService."""
-    ...
+    resolved = config_path if config_path is not None else Path.cwd() / _CONFIG_FILENAME
+    repo_type = _DEFAULT_REPO_TYPE
+    repo_path = _DEFAULT_REPO_PATH
+    if resolved.exists():
+        try:
+            config = tomllib.loads(resolved.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            print(f"Error: could not parse config file {resolved}: {exc}", file=sys.stderr)
+            sys.exit(1)
+        section = config.get("repository", {})
+        repo_type = section.get("type", _DEFAULT_REPO_TYPE)
+        repo_path = section.get("path", _DEFAULT_REPO_PATH)
+    if repo_type != "json":
+        print(f"Error: unsupported repository type '{repo_type}'.", file=sys.stderr)
+        sys.exit(1)
+    try:
+        repo = JsonRepository(Path(repo_path))
+    except TaxomeshRepositoryError as exc:
+        print(f"Error: could not open repository: {exc}", file=sys.stderr)
+        sys.exit(1)
+    return TaxomeshService(repository=repo)
 ```
 
-**Logic**:
-1. Determine config file path: `config_path` if given, else `Path.cwd() / "taxomesh.toml"`.
-2. If the file does not exist, use defaults silently.
-3. If the file exists: parse with `tomllib.loads(...)`. On `tomllib.TOMLDecodeError`,
-   print to stderr and `sys.exit(1)`.
-4. Extract `[repository]` section (default to `{}`).
-5. Read `type` (default `"json"`) and `path` (default `"taxomesh.json"`).
-6. If `type != "json"`, print error to stderr and `sys.exit(1)`.
-7. Instantiate `JsonRepository(Path(path))`. Catch `TaxomeshRepositoryError`, print,
-   `sys.exit(1)`.
-8. Return `TaxomeshService(repository=repo)`.
+**Acceptance**: `pytest tests/test_cli.py -k "build_service or config"` — 5 tests pass.
 
 ---
 
-## Phase 8 — CLI Main Module: Tests then Implementation
+## Phase 8a — `tests/test_cli.py` command tests (35 failing tests)
 
-### 8a — Write failing tests (file: `tests/test_cli.py`, commands section)
+**FRs**: FR-003 – FR-005, FR-010 – FR-025
 
-Use `typer.testing.CliRunner`. Each test:
-1. Creates an `InMemoryRepository` (or uses `tmp_path` for config tests).
-2. Patches `build_service` to return `TaxomeshService(InMemoryRepository())`.
-3. Invokes the command via `runner.invoke(app, [...])`.
-4. Asserts `result.exit_code` and `result.output`/`result.stderr`.
+Append 35 command tests to `tests/test_cli.py`. All must **fail** before Phase 8b.
 
-#### Category command tests
+Use `patch("taxomesh.adapters.cli.main.build_service", return_value=svc)` to inject
+in-memory backend.
 
-| Test | Command | Assert |
-|------|---------|--------|
-| `test_category_list_empty` | `category list` | exit 0, empty-state message |
-| `test_category_add` | `category add --name Music` | exit 0, UUID in output |
-| `test_category_add_with_description` | `category add --name X --description Y` | exit 0 |
-| `test_category_add_with_parent` | `category add --name X --parent-id <id>` | exit 0, parent confirmed |
-| `test_category_add_parent_not_found` | `category add --name X --parent-id <bad>` | exit 1, stderr |
-| `test_category_delete` | `category delete <id>` | exit 0, confirmation |
-| `test_category_delete_not_found` | `category delete <bad>` | exit 1, stderr |
-| `test_category_update_name` | `category update <id> --name New` | exit 0 |
-| `test_category_update_no_options` | `category update <id>` | exit non-zero |
-| `test_category_update_add_parent` | `category update <id> --parent-id <pid>` | exit 0 |
-| `test_category_cycle_detection` | `category update <id> --parent-id <self>` | exit 1, cycle error |
+### Category (11 tests)
+`test_category_list_empty`, `test_category_add`, `test_category_add_with_description`,
+`test_category_add_with_parent`, `test_category_add_parent_not_found`,
+`test_category_delete`, `test_category_delete_not_found`,
+`test_category_update_name`, `test_category_update_no_options`,
+`test_category_update_add_parent`, `test_category_cycle_detection`
 
-#### Item command tests
+### Category list filter (2 tests)
+`test_category_list_with_parent_id`, `test_category_list_parent_not_found`
 
-| Test | Command | Assert |
-|------|---------|--------|
-| `test_item_list_empty` | `item list` | exit 0 |
-| `test_item_add_int_external_id` | `item add --external-id 42 --name S` | exit 0, int preserved |
-| `test_item_add_str_external_id` | `item add --external-id slug --name S` | exit 0 |
-| `test_item_add_uuid_external_id` | `item add --external-id <uuid> --name S` | exit 0 |
-| `test_item_add_with_category` | `item add --external-id 1 --name X --category-id <id>` | exit 0, placement confirmed |
-| `test_item_add_with_tag` | `item add --external-id 1 --name X --tag-id <id>` | exit 0, assignment confirmed |
-| `test_item_add_category_not_found` | `item add ... --category-id <bad>` | exit 1, stderr |
-| `test_item_delete` | `item delete <id>` | exit 0 |
-| `test_item_delete_not_found` | `item delete <bad>` | exit 1 |
-| `test_item_update_name` | `item update <id> --name New` | exit 0 |
-| `test_item_update_disable` | `item update <id> --disable` | exit 0 |
-| `test_item_update_no_options` | `item update <id>` | exit non-zero |
-| `test_item_add_to_category` | `item add-to-category <iid> --category-id <cid>` | exit 0 |
-| `test_item_add_to_category_not_found` | `item add-to-category <bad> ...` | exit 1 |
-| `test_item_add_to_tag` | `item add-to-tag <iid> --tag-id <tid>` | exit 0 |
-| `test_item_add_to_tag_not_found` | `item add-to-tag <bad> ...` | exit 1 |
+### Item (16 tests)
+`test_item_list_empty`, `test_item_add_int_external_id`, `test_item_add_str_external_id`,
+`test_item_add_uuid_external_id`, `test_item_add_with_category`, `test_item_add_with_tag`,
+`test_item_add_category_not_found`, `test_item_delete`, `test_item_delete_not_found`,
+`test_item_update_disable`, `test_item_update_no_options`,
+`test_item_add_to_category`, `test_item_add_to_category_not_found`,
+`test_item_add_to_tag`, `test_item_add_to_tag_not_found`
 
-#### Tag command tests
+### Item list filter (2 tests)
+`test_item_list_with_category_id`, `test_item_list_category_not_found`
 
-| Test | Command | Assert |
-|------|---------|--------|
-| `test_tag_list_empty` | `tag list` | exit 0 |
-| `test_tag_add` | `tag add --name live` | exit 0, UUID in output |
-| `test_tag_add_name_too_long` | `tag add --name <26chars>` | exit 1, stderr |
-| `test_tag_delete` | `tag delete <id>` | exit 0 |
-| `test_tag_delete_not_found` | `tag delete <bad>` | exit 1 |
-| `test_tag_update_name` | `tag update <id> --name studio` | exit 0 |
-
-#### Config integration tests
-
-| Test | Description |
-|------|-------------|
-| `test_cli_reads_config_file` | Write `taxomesh.toml` to CWD; verify correct path used |
-| `test_cli_uses_defaults_when_no_config` | No config file; verify exit 0 |
-| `test_cli_invalid_toml_exits` | Corrupt config file; verify exit 1 |
-| `test_cli_custom_config_path` | Pass `--config other.toml`; verify used |
-
-### 8b — Implement `taxomesh/adapters/cli/main.py`
-
-#### New package: `taxomesh/adapters/cli/__init__.py`
-Empty file marking the package.
-
-#### `main.py` structure
-
-```python
-app = typer.Typer(name="taxomesh", no_args_is_help=True)
-category_app = typer.Typer(no_args_is_help=True, help="Manage categories.")
-item_app     = typer.Typer(no_args_is_help=True, help="Manage items.")
-tag_app      = typer.Typer(no_args_is_help=True, help="Manage tags.")
-
-app.add_typer(category_app, name="category")
-app.add_typer(item_app,     name="item")
-app.add_typer(tag_app,      name="tag")
-
-_config_path: Path | None = None  # set by root callback
-
-@app.callback()
-def main(config: Annotated[Path | None, typer.Option(...)] = None) -> None:
-    global _config_path
-    _config_path = config
-```
-
-**Error-handling wrapper** — a `_run` helper (or decorator) that wraps every command body:
-```python
-def _run(fn: Callable[[], None]) -> None:
-    try:
-        fn()
-    except TaxomeshError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(1)
-    except Exception as exc:
-        typer.echo(f"Unexpected error: {exc}", err=True)
-        raise typer.Exit(1)
-```
-
-**`--external-id` parser** (shared utility in `main.py`):
-```python
-def _parse_external_id(raw: str) -> ExternalId:
-    try:
-        return UUID(raw)
-    except ValueError:
-        pass
-    try:
-        return int(raw)
-    except ValueError:
-        pass
-    return raw
-```
-
-**Category commands** — `category_add`, `category_list`, `category_delete`, `category_update`.
-Each calls `build_service(_config_path)` at the top, then the appropriate service method(s).
-
-**Item commands** — `item_add`, `item_list`, `item_delete`, `item_update`,
-`item_add_to_category`, `item_add_to_tag`.
-
-**Tag commands** — `tag_add`, `tag_list`, `tag_delete`, `tag_update`.
+### Tag (6 tests)
+`test_tag_list_empty`, `test_tag_add`, `test_tag_add_name_too_long`,
+`test_tag_delete`, `test_tag_delete_not_found`, `test_tag_update_name`
 
 ---
 
-## Phase 9 — README Update
+## Phase 8b — `taxomesh/adapters/cli/main.py`
 
-### Files modified
-- `README.md`
+**FRs**: FR-001 – FR-005, FR-010 – FR-025
 
-### What changes
-Insert a new "CLI" section immediately after the `## Installation` section and before
-the existing `## Quick start` (Python API) section. The CLI section should cover:
-- Basic usage (`taxomesh category add`, `item add`, `tag add`)
-- Config file setup
-- Getting help
+Key implementation points:
 
-The existing Python API quick-start content is kept but moved after the CLI section.
+- `app = typer.Typer()` at module level; sub-apps `category_app`, `item_app`, `tag_app`
+  each created with `typer.Typer()` and registered with `app.add_typer(...)`.
+- `--config` option on the root `app` callback; pass via `typer.Context` object_store.
+- `_parse_external_id(raw: str) -> ExternalId`: try UUID → int → str.
+- Every command wraps body in:
+  ```python
+  try:
+      ...
+  except TaxomeshError as exc:
+      typer.echo(str(exc), err=True)
+      raise typer.Exit(1)
+  except Exception as exc:
+      typer.echo(f"Unexpected error: {exc}", err=True)
+      raise typer.Exit(1)
+  ```
+- `category update` and `item update`: check that at least one option was provided;
+  if none, `typer.echo("Error: at least one option required", err=True); raise typer.Exit(1)`.
+- `category list` command: accepts optional `--parent-id UUID | None = None`; passes to
+  `svc.list_categories(parent_id=parent_id)`.
+- `item list` command: accepts optional `--category-id UUID | None = None`; passes to
+  `svc.list_items(category_id=category_id)`.
+
+**Acceptance**: `pytest tests/test_cli.py` — all 40 tests pass (5 config + 35 command).
+`pytest tests/` — all tests pass. `mypy --strict .` passes. Coverage ≥ 80%.
+
+---
+
+## Phase 9 — `README.md`
+
+**FR**: FR-038
+
+Insert `## CLI` section immediately after `## Installation` and before existing
+`## Quick start` (Python API). Content: one-sentence intro, `taxomesh.toml` example,
+3–4 shell examples, note that Python API follows.
 
 ---
 
 ## Risk Register
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| mypy `--strict` rejects `global _config_path` in Typer callback | Medium | Medium | Use Typer's `callback` state pattern (`typer.Context`) instead of a global |
-| `test_custom_backend.py` fails because `InMemoryRepository` is missing new methods | High | High | Phase 3 (conftest update) must complete before any test run |
-| Existing `create_item` tests break because `Item.__init__` now has `name` | Low | Low | `name` defaults to `""` — existing calls `create_item(external_id=X)` are unaffected |
-| `uv.lock` drift after adding `typer` | Low | Low | Run `uv add typer` and commit the updated `uv.lock` |
-| `monkeypatch.chdir` in CLI config tests interferes with parallel test execution | Low | Low | pytest-xdist is not in use; tests run sequentially |
-
----
-
-## File Inventory
-
-### Modified files
-
-| File | Changes |
-|------|---------|
-| `taxomesh/domain/models.py` | `Item` + `name` + `description` |
-| `taxomesh/ports/repository.py` | + `delete_tag`, `save_item_parent_link`, `list_item_parent_links` |
-| `taxomesh/adapters/repositories/json_repository.py` | + 3 methods; `_load`/`_flush` updated |
-| `taxomesh/application/service.py` | + 5 methods |
-| `tests/service/conftest.py` | `InMemoryRepository` + 3 methods |
-| `tests/service/test_json_repository.py` | + 10 tests |
-| `tests/service/test_service_categories.py` | + 4 tests |
-| `tests/service/test_service_items.py` | + 12 tests |
-| `tests/service/test_service_tags.py` | + 4 tests |
-| `tests/service/test_custom_backend.py` | + 2 tests |
-| `pyproject.toml` | + typer dep, + entry point |
-| `uv.lock` | regenerated |
-| `README.md` | CLI section added |
-
-### New files
-
-| File | Purpose |
-|------|---------|
-| `taxomesh/adapters/cli/__init__.py` | Package marker |
-| `taxomesh/adapters/cli/config.py` | Config loading + `build_service` |
-| `taxomesh/adapters/cli/main.py` | Typer app + all commands |
-| `tests/test_cli.py` | CLI tests (config + all commands) |
+| Risk | Mitigation |
+|------|-----------|
+| `mypy --strict` on `list_items(*, category_id=...)` overloading existing signature | Use keyword-only args with default `None`; existing callers still pass without args |
+| Existing tests asserting `cat.description is None` | Update those tests to assert `== ""` in Phase 1 |
+| `conftest.py` InMemoryRepository not matching Protocol until Phase 3 | Phases 1→2→3 are strictly sequential; mypy not run between Phase 2 and Phase 3 |
+| `uv.lock` drift after `typer` added | Always run `uv add typer` (not manual edit) in Phase 6 |
+| Category `BeforeValidator` breaking strict mypy | Return type of validator must be `object` (input) → `object` to satisfy mypy |

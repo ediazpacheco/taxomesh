@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from taxomesh.domain.types import ExternalId
 
@@ -20,8 +20,13 @@ class Item(ModelBase):
 class Category(ModelBase):
     category_id: UUID
     name: Annotated[str, Field(max_length=256)]
-    description: Annotated[str, Field(max_length=100_000)] | None = None
+    description: Annotated[str, Field(max_length=100_000)] = ""
     metadata: dict[str, Any] = Field(default_factory=dict)  # arbitrary user-supplied key-value pairs
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _coerce_none_description(cls, v: object) -> object:
+        return "" if v is None else v
 
 
 class Tag(ModelBase):
