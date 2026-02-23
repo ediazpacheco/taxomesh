@@ -42,12 +42,12 @@ taxomesh/
 tests/
 ├── service/
 │   ├── conftest.py            ← InMemoryRepository: +delete_tag, +save/list_item_parent_links
-│   ├── test_json_repository.py ← +10 tests
+│   ├── test_json_repository.py ← +9 tests
 │   ├── test_service_categories.py ← +6 tests (update_category, list_categories filter)
 │   ├── test_service_items.py  ← +7 tests (update_item, place_item_in_category, list_items filter)
 │   ├── test_service_tags.py   ← +4 tests (update_tag, delete_tag)
 │   └── test_custom_backend.py ← +2 tests
-└── test_cli.py                ← NEW: 5 config tests + 35 command tests
+└── test_cli.py                ← NEW: 5 config tests + 39 command tests
 ```
 
 ---
@@ -61,7 +61,7 @@ Phase 2: repository.py      (Protocol +3 methods)
     ↓
 Phase 3: conftest.py        (InMemoryRepository +3 methods)
     ↓
-Phase 4a: test_json_repository.py  (10 failing tests)
+Phase 4a: test_json_repository.py  (9 failing tests)
     ↓
 Phase 4b: json_repository.py       (implement 3 methods)
     ↓
@@ -75,7 +75,7 @@ Phase 7a: test_cli.py config tests (5 failing)
     ↓
 Phase 7b: cli/config.py            (implement build_service)
     ↓
-Phase 8a: test_cli.py command tests (35 failing)
+Phase 8a: test_cli.py command tests (39 failing)
     ↓
 Phase 8b: cli/main.py              (implement all commands)
     ↓
@@ -161,11 +161,11 @@ def list_item_parent_links(self) -> list[ItemParentLink]:
 
 ---
 
-## Phase 4a — `tests/service/test_json_repository.py` (10 failing tests)
+## Phase 4a — `tests/service/test_json_repository.py` (9 failing tests)
 
 **FRs**: FR-034, FR-035, FR-036, FR-037
 
-Append 10 tests after existing ones. Key tests:
+Append 9 tests after existing ones. Key tests:
 
 | Test | What it covers |
 |------|---------------|
@@ -209,7 +209,7 @@ All tests must **fail** before Phase 4b.
 6. Add `save_item_parent_link` and `list_item_parent_links` in a new section
    `# --- Item → Category placement ---` after `list_category_parent_links`.
 
-**Acceptance**: `pytest tests/service/test_json_repository.py` — all 10 new tests pass.
+**Acceptance**: `pytest tests/service/test_json_repository.py` — all 9 new tests pass.
 
 ---
 
@@ -444,11 +444,11 @@ def build_service(config_path: Path | None = None) -> TaxomeshService:
 
 ---
 
-## Phase 8a — `tests/test_cli.py` command tests (35 failing tests)
+## Phase 8a — `tests/test_cli.py` command tests (39 failing tests)
 
 **FRs**: FR-003 – FR-005, FR-010 – FR-025
 
-Append 35 command tests to `tests/test_cli.py`. All must **fail** before Phase 8b.
+Append 39 command tests to `tests/test_cli.py`. All must **fail** before Phase 8b.
 
 Use `patch("taxomesh.adapters.cli.main.build_service", return_value=svc)` to inject
 in-memory backend.
@@ -501,14 +501,17 @@ Key implementation points:
       typer.echo(f"Unexpected error: {exc}", err=True)
       raise typer.Exit(1)
   ```
-- `category update` and `item update`: check that at least one option was provided;
-  if none, `typer.echo("Error: at least one option required", err=True); raise typer.Exit(1)`.
+- `category update`: check that at least one of `--name`, `--description`, `--parent-id` was provided;
+  if none, `typer.echo("Error: ...", err=True); raise typer.Exit(1)`.
+- `item update`: accepts `--enable/--disable`, `--category-id UUID`, `--sort-index INT`, `--tag-id UUID`;
+  check that at least one of `--enable`, `--disable`, `--category-id`, `--tag-id` was provided;
+  no `--name` or `--description` options.
 - `category list` command: accepts optional `--parent-id UUID | None = None`; passes to
   `svc.list_categories(parent_id=parent_id)`.
 - `item list` command: accepts optional `--category-id UUID | None = None`; passes to
   `svc.list_items(category_id=category_id)`.
 
-**Acceptance**: `pytest tests/test_cli.py` — all 40 tests pass (5 config + 35 command).
+**Acceptance**: `pytest tests/test_cli.py` — all 44 tests pass (5 config + 39 command).
 `pytest tests/` — all tests pass. `mypy --strict .` passes. Coverage ≥ 80%.
 
 ---

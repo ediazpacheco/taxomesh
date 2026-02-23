@@ -217,16 +217,25 @@ def item_update(
     item_id: UUID = typer.Argument(..., help="Item UUID to update"),
     enable: bool = typer.Option(False, "--enable/--no-enable", help="Enable the item"),
     disable: bool = typer.Option(False, "--disable/--no-disable", help="Disable the item"),
+    category_id: UUID | None = typer.Option(None, "--category-id", help="Place item in this category"),
+    sort_index: int = typer.Option(0, "--sort-index", help="Sort index within category"),
+    tag_id: UUID | None = typer.Option(None, "--tag-id", help="Assign this tag to the item"),
 ) -> None:
-    """Update an item's enabled state."""
-    if not enable and not disable:
-        typer.echo("Error: at least one of --enable or --disable must be provided.", err=True)
+    """Update an item's enabled state, category placement, or tag assignment."""
+    if not enable and not disable and category_id is None and tag_id is None:
+        typer.echo("Error: at least one of --enable, --disable, --category-id, --tag-id must be provided.", err=True)
         raise typer.Exit(code=1)
     svc = _get_service(ctx)
     try:
-        enabled = bool(enable)
-        updated = svc.update_item(item_id, enabled=enabled)
-        typer.echo(updated)
+        if enable or disable:
+            updated = svc.update_item(item_id, enabled=bool(enable))
+            typer.echo(updated)
+        if category_id is not None:
+            link = svc.place_item_in_category(item_id, category_id, sort_index=sort_index)
+            typer.echo(f"Placed in category: {link}")
+        if tag_id is not None:
+            svc.assign_tag(tag_id, item_id)
+            typer.echo(f"Assigned tag {tag_id}")
     except TaxomeshError as exc:
         _err(str(exc))
     except Exception as exc:

@@ -274,6 +274,35 @@ def test_item_update_no_options() -> None:
     assert result.exit_code != 0
 
 
+def test_item_update_with_category_id() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    item = svc.create_item(external_id="x")
+    cat = svc.create_category(name="C")
+    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+        result = runner.invoke(app, ["item", "update", str(item.item_id), "--category-id", str(cat.category_id)])
+    assert result.exit_code == 0
+
+
+def test_item_update_with_tag_id() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    item = svc.create_item(external_id="x")
+    tag = svc.create_tag(name="live")
+    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+        result = runner.invoke(app, ["item", "update", str(item.item_id), "--tag-id", str(tag.tag_id)])
+    assert result.exit_code == 0
+
+
+def test_item_update_category_not_found() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    item = svc.create_item(external_id="x")
+    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+        result = runner.invoke(app, ["item", "update", str(item.item_id), "--category-id", str(uuid4())])
+    assert result.exit_code == 1
+
+
 def test_item_add_to_category() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)

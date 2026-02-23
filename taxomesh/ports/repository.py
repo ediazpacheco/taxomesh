@@ -170,7 +170,7 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
-    # --- Item → Category placement ---
+    # --- Tag delete ---
 
     def delete_tag(self, tag_id: UUID) -> bool:
         """Delete a tag entity by its identifier.
@@ -182,6 +182,8 @@ class TaxomeshRepositoryBase(Protocol):
             True if the tag was found and deleted; False if it did not exist.
         """
         ...
+
+    # --- Item → Category placement ---
 
     def save_item_parent_link(self, link: ItemParentLink) -> None:
         """Upsert an item→category placement.

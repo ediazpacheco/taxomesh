@@ -11,19 +11,19 @@
 
 | ID | Title | Blocked by | Status |
 |----|-------|-----------|--------|
-| T-01 | Modify `Category.description` to `str = ""` with `BeforeValidator` | — | ☐ |
-| T-02 | Extend `TaxomeshRepositoryBase` Protocol with 3 new methods | T-01 | ☐ |
-| T-03 | Update `InMemoryRepository` in conftest.py | T-02 | ☐ |
-| T-04 | Write failing tests for `JsonRepository` new methods | T-03 | ☐ |
-| T-05 | Implement `JsonRepository` new methods | T-04 | ☐ |
-| T-06 | Write failing tests for service layer extensions | T-03 | ☐ |
-| T-07 | Implement service layer extensions | T-05, T-06 | ☐ |
-| T-08 | Add `typer` dependency and CLI entry point to `pyproject.toml` | T-07 | ☐ |
-| T-09 | Write failing tests for `build_service` / config loading | T-08 | ☐ |
-| T-10 | Implement `taxomesh/adapters/cli/config.py` | T-09 | ☐ |
-| T-11 | Write failing tests for all CLI commands | T-10 | ☐ |
-| T-12 | Implement `taxomesh/adapters/cli/main.py` | T-11 | ☐ |
-| T-13 | Update `README.md` with CLI section | T-12 | ☐ |
+| T-01 | Modify `Category.description` to `str = ""` with `BeforeValidator` | — | ☑ |
+| T-02 | Extend `TaxomeshRepositoryBase` Protocol with 3 new methods | T-01 | ☑ |
+| T-03 | Update `InMemoryRepository` in conftest.py | T-02 | ☑ |
+| T-04 | Write failing tests for `JsonRepository` new methods | T-03 | ☑ |
+| T-05 | Implement `JsonRepository` new methods | T-04 | ☑ |
+| T-06 | Write failing tests for service layer extensions | T-03 | ☑ |
+| T-07 | Implement service layer extensions | T-05, T-06 | ☑ |
+| T-08 | Add `typer` dependency and CLI entry point to `pyproject.toml` | T-07 | ☑ |
+| T-09 | Write failing tests for `build_service` / config loading | T-08 | ☑ |
+| T-10 | Implement `taxomesh/adapters/cli/config.py` | T-09 | ☑ |
+| T-11 | Write failing tests for all CLI commands | T-10 | ☑ |
+| T-12 | Implement `taxomesh/adapters/cli/main.py` | T-11 | ☑ |
+| T-13 | Update `README.md` with CLI section | T-12 | ☑ |
 
 ---
 
@@ -749,7 +749,8 @@ def _svc_with_repo(repo: InMemoryRepository) -> TaxomeshService:
     return TaxomeshService(repository=repo)
 ```
 
-Append the following 35 tests. All must **fail** before T-12.
+Append the following 36 tests. All must **fail** before T-12.
+(3 additional tests for `item update --category-id`, `--tag-id`, and category-not-found paths were added during implementation to fully cover FR-017, bringing the command test total to 39.)
 
 #### Category tests (11)
 
@@ -861,7 +862,7 @@ def test_category_list_parent_not_found() -> None:
     assert result.exit_code == 1
 ```
 
-#### Item tests (16)
+#### Item tests (15)
 
 ```python
 def test_item_list_empty() -> None:
@@ -1046,7 +1047,7 @@ def test_tag_update_name() -> None:
 
 ### Acceptance criteria
 
-- All 35 new command tests **fail** (ImportError on `app` is acceptable; fix import, not implementation).
+- All 36 new command tests **fail** (ImportError on `app` is acceptable; fix import, not implementation).
 
 ---
 
@@ -1067,13 +1068,15 @@ Key implementation points (see `specs/004-cli/plan.md` § Phase 8b for full pseu
 - Every command wraps body in try/except catching `TaxomeshError` then bare `Exception`.
 - `category list [--parent-id UUID]` → calls `svc.list_categories(parent_id=parent_id)`.
 - `item list [--category-id UUID]` → calls `svc.list_items(category_id=category_id)`.
-- `category update` and `item update`: guard that at least one option was provided.
-- `item update`: only `--enable/--disable` flag (no `--name` or `--description`).
+- `category update`: guard that at least one of `--name`, `--description`, `--parent-id` was provided.
+- `item update`: accepts `--enable/--disable`, `--category-id UUID`, `--sort-index INT`, `--tag-id UUID`;
+  guard that at least one of `--enable`, `--disable`, `--category-id`, `--tag-id` was provided;
+  no `--name` or `--description` options.
 - `item add`: no `--name` or `--description` options.
 
 ### Acceptance criteria
 
-- `pytest tests/test_cli.py` — all 40 tests pass (5 config + 35 command).
+- `pytest tests/test_cli.py` — all 44 tests pass (5 config + 39 command).
 - `pytest tests/` — all tests pass (no regressions).
 - `mypy --strict .` passes.
 - `ruff check . && ruff format --check .` pass.
@@ -1110,10 +1113,10 @@ Do not remove or shorten any existing content.
 
 All of the following must be true before a PR is opened:
 
-- [ ] All 13 tasks marked complete.
-- [ ] `ruff check .` — zero violations.
-- [ ] `ruff format --check .` — no formatting issues.
-- [ ] `mypy --strict .` — zero type errors.
-- [ ] `pytest --cov=taxomesh --cov-fail-under=80` — all tests pass, coverage ≥ 80%.
-- [ ] `uv run taxomesh --help` prints help text.
-- [ ] Spec artifacts committed: `specs/004-cli/` (all files).
+- [x] All 13 tasks marked complete.
+- [x] `ruff check .` — zero violations.
+- [x] `ruff format --check .` — no formatting issues.
+- [x] `mypy --strict .` — zero type errors.
+- [x] `pytest --cov=taxomesh --cov-fail-under=80` — all tests pass, coverage ≥ 80%.
+- [x] `uv run taxomesh --help` prints help text.
+- [x] Spec artifacts committed: `specs/004-cli/` (all files).
