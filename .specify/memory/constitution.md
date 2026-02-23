@@ -1,15 +1,15 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.1 → 1.1.1
-Bump type: MINOR+PATCH — v1.1.0 added Principle IX (Pluggable REST Views); v1.1.1 adds
-Code Style section with line-length = 119 as project-wide standard.
+Version change: 1.2.0 → 1.2.1
+Bump type: PATCH — composition-root exception clause added to Principle I.
+
+Previous version: 1.2.0 (added Google-style docstring rule)
 
 Modified principles:
-  - Principle I: adapters layer explicitly names `adapters/api/` alongside `adapters/repositories/`
+  - Principle I: added "Composition-root exception" clause for lazy import in TaxomeshService.__init__
 
-Added sections:
-  - Core Principle IX: Pluggable REST Views — FastAPI View Functions
+Added sections: none
 
 Removed sections: none
 
@@ -48,6 +48,12 @@ adapters → application → domain
 - `adapters/api/` — FastAPI view functions; the REST interface adapter
 
 No layer may import from a layer further out than itself.
+
+**Composition-root exception**: A lazy `import` inside an `if parameter is None:` guard of
+`TaxomeshService.__init__` — used to instantiate a default adapter when none is provided — is
+exempt from this rule. The import MUST be the only `application → adapters` dependency in the
+service, MUST live inside the None-guard only, and the trade-off MUST be documented as a formal
+decision in the feature's `research.md`.
 
 ### II. TaxomeshService Is the Single Public Facade
 `TaxomeshService` is the only class end-users instantiate. It accepts a
@@ -90,18 +96,18 @@ catch at any granularity:
 ```
 TaxomeshError
 ├── TaxomeshNotFoundError
-│   ├── ItemNotFoundError
-│   ├── CategoryNotFoundError
-│   └── TagNotFoundError
+│   ├── TaxomeshItemNotFoundError
+│   ├── TaxomeshCategoryNotFoundError
+│   └── TaxomeshTagNotFoundError
 ├── TaxomeshValidationError
-│   └── CyclicDependencyError
+│   └── TaxomeshCyclicDependencyError
 └── TaxomeshRepositoryError
 ```
 
 ### VI. DAG Integrity — Cycle Detection Is a Domain Responsibility
 Category relationships form a Directed Acyclic Graph (DAG). Cycle detection
 runs in the domain layer (`domain/dag.py`) before any write is committed to the
-repository. `CyclicDependencyError` MUST be raised on detection. This logic
+repository. `TaxomeshCyclicDependencyError` MUST be raised on detection. This logic
 must never be delegated to a repository adapter.
 
 The category-parent relationship is stored as:
@@ -209,6 +215,34 @@ Runtime dependencies: `fastapi` (mandatory — pulls in `pydantic` v2 transitive
 `line-length = 119` MUST be set in `[tool.ruff]` in `pyproject.toml`. No exceptions —
 do not use 88 (black default) or any other value.
 
+### Docstrings
+
+All public Python **modules** and public **methods/functions** MUST include a docstring
+following [Google style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings).
+
+- **Module docstring**: one-line summary describing the module's purpose, at the top of every `.py` file.
+- **Function/method docstring**: one-line summary, then `Args:`, `Returns:`, and `Raises:` sections
+  as needed. Omit any section that has nothing to document.
+- **Private methods** (name starts with `_`) are exempt but encouraged for complex logic.
+
+```python
+"""Category CRUD operations service."""  # module docstring
+
+def create_category(self, name: str, description: str | None = None) -> Category:
+    """Create and persist a new category.
+
+    Args:
+        name: Human-readable category name; max 256 characters.
+        description: Optional extended description; max 100 000 characters.
+
+    Returns:
+        The newly created Category with a library-assigned category_id.
+
+    Raises:
+        pydantic.ValidationError: If name or description violates length constraints.
+    """
+```
+
 ---
 
 ## Public API Surface
@@ -241,7 +275,7 @@ Neither repository adapters nor API views are re-exported from `__init__.py`.
 | Junction / link models | `Link` suffix | `CategoryParentLink` |
 | Concrete repository adapters | Descriptive prefix | `SqliteRepository`, `JsonRepository` |
 | Application service | `Service` suffix | `TaxomeshService` |
-| Exceptions | Descriptive + `Error` | `CyclicDependencyError` |
+| Exceptions | `Taxomesh` prefix + Descriptive + `Error` | `TaxomeshCyclicDependencyError` |
 | API response models | Descriptive + `Response` | `ItemResponse`, `CategoryResponse` |
 | API view modules | `views.py` per adapter package | `adapters/api/views.py` |
 
@@ -272,4 +306,4 @@ between this document and any other guideline, this document wins.
 All amendments MUST be proposed as a PR with an updated constitution file and
 a brief rationale. The amendment takes effect on merge to `main`.
 
-**Version**: 1.1.1 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-22
+**Version**: 1.2.1 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-22
