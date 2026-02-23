@@ -78,6 +78,10 @@ the entire codebase. `Any` is forbidden unless explicitly justified and commente
 
 Use `X | None` union syntax (Python 3.10+ style). No implicit `Optional`.
 
+**String length rule**: Every `str` field that is a direct model field MUST declare an explicit
+`max_length` constraint via `Annotated[str, Field(max_length=N)]`. Unbounded strings are
+forbidden on direct model fields. Container values (e.g. `dict[str, Any]` metadata) are exempt.
+
 ### V. Custom Exception Hierarchy — No Silent Failures
 All library errors inherit from `TaxomeshError`. Silent failures (returning
 `None` for missing entities, swallowing exceptions) are forbidden. Callers can
