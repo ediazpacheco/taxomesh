@@ -1,6 +1,26 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 1.2.1 → 1.2.2
+Bump type: PATCH — pyyaml promoted from optional to required runtime dep (Toolchain section).
+
+Previous version: 1.2.1 (composition-root exception clause added to Principle I)
+
+Modified sections:
+  - Toolchain: pyyaml entry updated from "optional" to "mandatory"
+  - Version/date footer updated
+
+Template alignment:
+  ✅ All templates — no constitution-specific static content; aligned.
+  ⚠ README.md — pyyaml installation docs need updating (covered by FR-012 in 007-yaml-repository).
+
+Follow-up TODOs:
+  - README.md updated as part of 007-yaml-repository implementation.
+
+---
+
+SYNC IMPACT REPORT (previous)
+==============================
 Version change: 1.2.0 → 1.2.1
 Bump type: PATCH — composition-root exception clause added to Principle I.
 
@@ -200,7 +220,7 @@ primary delivery mechanism for the taxomesh REST surface and ships with every in
 | **uv** | Package and virtual environment manager | `uv.lock` |
 
 Runtime dependencies: `fastapi` (mandatory — pulls in `pydantic` v2 transitively).
-`pyyaml` is optional (`pip install taxomesh[yaml]`). SQLite3 is stdlib.
+`pyyaml` is mandatory (promoted to required runtime dependency in 007-yaml-repository). SQLite3 is stdlib.
 
 ---
 
@@ -306,4 +326,4 @@ between this document and any other guideline, this document wins.
 All amendments MUST be proposed as a PR with an updated constitution file and
 a brief rationale. The amendment takes effect on merge to `main`.
 
-**Version**: 1.2.1 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-22
+**Version**: 1.2.2 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-24

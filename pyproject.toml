@@ -20,12 +20,12 @@ classifiers = [
 ]
 dependencies = [
     "fastapi>=0.110",
+    "pyyaml>=6.0",
     "rich>=13.0",
     "typer>=0.12",
 ]
 
 [project.optional-dependencies]
-yaml = ["pyyaml>=6.0"]
 dev = [
     "fastapi>=0.110",
     "pytest>=8.0",
@@ -33,6 +33,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "pyyaml>=6.0",
+    "types-PyYAML>=6.0",
     "pre-commit>=3.0",
 ]
 
@@ -72,3 +73,8 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "types-pyyaml>=6.0",
+]

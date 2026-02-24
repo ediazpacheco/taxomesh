@@ -13,12 +13,13 @@ from pathlib import Path
 
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.json_repository import JsonRepository
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
 from taxomesh.exceptions import TaxomeshRepositoryError
 from taxomesh.ports.repository import TaxomeshRepositoryBase
 
 _CONFIG_FILENAME = "taxomesh.toml"
-_DEFAULT_REPO_TYPE = "json"
-_DEFAULT_REPO_PATH = "taxomesh.json"
+_DEFAULT_REPO_TYPE = "yaml"
+_DEFAULT_REPO_PATH = "taxomesh.yaml"
 
 
 @dataclass
@@ -72,16 +73,23 @@ def build(config_path: Path | None = None) -> BuildResult:
         section = config.get("repository", {})
         repo_type = section.get("type", _DEFAULT_REPO_TYPE)
         repo_path = section.get("path", _DEFAULT_REPO_PATH)
-    if repo_type != "json":
+    if repo_type == "yaml":
+        try:
+            repo: JsonRepository | YAMLRepository = YAMLRepository(Path(repo_path))
+        except TaxomeshRepositoryError as exc:
+            print(f"Error: could not open repository: {exc}", file=sys.stderr)
+            sys.exit(1)
+    elif repo_type == "json":
+        try:
+            repo = JsonRepository(Path(repo_path))
+        except TaxomeshRepositoryError as exc:
+            print(f"Error: could not open repository: {exc}", file=sys.stderr)
+            sys.exit(1)
+    else:
         print(
-            f"Error: unsupported repository type '{repo_type}'. Only 'json' is supported in this version.",
+            f"Error: unsupported repository type '{repo_type}'. Supported: 'yaml', 'json'.",
             file=sys.stderr,
         )
-        sys.exit(1)
-    try:
-        repo = JsonRepository(Path(repo_path))
-    except TaxomeshRepositoryError as exc:
-        print(f"Error: could not open repository: {exc}", file=sys.stderr)
         sys.exit(1)
     svc = TaxomeshService(repository=repo)
     return BuildResult(

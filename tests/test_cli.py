@@ -1,4 +1,4 @@
-"""Tests for CLI config loading and CLI commands (004-cli, 005-cli-verbose)."""
+"""Tests for CLI config loading and CLI commands (004-cli, 005-cli-verbose, 007-yaml-repository)."""
 
 import time
 from pathlib import Path
@@ -41,7 +41,7 @@ def test_build_defaults_when_no_config_file(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.chdir(tmp_path)
     result = build()
     assert isinstance(result.service, TaxomeshService)
-    assert (tmp_path / "taxomesh.json").exists()
+    assert (tmp_path / "taxomesh.yaml").exists()
 
 
 def test_build_reads_json_path_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -912,3 +912,65 @@ def test_graph_performance_sc005() -> None:
 
     assert result.exit_code == 0
     assert elapsed < 3.0, f"graph took {elapsed:.2f}s — exceeds SC-005 3-second budget"
+
+
+# ---------------------------------------------------------------------------
+# T005 (007-yaml-repository): CLI YAML default + backward compat tests
+# ---------------------------------------------------------------------------
+
+
+def test_cli_default_repo_is_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No taxomesh.toml → CLI routes to taxomesh.yaml (FR-002, FR-003, SC-001)."""
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["--verbose", "category", "list"])
+    assert result.exit_code == 0
+    assert "taxomesh.yaml" in result.output
+
+
+def test_cli_toml_type_yaml_uses_yaml_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """taxomesh.toml with type=yaml and custom path → that path is used (FR-005)."""
+    monkeypatch.chdir(tmp_path)
+    custom = tmp_path / "data.yaml"
+    (tmp_path / "taxomesh.toml").write_text(f'[repository]\ntype = "yaml"\npath = "{custom}"\n', encoding="utf-8")
+    result = runner.invoke(app, ["--verbose", "category", "list"])
+    assert result.exit_code == 0
+    assert "data.yaml" in result.output
+
+
+def test_cli_toml_type_json_backward_compat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """taxomesh.toml with type=json → legacy.json is used, no YAML created (FR-006, SC-005)."""
+    monkeypatch.chdir(tmp_path)
+    legacy = tmp_path / "legacy.json"
+    (tmp_path / "taxomesh.toml").write_text(f'[repository]\ntype = "json"\npath = "{legacy}"\n', encoding="utf-8")
+    result = runner.invoke(app, ["--verbose", "category", "list"])
+    assert result.exit_code == 0
+    assert "legacy.json" in result.output
+    assert legacy.exists()
+
+
+def test_cli_toml_type_unsupported_exits_nonzero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """taxomesh.toml with type=csv → exit code 1 and descriptive error (FR-005)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "taxomesh.toml").write_text('[repository]\ntype = "csv"\n', encoding="utf-8")
+    with pytest.raises(SystemExit) as exc_info:
+        build(config_path=tmp_path / "taxomesh.toml")
+    assert exc_info.value.code != 0
+
+
+def test_cli_leaves_json_untouched_when_yaml_is_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing taxomesh.json is not modified when CLI defaults to YAML (FR-013)."""
+    monkeypatch.chdir(tmp_path)
+    json_file = tmp_path / "taxomesh.json"
+    json_file.write_text(
+        '{"categories":{},"items":{},"tags":{},"item_tag_links":[],"category_parent_links":[],"item_parent_links":[]}',
+        encoding="utf-8",
+    )
+    original_content = json_file.read_text(encoding="utf-8")
+
+    result = runner.invoke(app, ["category", "list"])
+    assert result.exit_code == 0
+
+    # JSON file must be unchanged
+    assert json_file.read_text(encoding="utf-8") == original_content
+    # YAML file must have been created instead
+    assert (tmp_path / "taxomesh.yaml").exists()
