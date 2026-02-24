@@ -162,6 +162,13 @@ are always in English.
 
 ---
 
+## Python Style Principles
+
+Follow KISS, DRY, and YAGNI. Prefer flat over nested. 
+Keep functions small and single-purpose.
+
+---
+
 ## Current State
 
 <!-- Update this section manually at the start of each work session -->
@@ -191,13 +198,13 @@ Do NOT update README during implement — only after
 ---
 
 ## Active Technologies
-- Python 3.11 (`requires-python = ">=3.11"`) + pydantic v2 (transitive via `fastapi ≥ 0.110`); stdlib `json`, (003-service-repository)
-- `JsonRepository` — single JSON file, atomic writes via `os.replace()` (003-service-repository)
 
-| Spec | Runtime | Dev |
-|---|---|---|
-| 001-pytest-setup | Python ≥ 3.11, fastapi ≥ 0.110 | pytest, pytest-cov, ruff, mypy |
-| 002-domain-models | Python ≥ 3.11, pydantic v2 | — |
+**Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
+
+**Storage**: `JsonRepository` — single JSON file, atomic writes via `os.replace()`
+
+**Dev tools**: pytest, pytest-cov, ruff, mypy
 
 ## Recent Changes
-- 003-service-repository: Added Python 3.11 (`requires-python = ">=3.11"`) + pydantic v2 (transitive via `fastapi ≥ 0.110`); stdlib `json`,
+- 005-cli-verbose: Added Typer (CLI adapter), `BuildResult` dataclass, `get_config_summary()` protocol method
+- 003-service-repository: Added `JsonRepository`, atomic JSON writes, `TaxomeshService` facade

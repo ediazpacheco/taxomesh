@@ -1,4 +1,4 @@
-"""Tests for CLI config loading and CLI commands (004-cli)."""
+"""Tests for CLI config loading and CLI commands (004-cli, 005-cli-verbose)."""
 
 from pathlib import Path
 from unittest.mock import patch
@@ -8,7 +8,7 @@ import pytest
 import typer.testing
 
 from taxomesh import TaxomeshService
-from taxomesh.adapters.cli.config import build_service
+from taxomesh.adapters.cli.config import BuildResult, build
 from taxomesh.adapters.cli.main import app
 from tests.service.conftest import InMemoryRepository
 
@@ -16,51 +16,62 @@ runner = typer.testing.CliRunner()
 
 
 def _svc_with_repo(repo: InMemoryRepository) -> TaxomeshService:
-    """Return a TaxomeshService backed by the given repo."""
+    """Return a TaxomeshService backed by the given repo (used for test setup only)."""
     return TaxomeshService(repository=repo)
 
 
+def _build_result(repo: InMemoryRepository, *, config_file_exists: bool = False) -> BuildResult:
+    """Return a BuildResult backed by the given in-memory repo (for use in mocks)."""
+    svc = TaxomeshService(repository=repo)
+    return BuildResult(
+        service=svc,
+        repository=repo,
+        config_file_path=Path("/fake/taxomesh.toml"),
+        config_file_exists=config_file_exists,
+    )
+
+
 # ---------------------------------------------------------------------------
-# T-09: build_service / config loading
+# T-09 / T002: build() / config loading
 # ---------------------------------------------------------------------------
 
 
-def test_build_service_defaults_when_no_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_defaults_when_no_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
-    svc = build_service()
-    assert isinstance(svc, TaxomeshService)
+    result = build()
+    assert isinstance(result.service, TaxomeshService)
     assert (tmp_path / "taxomesh.json").exists()
 
 
-def test_build_service_reads_json_path_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_reads_json_path_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     custom = tmp_path / "custom.json"
     (tmp_path / "taxomesh.toml").write_text(f'[repository]\ntype = "json"\npath = "{custom}"\n', encoding="utf-8")
-    build_service()
+    build()
     assert custom.exists()
 
 
-def test_build_service_accepts_explicit_config_path(tmp_path: Path) -> None:
+def test_build_accepts_explicit_config_path(tmp_path: Path) -> None:
     custom_cfg = tmp_path / "other.toml"
     custom_db = tmp_path / "other.json"
     custom_cfg.write_text(f'[repository]\ntype = "json"\npath = "{custom_db}"\n', encoding="utf-8")
-    build_service(config_path=custom_cfg)
+    build(config_path=custom_cfg)
     assert custom_db.exists()
 
 
-def test_build_service_invalid_toml_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_invalid_toml_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "taxomesh.toml").write_text("this is NOT toml !!!", encoding="utf-8")
     with pytest.raises(SystemExit) as exc_info:
-        build_service()
+        build()
     assert exc_info.value.code != 0
 
 
-def test_build_service_unrecognised_repo_type_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_unrecognised_repo_type_exits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "taxomesh.toml").write_text('[repository]\ntype = "sqlite"\n', encoding="utf-8")
     with pytest.raises(SystemExit) as exc_info:
-        build_service()
+        build()
     assert exc_info.value.code != 0
 
 
@@ -71,14 +82,14 @@ def test_build_service_unrecognised_repo_type_exits(tmp_path: Path, monkeypatch:
 
 def test_category_list_empty() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "list"])
     assert result.exit_code == 0
 
 
 def test_category_add() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "add", "--name", "Music"])
     assert result.exit_code == 0
     assert "Music" in result.output
@@ -86,7 +97,7 @@ def test_category_add() -> None:
 
 def test_category_add_with_description() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "add", "--name", "X", "--description", "Y"])
     assert result.exit_code == 0
 
@@ -95,14 +106,14 @@ def test_category_add_with_parent() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     parent = svc.create_category(name="Parent")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "add", "--name", "Child", "--parent-id", str(parent.category_id)])
     assert result.exit_code == 0
 
 
 def test_category_add_parent_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "add", "--name", "X", "--parent-id", str(uuid4())])
     assert result.exit_code == 1
 
@@ -111,14 +122,14 @@ def test_category_delete() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category(name="Gone")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "delete", str(cat.category_id)])
     assert result.exit_code == 0
 
 
 def test_category_delete_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "delete", str(uuid4())])
     assert result.exit_code == 1
 
@@ -127,7 +138,7 @@ def test_category_update_name() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category(name="Old")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "update", str(cat.category_id), "--name", "New"])
     assert result.exit_code == 0
     assert "New" in result.output
@@ -137,7 +148,7 @@ def test_category_update_no_options() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category(name="X")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "update", str(cat.category_id)])
     assert result.exit_code != 0
 
@@ -147,7 +158,7 @@ def test_category_update_add_parent() -> None:
     svc = _svc_with_repo(repo)
     child = svc.create_category(name="Child")
     parent = svc.create_category(name="Parent")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(
             app, ["category", "update", str(child.category_id), "--parent-id", str(parent.category_id)]
         )
@@ -158,7 +169,7 @@ def test_category_cycle_detection() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category(name="Self")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "update", str(cat.category_id), "--parent-id", str(cat.category_id)])
     assert result.exit_code == 1
 
@@ -169,7 +180,7 @@ def test_category_list_with_parent_id() -> None:
     parent = svc.create_category(name="P")
     child = svc.create_category(name="Child")
     svc.add_category_parent(child.category_id, parent.category_id)
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "list", "--parent-id", str(parent.category_id)])
     assert result.exit_code == 0
     assert "Child" in result.output
@@ -177,7 +188,7 @@ def test_category_list_with_parent_id() -> None:
 
 def test_category_list_parent_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "list", "--parent-id", str(uuid4())])
     assert result.exit_code == 1
 
@@ -189,28 +200,28 @@ def test_category_list_parent_not_found() -> None:
 
 def test_item_list_empty() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "list"])
     assert result.exit_code == 0
 
 
 def test_item_add_int_external_id() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add", "--external-id", "42"])
     assert result.exit_code == 0
 
 
 def test_item_add_str_external_id() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add", "--external-id", "my-slug"])
     assert result.exit_code == 0
 
 
 def test_item_add_uuid_external_id() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add", "--external-id", str(uuid4())])
     assert result.exit_code == 0
 
@@ -219,7 +230,7 @@ def test_item_add_with_category() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category(name="C")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add", "--external-id", "1", "--category-id", str(cat.category_id)])
     assert result.exit_code == 0
 
@@ -228,14 +239,14 @@ def test_item_add_with_tag() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     tag = svc.create_tag(name="live")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add", "--external-id", "1", "--tag-id", str(tag.tag_id)])
     assert result.exit_code == 0
 
 
 def test_item_add_category_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add", "--external-id", "1", "--category-id", str(uuid4())])
     assert result.exit_code == 1
 
@@ -244,14 +255,14 @@ def test_item_delete() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     item = svc.create_item(external_id="x")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "delete", str(item.item_id)])
     assert result.exit_code == 0
 
 
 def test_item_delete_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "delete", str(uuid4())])
     assert result.exit_code == 1
 
@@ -260,7 +271,7 @@ def test_item_update_disable() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     item = svc.create_item(external_id="x")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id), "--disable"])
     assert result.exit_code == 0
 
@@ -269,7 +280,7 @@ def test_item_update_no_options() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     item = svc.create_item(external_id="x")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id)])
     assert result.exit_code != 0
 
@@ -279,7 +290,7 @@ def test_item_update_with_category_id() -> None:
     svc = _svc_with_repo(repo)
     item = svc.create_item(external_id="x")
     cat = svc.create_category(name="C")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id), "--category-id", str(cat.category_id)])
     assert result.exit_code == 0
 
@@ -289,7 +300,7 @@ def test_item_update_with_tag_id() -> None:
     svc = _svc_with_repo(repo)
     item = svc.create_item(external_id="x")
     tag = svc.create_tag(name="live")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id), "--tag-id", str(tag.tag_id)])
     assert result.exit_code == 0
 
@@ -298,7 +309,7 @@ def test_item_update_category_not_found() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     item = svc.create_item(external_id="x")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id), "--category-id", str(uuid4())])
     assert result.exit_code == 1
 
@@ -308,7 +319,7 @@ def test_item_add_to_category() -> None:
     svc = _svc_with_repo(repo)
     item = svc.create_item(external_id="x")
     cat = svc.create_category(name="C")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(
             app, ["item", "add-to-category", str(item.item_id), "--category-id", str(cat.category_id)]
         )
@@ -317,7 +328,7 @@ def test_item_add_to_category() -> None:
 
 def test_item_add_to_category_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add-to-category", str(uuid4()), "--category-id", str(uuid4())])
     assert result.exit_code == 1
 
@@ -327,14 +338,14 @@ def test_item_add_to_tag() -> None:
     svc = _svc_with_repo(repo)
     item = svc.create_item(external_id="x")
     tag = svc.create_tag(name="live")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add-to-tag", str(item.item_id), "--tag-id", str(tag.tag_id)])
     assert result.exit_code == 0
 
 
 def test_item_add_to_tag_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add-to-tag", str(uuid4()), "--tag-id", str(uuid4())])
     assert result.exit_code == 1
 
@@ -345,14 +356,14 @@ def test_item_list_with_category_id() -> None:
     cat = svc.create_category(name="C")
     item = svc.create_item(external_id="x")
     svc.place_item_in_category(item.item_id, cat.category_id)
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "list", "--category-id", str(cat.category_id)])
     assert result.exit_code == 0
 
 
 def test_item_list_category_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "list", "--category-id", str(uuid4())])
     assert result.exit_code == 1
 
@@ -364,14 +375,14 @@ def test_item_list_category_not_found() -> None:
 
 def test_tag_list_empty() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["tag", "list"])
     assert result.exit_code == 0
 
 
 def test_tag_add() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["tag", "add", "--name", "live"])
     assert result.exit_code == 0
     assert "live" in result.output
@@ -379,7 +390,7 @@ def test_tag_add() -> None:
 
 def test_tag_add_name_too_long() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["tag", "add", "--name", "x" * 26])
     assert result.exit_code == 1
 
@@ -388,14 +399,14 @@ def test_tag_delete() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     tag = svc.create_tag(name="gone")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["tag", "delete", str(tag.tag_id)])
     assert result.exit_code == 0
 
 
 def test_tag_delete_not_found() -> None:
     repo = InMemoryRepository()
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=_svc_with_repo(repo)):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["tag", "delete", str(uuid4())])
     assert result.exit_code == 1
 
@@ -404,7 +415,340 @@ def test_tag_update_name() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     tag = svc.create_tag(name="old")
-    with patch("taxomesh.adapters.cli.main.build_service", return_value=svc):
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["tag", "update", str(tag.tag_id), "--name", "new"])
     assert result.exit_code == 0
     assert "new" in result.output
+
+
+# ---------------------------------------------------------------------------
+# T007: --verbose flag tests — failing until T008/T009/T010 implement them
+# ---------------------------------------------------------------------------
+
+
+def _verbose_build_result(repo: InMemoryRepository, *, config_file_exists: bool = False) -> BuildResult:
+    """Build result with a predictable config_file_path for verbose output assertions."""
+    svc = TaxomeshService(repository=repo)
+    return BuildResult(
+        service=svc,
+        repository=repo,
+        config_file_path=Path("/test/taxomesh.toml"),
+        config_file_exists=config_file_exists,
+    )
+
+
+def test_verbose_flag_prints_block_before_output() -> None:
+    repo = InMemoryRepository()
+    br = _verbose_build_result(repo)
+    with patch("taxomesh.adapters.cli.main.build", return_value=br):
+        result = runner.invoke(app, ["--verbose", "category", "list"])
+    assert result.exit_code == 0
+    lines = result.output.splitlines()
+    repo_line = next((i for i, ln in enumerate(lines) if "Repository" in ln), None)
+    config_line = next((i for i, ln in enumerate(lines) if "Config" in ln and "file" not in ln.lower()), None)
+    file_line = next((i for i, ln in enumerate(lines) if "Config file" in ln), None)
+    assert repo_line is not None, "verbose block: Repository line missing"
+    assert config_line is not None, "verbose block: Config line missing"
+    assert file_line is not None, "verbose block: Config file line missing"
+    # verbose block must appear before any list content
+    assert repo_line < config_line < file_line
+
+
+def test_no_verbose_flag_suppresses_block() -> None:
+    repo = InMemoryRepository()
+    br = _verbose_build_result(repo)
+    with patch("taxomesh.adapters.cli.main.build", return_value=br):
+        result = runner.invoke(app, ["category", "list"])
+    assert result.exit_code == 0
+    assert "Repository  :" not in result.output
+
+
+def test_verbose_shows_config_file_not_found() -> None:
+    repo = InMemoryRepository()
+    br = _verbose_build_result(repo, config_file_exists=False)
+    with patch("taxomesh.adapters.cli.main.build", return_value=br):
+        result = runner.invoke(app, ["--verbose", "category", "list"])
+    assert result.exit_code == 0
+    assert "[not found]" in result.output
+
+
+def test_verbose_shows_config_file_path_found() -> None:
+    repo = InMemoryRepository()
+    br = _verbose_build_result(repo, config_file_exists=True)
+    with patch("taxomesh.adapters.cli.main.build", return_value=br):
+        result = runner.invoke(app, ["--verbose", "category", "list"])
+    assert result.exit_code == 0
+    assert "[not found]" not in result.output
+    assert "/test/taxomesh.toml" in result.output
+
+
+def test_verbose_block_appears_before_list_header() -> None:
+    repo = InMemoryRepository()
+    svc = TaxomeshService(repository=repo)
+    svc.create_category(name="Alpha")
+    br = BuildResult(
+        service=svc,
+        repository=repo,
+        config_file_path=Path("/test/taxomesh.toml"),
+        config_file_exists=False,
+    )
+    with patch("taxomesh.adapters.cli.main.build", return_value=br):
+        result = runner.invoke(app, ["--verbose", "category", "list"])
+    assert result.exit_code == 0
+    repo_pos = result.output.find("Repository  :")
+    header_pos = result.output.find("--- Categories ---")
+    assert repo_pos != -1
+    assert header_pos != -1
+    assert repo_pos < header_pos
+
+
+def test_verbose_block_appears_even_on_command_error() -> None:
+    repo = InMemoryRepository()
+    br = _verbose_build_result(repo)
+    with patch("taxomesh.adapters.cli.main.build", return_value=br):
+        result = runner.invoke(app, ["--verbose", "category", "list", "--parent-id", str(__import__("uuid").uuid4())])
+    # command fails (parent not found), but verbose block still printed
+    assert result.exit_code == 1
+    assert "Repository  :" in result.output
+
+
+# ---------------------------------------------------------------------------
+# T011: list command headers & footers — failing until T012 implements them
+# ---------------------------------------------------------------------------
+
+
+def test_category_list_has_header() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_category(name="Rock")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "list"])
+    assert result.exit_code == 0
+    assert "--- Categories ---" in result.output
+
+
+def test_category_list_has_footer_with_count() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_category(name="Rock")
+    svc.create_category(name="Jazz")
+    svc.create_category(name="Pop")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "list"])
+    assert result.exit_code == 0
+    assert "--- Total: 3 ---" in result.output
+
+
+def test_category_list_empty_footer_is_zero() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "list"])
+    assert result.exit_code == 0
+    assert "--- Total: 0 ---" in result.output
+
+
+def test_category_list_header_before_records() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_category(name="Rock")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "list"])
+    assert result.exit_code == 0
+    header_pos = result.output.find("--- Categories ---")
+    rock_pos = result.output.find("Rock")
+    assert header_pos != -1
+    assert rock_pos != -1
+    assert header_pos < rock_pos
+
+
+def test_category_list_footer_after_records() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_category(name="Rock")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "list"])
+    assert result.exit_code == 0
+    rock_pos = result.output.find("Rock")
+    footer_pos = result.output.find("--- Total: 1 ---")
+    assert rock_pos != -1
+    assert footer_pos != -1
+    assert rock_pos < footer_pos
+
+
+def test_category_list_filtered_footer_reflects_filter_count() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    parent = svc.create_category(name="Root")
+    child1 = svc.create_category(name="Child1")
+    child2 = svc.create_category(name="Child2")
+    svc.add_category_parent(child1.category_id, parent.category_id)
+    svc.add_category_parent(child2.category_id, parent.category_id)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "list", "--parent-id", str(parent.category_id)])
+    assert result.exit_code == 0
+    # 3 categories total, but only 2 are children of parent
+    assert "--- Total: 2 ---" in result.output
+    assert "--- Total: 3 ---" not in result.output
+
+
+def test_category_list_no_footer_on_error() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "list", "--parent-id", str(__import__("uuid").uuid4())])
+    assert result.exit_code == 1
+    assert "--- Total:" not in result.output
+
+
+def test_item_list_has_header() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_item(external_id="x")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["item", "list"])
+    assert result.exit_code == 0
+    assert "--- Items ---" in result.output
+
+
+def test_item_list_has_footer_with_count() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_item(external_id="x")
+    svc.create_item(external_id="y")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["item", "list"])
+    assert result.exit_code == 0
+    assert "--- Total: 2 ---" in result.output
+
+
+def test_item_list_empty_footer_is_zero() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["item", "list"])
+    assert result.exit_code == 0
+    assert "--- Total: 0 ---" in result.output
+
+
+def test_item_list_filtered_footer_reflects_filter_count() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.create_category(name="C")
+    item_in = svc.create_item(external_id="in")
+    svc.create_item(external_id="out")
+    svc.place_item_in_category(item_in.item_id, cat.category_id)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["item", "list", "--category-id", str(cat.category_id)])
+    assert result.exit_code == 0
+    # 2 items total, only 1 in category
+    assert "--- Total: 1 ---" in result.output
+    assert "--- Total: 2 ---" not in result.output
+
+
+def test_tag_list_has_header() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_tag(name="live")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["tag", "list"])
+    assert result.exit_code == 0
+    assert "--- Tags ---" in result.output
+
+
+def test_tag_list_has_footer_with_count() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_tag(name="live")
+    svc.create_tag(name="draft")
+    svc.create_tag(name="archived")
+    svc.create_tag(name="featured")
+    svc.create_tag(name="hidden")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["tag", "list"])
+    assert result.exit_code == 0
+    assert "--- Total: 5 ---" in result.output
+
+
+def test_tag_list_empty_footer_is_zero() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["tag", "list"])
+    assert result.exit_code == 0
+    assert "--- Total: 0 ---" in result.output
+
+
+# ---------------------------------------------------------------------------
+# T004: get_config_summary() — failing until T006 implements it
+# ---------------------------------------------------------------------------
+
+
+def test_json_repo_get_config_summary_contains_path(tmp_path: Path) -> None:
+    from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_path / "data.json")
+    summary = repo.get_config_summary()
+    assert isinstance(summary, str)
+    assert len(summary) > 0
+    assert "data.json" in summary
+
+
+def test_json_repo_get_config_summary_does_not_raise(tmp_path: Path) -> None:
+    from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_path / "any.json")
+    try:
+        repo.get_config_summary()
+    except Exception as exc:  # noqa: BLE001
+        pytest.fail(f"get_config_summary() raised unexpectedly: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# T001: build() / BuildResult — failing until T002 implements them
+# ---------------------------------------------------------------------------
+
+
+def test_build_returns_build_result_instance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxomesh.adapters.cli.config import BuildResult, build  # noqa: PLC0415
+
+    monkeypatch.chdir(tmp_path)
+    result = build(None)
+    assert isinstance(result, BuildResult)
+
+
+def test_build_result_service_is_taxomesh_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxomesh.adapters.cli.config import build  # noqa: PLC0415
+
+    monkeypatch.chdir(tmp_path)
+    result = build(None)
+    assert isinstance(result.service, TaxomeshService)
+
+
+def test_build_result_has_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxomesh.adapters.cli.config import build  # noqa: PLC0415
+
+    monkeypatch.chdir(tmp_path)
+    result = build(None)
+    assert result.repository is not None
+
+
+def test_build_result_config_file_path_is_absolute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxomesh.adapters.cli.config import build  # noqa: PLC0415
+
+    monkeypatch.chdir(tmp_path)
+    result = build(None)
+    assert result.config_file_path.is_absolute()
+
+
+def test_build_result_config_file_exists_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxomesh.adapters.cli.config import build  # noqa: PLC0415
+
+    monkeypatch.chdir(tmp_path)
+    result = build(None)
+    assert result.config_file_exists is False
+
+
+def test_build_result_config_file_exists_true(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from taxomesh.adapters.cli.config import build  # noqa: PLC0415
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "taxomesh.toml").write_text('[repository]\ntype = "json"\n', encoding="utf-8")
+    result = build(None)
+    assert result.config_file_exists is True
