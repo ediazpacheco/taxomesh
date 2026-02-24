@@ -326,6 +326,19 @@ class JsonRepository:
         """
         return list(self._item_parent_links)
 
+    # ------------------------------------------------------------------
+    # Configuration introspection
+    # ------------------------------------------------------------------
+
+    def get_config_summary(self) -> str:
+        """Return the as-configured path of the JSON storage file.
+
+        Returns:
+            String representation of the path supplied at construction time.
+            Never raises; never returns an empty string.
+        """
+        return str(self._path)
+
     def remove_tag(self, tag_id: UUID, item_id: UUID) -> bool:
         """Remove the association between a tag and an item.
 

@@ -128,6 +128,12 @@ class InMemoryRepository:
         """Return all item→category placement records."""
         return list(self._item_parent_links)
 
+    # --- Configuration introspection ---
+
+    def get_config_summary(self) -> str:
+        """Return a fixed description identifying this as an in-memory test repository."""
+        return "InMemoryRepository (test)"
+
 
 @pytest.fixture
 def service() -> TaxomeshService:

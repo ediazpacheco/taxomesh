@@ -203,3 +203,22 @@ class TaxomeshRepositoryBase(Protocol):
             List of all ItemParentLink records; empty list if none exist.
         """
         ...
+
+    # --- Configuration introspection ---
+
+    def get_config_summary(self) -> str:
+        """Return a human-readable string describing this repository's configuration.
+
+        Implementations MUST satisfy the following contract:
+
+        - The returned string MUST be non-empty.
+        - This method MUST NOT raise under any circumstances.
+        - The returned string MUST NOT contain passwords, credentials, or other
+          secrets; implementations are required to sanitize or omit sensitive values.
+
+        Returns:
+            A non-empty, human-readable description of the repository's
+            configuration (e.g. the storage file path, a sanitized connection
+            string, or a named data source identifier).
+        """
+        ...

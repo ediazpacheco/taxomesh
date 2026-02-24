@@ -45,3 +45,4 @@ Thumbs.db
 *.taxomesh.yaml
 *.taxomesh.db
 /.run/
+/taxomesh.json
