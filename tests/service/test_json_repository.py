@@ -93,9 +93,15 @@ def test_json_repository_persists_category_parent_links(tmp_json_path: Path) -> 
     repo2 = JsonRepository(tmp_json_path)
     svc2 = TaxomeshService(repository=repo2)
     loaded_links = repo2.list_category_parent_links()
-    assert len(loaded_links) == 1
-    assert loaded_links[0].category_id == link.category_id
-    assert loaded_links[0].parent_category_id == link.parent_category_id
+    # 3 links: A→root (auto), B→root (auto), A→B (explicit)
+    assert len(loaded_links) == 3
+    explicit = next(
+        lnk
+        for lnk in loaded_links
+        if lnk.category_id == link.category_id and lnk.parent_category_id == link.parent_category_id
+    )
+    assert explicit.category_id == link.category_id
+    assert explicit.parent_category_id == link.parent_category_id
     # Verify the service can also detect the existing cycle after reload
     with pytest.raises(TaxomeshCyclicDependencyError):
         svc2.add_category_parent(cat_b.category_id, cat_a.category_id)

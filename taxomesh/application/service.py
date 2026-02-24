@@ -5,18 +5,22 @@ It delegates all reads and writes to a pluggable repository backend and
 contains no storage logic itself.
 """
 
-from typing import Any
+from typing import Any, Final
 from uuid import UUID, uuid4
 
 from taxomesh.domain.dag import check_no_cycle
+from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
 from taxomesh.domain.types import ExternalId
 from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
     TaxomeshItemNotFoundError,
+    TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
 )
 from taxomesh.ports.repository import TaxomeshRepositoryBase
+
+ROOT_CATEGORY_NAME: Final[str] = "__root__"
 
 
 class TaxomeshService:
@@ -45,6 +49,20 @@ class TaxomeshService:
             self._repo: TaxomeshRepositoryBase = JsonRepository()
         else:
             self._repo = repository
+        self._root_id: UUID = self._ensure_root()
+
+    def _ensure_root(self) -> UUID:
+        """Guarantee the reserved root category exists and return its UUID.
+
+        Scans the repository for an existing root category. Creates one if absent.
+        Called once at the end of ``__init__``.
+        """
+        for cat in self._repo.list_categories():
+            if cat.name == ROOT_CATEGORY_NAME:
+                return cat.category_id
+        root = Category(category_id=uuid4(), name=ROOT_CATEGORY_NAME)
+        self._repo.save_category(root)
+        return root.category_id
 
     # ------------------------------------------------------------------
     # Category
@@ -66,6 +84,8 @@ class TaxomeshService:
         Returns:
             The newly created Category with a library-assigned UUID.
         """
+        if name == ROOT_CATEGORY_NAME:
+            raise TaxomeshRootCategoryError(f"Category name '{ROOT_CATEGORY_NAME}' is reserved")
         category = Category(
             category_id=uuid4(),
             name=name,
@@ -73,6 +93,9 @@ class TaxomeshService:
             metadata=metadata if metadata is not None else {},
         )
         self._repo.save_category(category)
+        self._repo.save_category_parent_link(
+            CategoryParentLink(category_id=category.category_id, parent_category_id=self._root_id, sort_index=0)
+        )
         return category
 
     def get_category(self, category_id: UUID) -> Category:
@@ -106,8 +129,9 @@ class TaxomeshService:
             TaxomeshCategoryNotFoundError: If parent_id is provided but not found.
         """
         if parent_id is None:
-            return self._repo.list_categories()
-        self.get_category(parent_id)
+            parent_id = self._root_id
+        else:
+            self.get_category(parent_id)
         links = sorted(
             [lnk for lnk in self._repo.list_category_parent_links() if lnk.parent_category_id == parent_id],
             key=lambda lnk: lnk.sort_index,
@@ -123,6 +147,8 @@ class TaxomeshService:
         Raises:
             TaxomeshCategoryNotFoundError: If no category with the given id exists.
         """
+        if category_id == self._root_id:
+            raise TaxomeshRootCategoryError("Cannot delete the root category")
         found = self._repo.delete_category(category_id)
         if not found:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
@@ -146,6 +172,8 @@ class TaxomeshService:
         Raises:
             TaxomeshCategoryNotFoundError: If no category with the given id exists.
         """
+        if category_id == self._root_id:
+            raise TaxomeshRootCategoryError("Cannot update the root category")
         category = self.get_category(category_id)
         if name is not None:
             category.name = name
@@ -362,6 +390,8 @@ class TaxomeshService:
             TaxomeshCategoryNotFoundError: If either category does not exist.
             TaxomeshCyclicDependencyError: If the relationship would create a cycle.
         """
+        if category_id == self._root_id:
+            raise TaxomeshRootCategoryError("Cannot add a parent to the root category")
         if self._repo.get_category(category_id) is None:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
         if self._repo.get_category(parent_id) is None:
@@ -374,6 +404,54 @@ class TaxomeshService:
         )
         self._repo.save_category_parent_link(link)
         return link
+
+    def get_graph(self) -> TaxomeshGraph:
+        """Build and return a full taxonomy snapshot.
+
+        Reads all categories (excluding the internal root), all category-parent
+        relationships, and all item placements from the configured repository.
+        Constructs a tree of CategoryNode instances rooted at the implicit
+        taxonomy root.
+
+        Returns:
+            A TaxomeshGraph snapshot. Returns a graph with an empty roots list
+            when no user-created categories exist.
+
+        Raises:
+            TaxomeshRepositoryError: If the underlying repository fails during read.
+        """
+        all_cats = {c.category_id: c for c in self._repo.list_categories() if c.category_id != self._root_id}
+        all_links = self._repo.list_category_parent_links()
+
+        explicit_links = [lnk for lnk in all_links if lnk.parent_category_id != self._root_id]
+        root_child_links = [lnk for lnk in all_links if lnk.parent_category_id == self._root_id]
+        root_sort = {lnk.category_id: lnk.sort_index for lnk in root_child_links}
+
+        explicitly_parented = {lnk.category_id for lnk in explicit_links}
+        top_level_ids = {cid for cid in root_sort if cid not in explicitly_parented}
+
+        children_by_parent: dict[UUID, list[tuple[int, UUID]]] = {}
+        for lnk in explicit_links:
+            children_by_parent.setdefault(lnk.parent_category_id, []).append((lnk.sort_index, lnk.category_id))
+        for bucket in children_by_parent.values():
+            bucket.sort(key=lambda t: t[0])
+
+        item_links = self._repo.list_item_parent_links()
+        items_map = {i.item_id: i for i in self._repo.list_items()}
+        items_pairs_by_cat: dict[UUID, list[tuple[int, Item]]] = {}
+        for ilnk in item_links:
+            items_pairs_by_cat.setdefault(ilnk.category_id, []).append((ilnk.sort_index, items_map[ilnk.item_id]))
+        sorted_items_by_cat: dict[UUID, list[Item]] = {
+            cid: [item for _, item in sorted(pairs, key=lambda t: t[0])] for cid, pairs in items_pairs_by_cat.items()
+        }
+
+        def _build_node(cat_id: UUID) -> CategoryNode:
+            items = sorted_items_by_cat.get(cat_id, [])
+            children = [_build_node(cid) for _, cid in children_by_parent.get(cat_id, [])]
+            return CategoryNode(category=all_cats[cat_id], items=items, children=children)
+
+        roots = [_build_node(cid) for cid in sorted(top_level_ids, key=lambda cid: root_sort[cid])]
+        return TaxomeshGraph(roots=roots)
 
     def place_item_in_category(
         self,

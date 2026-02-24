@@ -1,5 +1,6 @@
 """Tests for CLI config loading and CLI commands (004-cli, 005-cli-verbose)."""
 
+import time
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -752,3 +753,162 @@ def test_build_result_config_file_exists_true(tmp_path: Path, monkeypatch: pytes
     (tmp_path / "taxomesh.toml").write_text('[repository]\ntype = "json"\n', encoding="utf-8")
     result = build(None)
     assert result.config_file_exists is True
+
+
+# ---------------------------------------------------------------------------
+# T005 [US2]: graph CLI command tests — failing until T006 implements graph_cmd
+# ---------------------------------------------------------------------------
+
+
+def test_graph_empty_taxonomy_exits_zero() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+
+
+def test_graph_empty_taxonomy_shows_message() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert result.output.strip() != ""
+
+
+def test_graph_shows_category_name() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_category("Animals")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert "Animals" in result.output
+
+
+def test_graph_shows_item_external_id() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.create_category("Animals")
+    item = svc.create_item(external_id="lion")
+    svc.place_item_in_category(item.item_id, cat.category_id)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert "lion" in result.output
+
+
+def test_graph_shows_item_item_id() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.create_category("Animals")
+    item = svc.create_item(external_id="lion")
+    svc.place_item_in_category(item.item_id, cat.category_id)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert str(item.item_id) in result.output
+
+
+def test_graph_shows_item_enabled_true() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.create_category("Animals")
+    item = svc.create_item(external_id="lion")
+    svc.place_item_in_category(item.item_id, cat.category_id)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert "enabled=True" in result.output
+
+
+def test_graph_shows_item_enabled_false() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.create_category("Animals")
+    item = svc.create_item(external_id="lion")
+    svc.update_item(item.item_id, enabled=False)
+    svc.place_item_in_category(item.item_id, cat.category_id)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert "enabled=False" in result.output
+
+
+def test_graph_shows_tree_connectors() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    parent = svc.create_category("Animals")
+    child = svc.create_category("Mammals")
+    svc.add_category_parent(child.category_id, parent.category_id, sort_index=1)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert any(c in result.output for c in ["│", "├", "└", "──"])
+
+
+def test_graph_nested_category_appears_under_parent() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    parent = svc.create_category("Animals")
+    child = svc.create_category("Mammals")
+    svc.add_category_parent(child.category_id, parent.category_id, sort_index=1)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert "Mammals" in result.output
+
+
+def test_graph_no_tag_data_in_output() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.create_category("Animals")
+    item = svc.create_item(external_id="lion")
+    svc.place_item_in_category(item.item_id, cat.category_id)
+    tag = svc.create_tag(name="unique-tag-xyzzy")
+    svc.assign_tag(tag.tag_id, item.item_id)
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert "unique-tag-xyzzy" not in result.output
+
+
+def test_graph_category_description_not_in_output() -> None:
+    """FR-007b: category description MUST NOT appear in graph output; name only."""
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    svc.create_category("Animals", description="unique-description-xyzzy")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert "Animals" in result.output
+    assert "unique-description-xyzzy" not in result.output
+
+
+def test_graph_performance_sc005() -> None:
+    """SC-005: graph command completes within 3 s for ≤ 50 categories / 200 items."""
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+
+    # Build a taxonomy: 10 top-level categories, each with 4 children = 50 categories
+    top_cats = [svc.create_category(f"Top{i}") for i in range(10)]
+    all_cats = list(top_cats)
+    for parent in top_cats:
+        for j in range(4):
+            child = svc.create_category(f"Child{parent.category_id.int % 1000}_{j}")
+            svc.add_category_parent(child.category_id, parent.category_id, sort_index=j)
+            all_cats.append(child)
+
+    # Create 200 items, distribute across leaf categories
+    for k in range(200):
+        item = svc.create_item(external_id=f"item-{k}")
+        target_cat = all_cats[k % len(all_cats)]
+        svc.place_item_in_category(item.item_id, target_cat.category_id, sort_index=k)
+
+    br = _build_result(repo)
+    start = time.monotonic()
+    with patch("taxomesh.adapters.cli.main.build", return_value=br):
+        result = runner.invoke(app, ["graph"])
+    elapsed = time.monotonic() - start
+
+    assert result.exit_code == 0
+    assert elapsed < 3.0, f"graph took {elapsed:.2f}s — exceeds SC-005 3-second budget"
