@@ -12,8 +12,11 @@ from typing import Any
 from uuid import UUID
 
 import typer
+from rich.console import Console
+from rich.tree import Tree
 
 from taxomesh.adapters.cli.config import BuildResult, build
+from taxomesh.domain.graph import CategoryNode
 from taxomesh.domain.types import ExternalId
 from taxomesh.exceptions import TaxomeshError
 
@@ -404,6 +407,61 @@ def tag_update(
         _err(str(exc))
     except Exception as exc:
         _err(f"Unexpected error: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Graph command
+# ---------------------------------------------------------------------------
+
+
+def _add_graph_node(tree_node: Tree, category_node: CategoryNode) -> None:
+    """Recursively populate a Rich Tree node from a CategoryNode.
+
+    Adds a styled branch for the category (bold cyan name) and a leaf for
+    each item showing ``external_id``, ``item_id``, and ``enabled`` status.
+    Recurses into child categories.
+
+    Args:
+        tree_node: The Rich Tree node to attach category and item branches to.
+        category_node: The CategoryNode supplying category and item data.
+    """
+    branch = tree_node.add(f"[bold cyan]{category_node.category.name}[/bold cyan]")
+    for item in category_node.items:
+        enabled_style = "green" if item.enabled else "red"
+        label = (
+            f"[yellow]{item.external_id}[/yellow]"
+            f"  [dim]{item.item_id}[/dim]"
+            f"  [{enabled_style}]enabled={item.enabled}[/{enabled_style}]"
+        )
+        branch.add(label)
+    for child in category_node.children:
+        _add_graph_node(branch, child)
+
+
+@app.command("graph")
+def graph_cmd(ctx: typer.Context) -> None:
+    """Display the full taxonomy as a colour-coded tree.
+
+    Retrieves the complete taxonomy snapshot via the service and renders it
+    as a Rich tree in the terminal.  Categories are shown in bold cyan,
+    items in yellow with dim UUID and colour-coded enabled status.
+
+    Args:
+        ctx: Typer context carrying verbose flag and config path.
+    """
+    result = build(_config_path(ctx))
+    _print_verbose(result, _verbose(ctx))
+    try:
+        graph = result.service.get_graph()
+    except TaxomeshError as exc:
+        _err(str(exc))
+    if not graph.roots:
+        typer.echo("No categories were found. Add one with: taxomesh category add --name <name>")
+        return
+    tree = Tree("Taxonomy")
+    for root_node in graph.roots:
+        _add_graph_node(tree, root_node)
+    Console().print(tree)
 
 
 if __name__ == "__main__":

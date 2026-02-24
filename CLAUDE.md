@@ -198,6 +198,8 @@ Do NOT update README during implement — only after
 ---
 
 ## Active Technologies
+- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (via FastAPI), Typer ≥ 0.12, Rich ≥ 13.0 (new) (006-taxonomy-graph)
+- Pluggable via `TaxomeshRepositoryBase` (default: `JsonRepository`) (006-taxonomy-graph)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

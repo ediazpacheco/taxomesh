@@ -4,8 +4,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from taxomesh.application.service import TaxomeshService
-from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshCyclicDependencyError
+from taxomesh.application.service import ROOT_CATEGORY_NAME, TaxomeshService
+from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshCyclicDependencyError, TaxomeshRootCategoryError
 
 
 def test_create_category_returns_category_with_id(service: TaxomeshService) -> None:
@@ -148,3 +148,58 @@ def test_list_categories_filtered_by_parent(service: TaxomeshService) -> None:
 def test_list_categories_parent_not_found_raises(service: TaxomeshService) -> None:
     with pytest.raises(TaxomeshCategoryNotFoundError):
         service.list_categories(parent_id=uuid4())
+
+
+# ---------------------------------------------------------------------------
+# Root category (006-taxonomy-graph prerequisite)
+# ---------------------------------------------------------------------------
+
+
+def test_root_category_exists_after_init(service: TaxomeshService) -> None:
+    root = service.get_category(service._root_id)
+    assert root.name == ROOT_CATEGORY_NAME
+
+
+def test_list_categories_excludes_root(service: TaxomeshService) -> None:
+    categories = service.list_categories()
+    names = {c.name for c in categories}
+    assert ROOT_CATEGORY_NAME not in names
+
+
+def test_create_category_reserved_name_raises(service: TaxomeshService) -> None:
+    with pytest.raises(TaxomeshRootCategoryError):
+        service.create_category(name=ROOT_CATEGORY_NAME)
+
+
+def test_delete_root_category_raises(service: TaxomeshService) -> None:
+    with pytest.raises(TaxomeshRootCategoryError):
+        service.delete_category(service._root_id)
+
+
+def test_update_root_category_raises(service: TaxomeshService) -> None:
+    with pytest.raises(TaxomeshRootCategoryError):
+        service.update_category(service._root_id, name="x")
+
+
+def test_add_category_parent_root_as_child_raises(service: TaxomeshService) -> None:
+    cat = service.create_category(name="SomeCat")
+    with pytest.raises(TaxomeshRootCategoryError):
+        service.add_category_parent(service._root_id, cat.category_id)
+
+
+def test_create_category_auto_links_to_root(service: TaxomeshService) -> None:
+    cat = service.create_category(name="Animals")
+    links = service._repo.list_category_parent_links()
+    root_link = next(
+        (lnk for lnk in links if lnk.category_id == cat.category_id and lnk.parent_category_id == service._root_id),
+        None,
+    )
+    assert root_link is not None
+    assert root_link.sort_index == 0
+
+
+def test_list_categories_returns_direct_children_of_root(service: TaxomeshService) -> None:
+    cat = service.create_category(name="Animals")
+    result = service.list_categories()
+    assert len(result) == 1
+    assert result[0].category_id == cat.category_id

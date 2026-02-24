@@ -37,3 +37,7 @@ class TaxomeshCyclicDependencyError(TaxomeshValidationError):
 
 class TaxomeshRepositoryError(TaxomeshError):
     """Raised when a storage I/O or parse failure occurs in a repository adapter."""
+
+
+class TaxomeshRootCategoryError(TaxomeshError):
+    """Raised when a mutating operation is attempted on the reserved root category."""
