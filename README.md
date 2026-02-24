@@ -1,6 +1,7 @@
 # taxomesh
 
-> Flexible taxonomy management for generic items — categories, tags, and multi-parent hierarchies with pluggable storage.
+> Flexible taxonomy management for generic items — multi-parent DAG hierarchies,
+> per-parent sort indexes, free-form tags, and pluggable storage.
 
 [![CI](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml/badge.svg)](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/taxomesh.svg)](https://pypi.org/project/taxomesh/)
@@ -12,44 +13,46 @@
 
 ## What is taxomesh?
 
-**taxomesh** is a Python library for organizing arbitrary items into flexible taxonomies. An "item" is any entity identified by a UUID, integer, or string — a product, a document, a user, a media file — anything. taxomesh doesn't care what your items *are*; it just manages how they are **categorized and tagged**.
+Most taxonomy libraries force your categories into a single tree. Real-world content doesn't fit a tree — a song can belong to both *Jazz* and *Argentina*, a product to both *Electronics* and *Sale Items*, a document to both *Legal* and *HR*. **taxomesh** models categories as a full **directed acyclic graph (DAG)**, so the same item or category can live in multiple places simultaneously — with an independent ordering in each context.
 
-### Key concepts
+taxomesh is **storage-agnostic by design**. It defines a clean structural interface (`TaxomeshRepositoryBase`) that any backend can satisfy without inheriting from anything — just implement the methods and plug it in. Switch from a JSON file to SQLite to a remote database without touching a single line of your application code.
+
+Under the hood, every write to the category graph is protected by **cycle detection at the domain layer** — a separate concern from storage, impossible to bypass, and tested independently from any backend.
+
+---
+
+## Key concepts
 
 | Concept | Description |
 |---|---|
-| **Item** | A generic reference (UUID / int / str) to any external entity |
-| **Category** | A named node in a taxonomy graph |
-| **Tag** | A free-form label attached to an item |
-| **Multi-parent hierarchy** | A category can belong to *multiple* parent categories simultaneously |
-| **Sort index** | A category's position within each parent is independent — "Tango" can be rank 1 under "Argentina" and rank 5 under "World Music Genres" |
-| **Repository** | A pluggable backend that stores all of the above |
-
-### Multi-parent categories with per-parent sort index
-
-Unlike traditional single-parent trees, taxomesh models categories as a **directed acyclic graph (DAG)**. The relationship between a category and each of its parents carries an independent `sort_index`, stored in a dedicated junction record:
-
-```
-(category_id, parent_category_id, sort_index)
-```
-
-This lets the same category appear at different positions depending on which parent context is being browsed. Cyclic dependencies are detected and rejected at write time.
+| **Item** | A generic reference to any external entity. The `external_id` can be a UUID, integer, or string — taxomesh does not care what your items *are*. |
+| **Category** | A named node in the taxonomy DAG. Can have zero or many parents. |
+| **Tag** | A free-form label (max 25 chars) attached to an item. |
+| **Per-parent sort index** | Each category–parent and item–category relationship carries its own `sort_index`. *Tango* can be rank 1 under *Argentina* and rank 5 under *World Music Genres* — independently. |
+| **Multi-parent hierarchy** | A category or item appears in every parent it is linked to. No deduplication. |
+| **Taxonomy graph** | A read-only snapshot of the full taxonomy — all categories with their items and children, ready for display or processing. |
+| **Repository** | A pluggable backend that stores everything. The default is an atomic JSON file; bring your own for anything else. |
 
 ---
 
 ## Features
 
-- [x] Generic item references (UUID, int, or str)
-- [x] Categories organized as a DAG (directed acyclic graph)
-- [x] Per-parent sort index for categories
-- [x] Cycle detection in category hierarchies
+- [x] Generic item references — UUID, int, or string external ID
+- [x] Category hierarchies as a full DAG (not just a tree)
+- [x] Per-parent sort index — independent ordering in each parent context
+- [x] Multi-parent categories and items — appear under every parent they belong to
+- [x] Cycle detection in category relationships, enforced at the domain layer
 - [x] Free-form tags on items with idempotent assign/remove
-- [x] Pluggable repository interface (`TaxomeshRepositoryBase`) — no inheritance required
-- [x] Built-in JSON repository backend with atomic writes
-- [x] Typed exception hierarchy for precise error handling
+- [x] `get_graph()` — full taxonomy snapshot as a traversable `TaxomeshGraph` object
+- [x] Pluggable repository backend via `typing.Protocol` — no inheritance required
+- [x] Built-in JSON backend with atomic writes (no data corruption on crash)
+- [x] First-class CLI — `taxomesh category`, `item`, `tag`, `graph`
+- [x] `--verbose` flag for diagnostics (repository type, config path)
+- [x] Fully typed — passes `mypy --strict` with zero suppressions
+- [x] 220+ tests, ≥ 80% coverage enforced in CI
 - [ ] YAML file backend *(planned)*
 - [ ] SQLite3 backend *(planned)*
-- [ ] Query/search capabilities *(planned)*
+- [ ] Query / filter capabilities *(planned)*
 
 ---
 
@@ -59,70 +62,33 @@ This lets the same category appear at different positions depending on which par
 pip install taxomesh
 ```
 
-Requires Python 3.11 or later. No extra dependencies needed for the default JSON backend.
+Requires **Python 3.11+**. The default JSON backend has no extra dependencies.
 
 ---
 
-## CLI
+## Python API
 
-taxomesh ships with a command-line interface. After installation, the `taxomesh` command is available:
-
-```toml
-# taxomesh.toml (optional — place in project root)
-[repository]
-type = "json"
-path = "data/taxonomy.json"
-```
-
-```sh
-# Create a category
-taxomesh category add --name "Music"
-
-# Register an item (integer, string slug, or UUID external ID)
-taxomesh item add --external-id 42
-taxomesh item add --external-id "my-article-slug"
-
-# Create a tag and assign it to an item
-taxomesh tag add --name "live"
-taxomesh item add-to-tag <item-uuid> --tag-id <tag-uuid>
-
-# Show help for any command
-taxomesh --help
-taxomesh category --help
-taxomesh item add --help
-```
-
-Override the config file path per-invocation:
-
-```sh
-taxomesh --config /etc/taxomesh.toml category list
-```
-
-The full Python API is documented below.
-
----
-
-## Quick start
-
-### Default storage (JSON file in current directory)
+### Getting started
 
 ```python
 from taxomesh import TaxomeshService
 
-service = TaxomeshService()  # persists to taxomesh.json
+service = TaxomeshService()          # persists to taxomesh.json in the current directory
 ```
 
-### Custom storage path
+Custom storage path:
 
 ```python
 from pathlib import Path
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.json_repository import JsonRepository
 
-service = TaxomeshService(repository=JsonRepository(Path("/data/my_taxonomy.json")))
+service = TaxomeshService(repository=JsonRepository(Path("data/taxonomy.json")))
 ```
 
-### Managing categories
+---
+
+### Categories
 
 ```python
 from taxomesh import TaxomeshService, TaxomeshCategoryNotFoundError
@@ -130,46 +96,67 @@ from taxomesh import TaxomeshService, TaxomeshCategoryNotFoundError
 service = TaxomeshService()
 
 # Create
-music = service.create_category(name="Music")
-jazz  = service.create_category(name="Jazz", description="Improvisational genre.")
+music   = service.create_category(name="Music")
+jazz    = service.create_category(name="Jazz",    description="Improvisational genre.")
+bossanova = service.create_category(name="Bossa Nova")
+
 print(music.category_id)   # UUID assigned by the library
 
 # Retrieve
 same = service.get_category(music.category_id)
 assert same.name == "Music"
 
-# List
-all_cats = service.list_categories()
+# List all top-level categories
+all_top = service.list_categories()
+
+# Update
+service.update_category(jazz.category_id, description="Improvisational, rooted in blues.")
 
 # Delete
-service.delete_category(jazz.category_id)
+service.delete_category(bossanova.category_id)
 
-# Missing entity raises a typed error — never returns None
+# Missing entity → typed error, never None
 try:
-    service.get_category(jazz.category_id)
-except TaxomeshCategoryNotFoundError as e:
-    print(e)
+    service.get_category(bossanova.category_id)
+except TaxomeshCategoryNotFoundError:
+    print("not found — as expected")
 ```
 
-### Category parent relationships (DAG)
+---
+
+### Category hierarchies (DAG)
+
+Categories form a **directed acyclic graph**. A category can belong to multiple parents, each with its own independent `sort_index`.
 
 ```python
-animals  = service.create_category(name="Animals")
-mammals  = service.create_category(name="Mammals")
-dogs     = service.create_category(name="Dogs")
+service = TaxomeshService()
 
-service.add_category_parent(mammals.category_id, animals.category_id)
-service.add_category_parent(dogs.category_id,    mammals.category_id)
+world_music = service.create_category(name="World Music")
+argentina   = service.create_category(name="Argentina")
+tango       = service.create_category(name="Tango")
 
-# Cycle detection — raises TaxomeshCyclicDependencyError
+# Tango belongs to both World Music and Argentina
+# sort_index is independent per parent: rank 1 under Argentina, rank 3 under World Music
+service.add_category_parent(tango.category_id, argentina.category_id,   sort_index=1)
+service.add_category_parent(tango.category_id, world_music.category_id, sort_index=3)
+
+# Children of Argentina are returned sorted by sort_index
+children = service.list_categories(parent_id=argentina.category_id)
+# → [Tango]  (rank 1)
+
+# Cycle detection — raises TaxomeshCyclicDependencyError, enforced at the domain layer
 from taxomesh import TaxomeshCyclicDependencyError
 try:
-    service.add_category_parent(animals.category_id, dogs.category_id)
+    service.add_category_parent(argentina.category_id, tango.category_id)
 except TaxomeshCyclicDependencyError:
     print("cycle rejected")
 ```
 
-### Managing items
+---
+
+### Items
+
+Items carry a library-assigned internal UUID (`item_id`) and a user-supplied `external_id` that can be a UUID, integer, or string slug.
 
 ```python
 from uuid import uuid4
@@ -177,37 +164,122 @@ from taxomesh import TaxomeshService
 
 service = TaxomeshService()
 
-# External ID can be UUID, int, or string slug
 song    = service.create_item(external_id=42)
 article = service.create_item(external_id="how-to-brew-coffee")
 product = service.create_item(external_id=uuid4())
 
-print(song.item_id)      # library-assigned internal UUID
+print(song.item_id)      # internal UUID (assigned by the library)
 print(song.external_id)  # 42
 
-# Retrieve by internal UUID
+# Enable / disable
+service.update_item(song.item_id, enabled=False)
+
+# Retrieve
 same = service.get_item(song.item_id)
+
+# List all items
 all_items = service.list_items()
-service.delete_item(song.item_id)
 ```
 
-### Managing tags
+---
+
+### Placing items in categories (with sort order)
+
+Items can be placed in any category. `sort_index` controls the order within that category — independently from any other category the item belongs to.
+
+```python
+service = TaxomeshService()
+
+jazz  = service.create_category(name="Jazz")
+blues = service.create_category(name="Blues")
+
+a_love_supreme = service.create_item(external_id="a-love-supreme")
+kind_of_blue   = service.create_item(external_id="kind-of-blue")
+blue_train     = service.create_item(external_id="blue-train")
+
+# Under Jazz: Kind of Blue first, A Love Supreme second
+service.place_item_in_category(kind_of_blue.item_id,   jazz.category_id, sort_index=1)
+service.place_item_in_category(a_love_supreme.item_id, jazz.category_id, sort_index=2)
+
+# Under Blues: Blue Train is the opener
+service.place_item_in_category(blue_train.item_id,     blues.category_id, sort_index=1)
+service.place_item_in_category(a_love_supreme.item_id, blues.category_id, sort_index=2)
+
+# Retrieve in order — each category applies its own sort_index
+jazz_items  = service.list_items(category_id=jazz.category_id)
+blues_items = service.list_items(category_id=blues.category_id)
+
+print([i.external_id for i in jazz_items])
+# → ['kind-of-blue', 'a-love-supreme']
+
+print([i.external_id for i in blues_items])
+# → ['blue-train', 'a-love-supreme']
+```
+
+---
+
+### Tags
+
+```python
+service = TaxomeshService()
+
+live      = service.create_tag(name="live")
+remastered = service.create_tag(name="remastered")
+song      = service.create_item(external_id=99)
+
+# Assign — idempotent, calling it twice has no effect
+service.assign_tag(tag_id=live.tag_id, item_id=song.item_id)
+service.assign_tag(tag_id=live.tag_id, item_id=song.item_id)  # no-op
+
+# Remove — no-op if the association is already gone
+service.remove_tag(tag_id=live.tag_id, item_id=song.item_id)
+```
+
+---
+
+### Taxonomy graph snapshot
+
+`get_graph()` returns a complete read-only snapshot of the taxonomy as a tree of `CategoryNode` objects, each carrying its items (ordered by `sort_index`) and children (also ordered by `sort_index`). The internal root category is excluded automatically.
 
 ```python
 from taxomesh import TaxomeshService
+from taxomesh.domain.graph import TaxomeshGraph, CategoryNode
 
 service = TaxomeshService()
 
-live_tag = service.create_tag(name="live")
-song     = service.create_item(external_id=99)
+world_music = service.create_category(name="World Music")
+argentina   = service.create_category(name="Argentina")
+tango       = service.create_category(name="Tango")
+service.add_category_parent(tango.category_id, argentina.category_id, sort_index=1)
 
-# Assign — idempotent, safe to call multiple times
-service.assign_tag(tag_id=live_tag.tag_id, item_id=song.item_id)
-service.assign_tag(tag_id=live_tag.tag_id, item_id=song.item_id)  # no-op
+piazzolla = service.create_item(external_id="piazzolla-libertango")
+coltrane  = service.create_item(external_id="coltrane-a-love-supreme")
+service.place_item_in_category(piazzolla.item_id, tango.category_id, sort_index=1)
+service.place_item_in_category(coltrane.item_id,  world_music.category_id, sort_index=1)
 
-# Remove — no-op if association already absent
-service.remove_tag(tag_id=live_tag.tag_id, item_id=song.item_id)
+graph: TaxomeshGraph = service.get_graph()
+
+# Walk the top-level categories
+for root_node in graph.roots:
+    print(root_node.category.name)
+    for item in root_node.items:
+        print(f"  item: {item.external_id}  (enabled={item.enabled})")
+    for child in root_node.children:
+        print(f"  └─ {child.category.name}")
+        for item in child.items:
+            print(f"       item: {item.external_id}")
+
+# Output:
+# World Music
+#   item: coltrane-a-love-supreme  (enabled=True)
+# Argentina
+#   └─ Tango
+#        item: piazzolla-libertango
 ```
+
+A category with multiple explicit parents appears as a separate `CategoryNode` under each parent — the graph faithfully represents the full DAG structure.
+
+---
 
 ### Persistence across restarts
 
@@ -218,104 +290,253 @@ from taxomesh.adapters.repositories.json_repository import JsonRepository
 
 DB = Path("my_taxonomy.json")
 
-# First run — write data
+# Session 1 — write
 s1 = TaxomeshService(repository=JsonRepository(DB))
 cat = s1.create_category(name="Electronic")
 
-# Later run — data survives process restart
+# Session 2 — data survives
 s2 = TaxomeshService(repository=JsonRepository(DB))
-same = s2.get_category(cat.category_id)
-assert same.name == "Electronic"
+assert s2.get_category(cat.category_id).name == "Electronic"
+```
+
+---
+
+## CLI
+
+taxomesh ships with a full command-line interface. After installation, the `taxomesh` command is available.
+
+### Configuration (optional)
+
+```toml
+# taxomesh.toml — place in your project root
+[repository]
+type = "json"
+path = "data/taxonomy.json"
+```
+
+Override per-invocation with `--config`:
+
+```sh
+taxomesh --config /etc/taxomesh.toml category list
+```
+
+---
+
+### Categories
+
+```sh
+# Add categories
+taxomesh category add --name "Music"
+taxomesh category add --name "Jazz" --description "Improvisational genre"
+
+# Add a child category under a parent (use the UUID shown after add)
+taxomesh category add --name "Bebop" --parent-id <jazz-uuid>
+
+# List top-level categories
+taxomesh category list
+
+# List children of a specific category
+taxomesh category list --parent-id <jazz-uuid>
+
+# Rename
+taxomesh category update <category-uuid> --name "Jazz & Blues"
+
+# Delete
+taxomesh category delete <category-uuid>
+```
+
+---
+
+### Items
+
+```sh
+# Add items — external ID can be an integer, a string slug, or a UUID
+taxomesh item add --external-id 42
+taxomesh item add --external-id "kind-of-blue"
+taxomesh item add --external-id "550e8400-e29b-41d4-a716-446655440000"
+
+# Add an item and place it in a category immediately
+taxomesh item add --external-id "my-article" --category-id <category-uuid>
+
+# Place an existing item in a category
+taxomesh item add-to-category <item-uuid> --category-id <category-uuid>
+
+# List all items
+taxomesh item list
+
+# List items in a specific category (ordered by sort_index)
+taxomesh item list --category-id <category-uuid>
+
+# Disable an item
+taxomesh item update <item-uuid> --disable
+
+# Delete
+taxomesh item delete <item-uuid>
+```
+
+---
+
+### Tags
+
+```sh
+# Create a tag
+taxomesh tag add --name "live"
+
+# Assign to an item
+taxomesh item add-to-tag <item-uuid> --tag-id <tag-uuid>
+
+# List all tags
+taxomesh tag list
+
+# Rename
+taxomesh tag update <tag-uuid> --name "live-recording"
+
+# Delete
+taxomesh tag delete <tag-uuid>
+```
+
+---
+
+### Taxonomy graph
+
+```sh
+# Render the full taxonomy as a colour-coded tree
+taxomesh graph
+```
+
+```
+Taxonomy
+├── Music
+│   ├── Jazz
+│   │   ├── kind-of-blue  3f2a1c…  enabled=True
+│   │   └── a-love-supreme  7b9d4e…  enabled=True
+│   └── Blues
+│       └── blue-train  1a2b3c…  enabled=True
+└── Argentina
+    └── Tango
+        └── piazzolla-libertango  9e8f7a…  enabled=False
+```
+
+Each item leaf shows its `external_id`, internal `item_id` (abbreviated), and enabled status — colour-coded green/red. Categories are bold cyan.
+
+---
+
+### Verbose output
+
+Any command accepts `--verbose` to print the active repository backend and config file path before the command output:
+
+```sh
+taxomesh --verbose category list
+# Repository  : JsonRepository
+# Config      : data/taxonomy.json
+# Config file : /home/user/project/taxomesh.toml
+# --- Categories ---
+# ...
 ```
 
 ---
 
 ## Architecture overview
 
+taxomesh follows a **hexagonal architecture** (ports and adapters). Dependency direction always points inward: adapters → application → domain.
+
 ```
-┌─────────────────────────────────────────────────────┐
-│  Public import surface  (taxomesh)                  │
-│  TaxomeshService · exception classes                │
-└───────────────────┬─────────────────────────────────┘
-                    │ delegates all I/O
-┌───────────────────▼─────────────────────────────────┐
-│  Ports  (taxomesh.ports.repository)                 │
-│  TaxomeshRepositoryBase  ← typing.Protocol          │
-└───────────────────┬─────────────────────────────────┘
-                    │ satisfied by
-┌───────────────────▼─────────────────────────────────┐
-│  Adapters  (taxomesh.adapters.repositories)         │
-│  JsonRepository  (default, atomic writes)           │
-│  … future: YamlRepository, SqliteRepository …      │
-└─────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│  taxomesh (public surface)                         │
+│  TaxomeshService  ·  exception hierarchy           │
+│  CategoryNode  ·  TaxomeshGraph  (graph snapshot)  │
+└────────────────────┬───────────────────────────────┘
+                     │ delegates all I/O
+┌────────────────────▼───────────────────────────────┐
+│  Ports  (taxomesh.ports.repository)                │
+│  TaxomeshRepositoryBase  ← typing.Protocol         │
+└────────────────────┬───────────────────────────────┘
+                     │ satisfied structurally by
+┌────────────────────▼───────────────────────────────┐
+│  Adapters  (taxomesh.adapters)                     │
+│  JsonRepository  (default, atomic writes)          │
+│  … future: YamlRepository, SqliteRepository …     │
+│                                                    │
+│  CLI  (taxomesh.adapters.cli)                      │
+│  category · item · tag · graph                     │
+└────────────────────────────────────────────────────┘
 ```
 
-`TaxomeshService` is the **sole public entry point**. It holds no storage logic and delegates every read and write to the repository backend. Any object that structurally satisfies `TaxomeshRepositoryBase` can be used — no inheritance required.
+`TaxomeshService` is the **sole public entry point**. It holds no storage logic whatsoever — every read and write is delegated to the injected repository.
 
-### Repository interface
+The domain layer (`taxomesh/domain/`) has zero dependencies on storage, frameworks, or I/O. Cycle detection in the category graph runs here, in pure Python, before any write reaches the repository.
 
-`TaxomeshRepositoryBase` is a `typing.Protocol` with 18 methods:
+---
+
+### Plugging in a custom backend
+
+`TaxomeshRepositoryBase` is a `typing.Protocol` — no inheritance required. Implement its methods and pass the instance at construction time:
+
+```python
+class MyDatabaseBackend:
+    def save_category(self, category): ...
+    def get_category(self, category_id): ...
+    # ... implement all 18 protocol methods ...
+
+service = TaxomeshService(repository=MyDatabaseBackend())
+# Everything — categories, items, tags, graph — works identically.
+```
+
+The full protocol is importable for type annotations:
+
+```python
+from taxomesh.ports.repository import TaxomeshRepositoryBase
+```
+
+---
+
+### Repository protocol — method reference
 
 | Group | Methods |
 |---|---|
 | Category CRUD | `save_category`, `get_category`, `list_categories`, `delete_category` |
 | Item CRUD | `save_item`, `get_item`, `list_items`, `delete_item` |
 | Tag CRUD | `save_tag`, `get_tag`, `list_tags`, `delete_tag` |
-| Tag ↔ Item association | `assign_tag`, `remove_tag` |
+| Tag ↔ Item | `assign_tag`, `remove_tag` |
 | Category parent links | `save_category_parent_link`, `list_category_parent_links` |
 | Item → Category placement | `save_item_parent_link`, `list_item_parent_links` |
-
-Import path for advanced use (e.g., type annotations on a custom backend):
-
-```python
-from taxomesh.ports.repository import TaxomeshRepositoryBase
-```
-
-### Plugging in a custom backend
-
-No inheritance from `TaxomeshRepositoryBase` is required. Implement all 18 methods and pass the instance at construction time:
-
-```python
-from taxomesh import TaxomeshService
-
-service = TaxomeshService(repository=MyCustomBackend())
-```
+| Diagnostics | `get_config_summary` |
 
 ---
 
 ## Domain models
 
-taxomesh defines its domain model classes in `taxomesh/domain/models.py`:
-
 | Class | Description |
 |---|---|
-| **`Item`** | A generic reference to any external entity, identified by an auto-generated UUID (`item_id`) and a user-supplied `external_id` (UUID, str, or int) |
-| **`Category`** | A named node in the taxonomy DAG, with an optional description and metadata |
-| **`Tag`** | A short free-form label (max 25 chars) that can be attached to items |
-| **`CategoryParentLink`** | Junction record linking a category to one of its parent categories, with an independent `sort_index` |
-| **`ItemParentLink`** | Junction record placing an item under a category, with a sort index |
-| **`ItemTagLink`** | Junction record associating a tag with an item |
+| `Item` | External entity reference. `item_id` (internal UUID) + `external_id` (UUID / int / str) + `enabled` flag. |
+| `Category` | Named DAG node. `category_id`, `name`, optional `description`, free-form `metadata`. |
+| `Tag` | Short label (max 25 chars). `tag_id`, `name`, free-form `metadata`. |
+| `CategoryParentLink` | Junction linking a category to one parent, with an independent `sort_index`. |
+| `ItemParentLink` | Junction placing an item under a category, with a `sort_index`. |
+| `ItemTagLink` | Junction associating a tag with an item. |
+| `CategoryNode` | Read-model aggregate: one category + its ordered items + its ordered children. Produced by `get_graph()`. |
+| `TaxomeshGraph` | Top-level graph snapshot: list of root `CategoryNode` objects. Produced by `get_graph()`. |
 
-All models are `pydantic.BaseModel` subclasses with `populate_by_name=True` and `validate_assignment=True`. Every direct `str` field carries an explicit `max_length` constraint.
+All domain entities are `pydantic.BaseModel` subclasses with `validate_assignment=True`. Every `str` field carries an explicit `max_length` constraint.
 
 ---
 
 ## Error handling
 
-All errors raised by taxomesh inherit from `TaxomeshError`:
+All errors raised by taxomesh inherit from `TaxomeshError`. The service never returns `None` for a missing entity — every not-found condition raises a typed, catchable error.
 
 ```
-TaxomeshError                          ← catch-all for any taxomesh error
-├── TaxomeshNotFoundError              ← any entity not found
+TaxomeshError                          ← catch any taxomesh error
+├── TaxomeshNotFoundError              ← entity does not exist
 │   ├── TaxomeshCategoryNotFoundError
 │   ├── TaxomeshItemNotFoundError
 │   └── TaxomeshTagNotFoundError
-├── TaxomeshValidationError            ← domain constraint violation
-│   └── TaxomeshCyclicDependencyError  ← DAG cycle in add_category_parent
-└── TaxomeshRepositoryError            ← storage I/O / parse failure
+├── TaxomeshValidationError            ← domain constraint violated
+│   └── TaxomeshCyclicDependencyError  ← DAG cycle detected in add_category_parent
+└── TaxomeshRepositoryError            ← storage I/O or parse failure
 ```
 
-All names are importable from the top-level `taxomesh` package:
+All names are importable from the top-level package:
 
 ```python
 from taxomesh import (
@@ -331,28 +552,28 @@ from taxomesh import (
 )
 ```
 
-The service never returns `None` for a missing entity. Every not-found condition raises a specific, catchable typed error.
-
 ---
 
 ## Roadmap
 
-- **v0.1** — Core models, service facade, `TaxomeshRepositoryBase`, JSON backend, DAG cycle detection *(in progress)*
-- **v0.2** — YAML and SQLite3 backends, bulk operations, filtering and querying
-- **v0.3** — Async repository interface, additional backends (PostgreSQL, MongoDB)
-- **v1.0** — Stable API, full test coverage, documentation site
+| Version | Scope |
+|---|---|
+| **v0.1** *(in progress)* | Core models, service facade, JSON backend, DAG cycle detection, CLI, taxonomy graph |
+| **v0.2** | YAML and SQLite3 backends, bulk operations, filtering and querying |
+| **v0.3** | Async repository interface, additional backends (PostgreSQL, MongoDB) |
+| **v1.0** | Stable public API, documentation site, migration tooling |
 
 ---
 
 ## Spec-driven development
 
-This project is built using **spec-driven development**. Every feature begins as a written specification before any code is touched. See [`specs/`](specs/) for published specifications.
+Every feature in taxomesh begins as a written specification before any code is written. See [`specs/`](specs/) for published design documents, data models, and interface contracts.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please open an issue to discuss any change before submitting a pull request. This project follows a spec-first workflow — implementation PRs without a corresponding spec will not be merged.
+Contributions are welcome. Please open an issue before submitting a pull request. This project follows a spec-first workflow — implementation PRs without a corresponding spec in `specs/` will not be merged.
 
 ---
 
