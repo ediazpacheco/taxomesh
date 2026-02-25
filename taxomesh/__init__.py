@@ -7,6 +7,7 @@ per-parent sort indexes, free-form tags, and pluggable storage backends.
 from taxomesh.application.service import TaxomeshService
 from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
+    TaxomeshConfigError,
     TaxomeshCyclicDependencyError,
     TaxomeshError,
     TaxomeshItemNotFoundError,
@@ -28,4 +29,5 @@ __all__ = [
     "TaxomeshValidationError",
     "TaxomeshCyclicDependencyError",
     "TaxomeshRepositoryError",
+    "TaxomeshConfigError",
 ]

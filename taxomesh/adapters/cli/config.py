@@ -1,24 +1,20 @@
 """CLI configuration loading for taxomesh.
 
-Reads taxomesh.toml from the current working directory (or a supplied override
-path), constructs the appropriate repository adapter, and returns a BuildResult
-containing the configured TaxomeshService and associated metadata for use by
-CLI commands.
+Resolves the taxomesh.toml config file path, delegates all repository
+construction to TaxomeshService, and returns a BuildResult containing the
+configured TaxomeshService and associated metadata for use by CLI commands.
 """
 
 import sys
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from taxomesh import TaxomeshService
-from taxomesh.adapters.repositories.json_repository import JsonRepository
-from taxomesh.exceptions import TaxomeshRepositoryError
+from taxomesh.exceptions import TaxomeshConfigError, TaxomeshRepositoryError
 from taxomesh.ports.repository import TaxomeshRepositoryBase
 
-_CONFIG_FILENAME = "taxomesh.toml"
-_DEFAULT_REPO_TYPE = "json"
-_DEFAULT_REPO_PATH = "taxomesh.json"
+_CONFIG_FILENAME: Final[str] = "taxomesh.toml"
 
 
 @dataclass
@@ -44,11 +40,11 @@ class BuildResult:
 
 
 def build(config_path: Path | None = None) -> BuildResult:
-    """Read taxomesh.toml and return a fully-configured BuildResult.
+    """Resolve taxomesh.toml and return a fully-configured BuildResult.
 
-    Resolves the config file path, reads repository settings from it if present,
-    constructs the repository adapter and service, and returns all artefacts
-    bundled in a BuildResult for use by CLI sub-commands.
+    Resolves the config file path and delegates repository construction to
+    TaxomeshService. On configuration or repository errors, prints a message
+    to stderr and exits with code 1.
 
     Args:
         config_path: Explicit path to taxomesh.toml. If None, resolves
@@ -61,32 +57,14 @@ def build(config_path: Path | None = None) -> BuildResult:
     """
     resolved = (config_path if config_path is not None else Path.cwd() / _CONFIG_FILENAME).resolve()
     config_file_exists = resolved.exists()
-    repo_type = _DEFAULT_REPO_TYPE
-    repo_path = _DEFAULT_REPO_PATH
-    if config_file_exists:
-        try:
-            config = tomllib.loads(resolved.read_text(encoding="utf-8"))
-        except tomllib.TOMLDecodeError as exc:
-            print(f"Error: could not parse config file {resolved}: {exc}", file=sys.stderr)
-            sys.exit(1)
-        section = config.get("repository", {})
-        repo_type = section.get("type", _DEFAULT_REPO_TYPE)
-        repo_path = section.get("path", _DEFAULT_REPO_PATH)
-    if repo_type != "json":
-        print(
-            f"Error: unsupported repository type '{repo_type}'. Only 'json' is supported in this version.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
     try:
-        repo = JsonRepository(Path(repo_path))
-    except TaxomeshRepositoryError as exc:
-        print(f"Error: could not open repository: {exc}", file=sys.stderr)
+        svc = TaxomeshService(config_path=resolved)
+    except (TaxomeshConfigError, TaxomeshRepositoryError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
-    svc = TaxomeshService(repository=repo)
     return BuildResult(
         service=svc,
-        repository=repo,
+        repository=svc.repository,
         config_file_path=resolved,
         config_file_exists=config_file_exists,
     )

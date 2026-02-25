@@ -1,0 +1,45 @@
+# taxomesh.toml.example
+#
+# Reference configuration template for taxomesh.
+#
+# The CLI works out of the box with no configuration file — all settings below
+# have built-in defaults. This file documents every supported setting so you
+# know exactly what can be customised.
+#
+# To use:
+#   1. Copy this file to your project root:  cp taxomesh.toml.example taxomesh.toml
+#   2. Uncomment and edit the settings you want to override.
+#   3. Run any taxomesh CLI command — the CLI will pick up taxomesh.toml automatically.
+#
+# You can also point the CLI at a different config file per-invocation:
+#   taxomesh --config /path/to/taxomesh.toml category list
+
+# ---------------------------------------------------------------------------
+# [repository] — storage backend settings
+# ---------------------------------------------------------------------------
+
+# YAML backend (default — human-readable, diff-friendly, version-control friendly)
+[repository]
+
+# type: the storage backend format taxomesh uses to persist your taxonomy.
+#   Accepted values : "yaml" (default), "json"
+#   Default         : "yaml"
+type = "yaml"
+
+# path: path to the storage file where taxomesh reads and writes your taxonomy.
+#       Relative paths are resolved from the directory where you run the CLI
+#       (usually your project root).
+#   Default: "data/taxomesh.yaml"
+path = "data/taxomesh.yaml"
+
+
+# ---------------------------------------------------------------------------
+# JSON backend (alternative option)
+#
+# To switch to the JSON backend, comment out the [repository] block above and
+# uncomment the block below.
+# ---------------------------------------------------------------------------
+
+# [repository]
+# type = "json"
+# path = "data/taxomesh.json"

@@ -64,12 +64,12 @@ def test_json_repository_directory_path_raises(tmp_path: Path) -> None:
         JsonRepository(tmp_path)
 
 
-def test_service_default_repository_uses_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """TaxomeshService() without arguments defaults to JsonRepository at taxomesh.json in CWD."""
+def test_service_default_repository_uses_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TaxomeshService() without arguments defaults to YAMLRepository at data/taxomesh.yaml in CWD."""
     monkeypatch.chdir(tmp_path)
     svc = TaxomeshService()
     cat = svc.create_category(name="Default")
-    assert (tmp_path / "taxomesh.json").exists()
+    assert (tmp_path / "data" / "taxomesh.yaml").exists()
     assert svc.get_category(cat.category_id).name == "Default"
 
 

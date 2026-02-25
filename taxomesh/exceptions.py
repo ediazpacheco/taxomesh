@@ -39,5 +39,9 @@ class TaxomeshRepositoryError(TaxomeshError):
     """Raised when a storage I/O or parse failure occurs in a repository adapter."""
 
 
+class TaxomeshConfigError(TaxomeshError):
+    """Raised when a taxomesh.toml configuration file is invalid or specifies an unsupported option."""
+
+
 class TaxomeshRootCategoryError(TaxomeshError):
     """Raised when a mutating operation is attempted on the reserved root category."""

@@ -1,33 +1,37 @@
-"""File-backed JSON repository for taxomesh.
+"""File-backed YAML repository for taxomesh.
 
-Reads the full data set from a single JSON file at initialisation and writes
+Reads the full data set from a single YAML file at initialisation and writes
 the full current state back after every mutating operation. Writes are atomic:
 a sibling temporary file is flushed with ``os.fsync`` and then renamed into
 place with ``os.replace`` so the target file is never in a partial state.
 """
 
-import json
 import os
 import tempfile
 from pathlib import Path
 from typing import Any, Final
 from uuid import UUID
 
+import yaml
+
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemTagLink, Tag
 from taxomesh.exceptions import TaxomeshRepositoryError
 
-DEFAULT_JSON_PATH: Final[Path] = Path("data/taxomesh.json")
+DEFAULT_YAML_PATH: Final[Path] = Path("data/taxomesh.yaml")
 
 
-class JsonRepository:
-    """Repository that persists taxomesh data to a JSON file on disk.
+class YAMLRepository:
+    """Repository that persists taxomesh data to a YAML file on disk.
 
-    All four entity collections (categories, items, tags, tag-item links)
-    are stored as a single JSON document. The file is read once at
+    All entity collections (categories, items, tags, and all link types)
+    are stored as a single YAML document. The file is read once at
     construction and written atomically after every mutation.
 
+    Uses ``yaml.safe_load`` / ``yaml.safe_dump`` exclusively to prevent
+    arbitrary object deserialisation from untrusted files.
+
     Args:
-        path: Path to the JSON storage file. Defaults to ``data/taxomesh.json`` in
+        path: Path to the YAML storage file. Defaults to ``data/taxomesh.yaml`` in
             the current working directory. Missing parent directories are
             created automatically.
 
@@ -36,11 +40,11 @@ class JsonRepository:
             exists but cannot be parsed as valid storage content.
     """
 
-    def __init__(self, path: Path | str = DEFAULT_JSON_PATH) -> None:
+    def __init__(self, path: Path | str = DEFAULT_YAML_PATH) -> None:
         """Initialise the repository from an existing file or create a new one.
 
         Args:
-            path: Path to the JSON storage file. Defaults to ``data/taxomesh.json``
+            path: Path to the YAML storage file. Defaults to ``data/taxomesh.yaml``
                 in the current working directory.
 
         Raises:
@@ -69,15 +73,18 @@ class JsonRepository:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
-        """Load state from the JSON file into in-memory collections.
+        """Load state from the YAML file into in-memory collections.
 
         Raises:
             TaxomeshRepositoryError: If the file cannot be read or parsed.
         """
         try:
-            raw: Any = json.loads(self._path.read_text(encoding="utf-8"))
+            raw: Any = yaml.safe_load(self._path.read_text(encoding="utf-8"))
+            if raw is None:
+                # Empty file — treat as empty taxonomy
+                return
             if not isinstance(raw, dict):
-                raise ValueError("expected a JSON object at the top level")
+                raise ValueError("expected a YAML mapping at the top level")
             data: dict[str, Any] = raw
             self._categories = {UUID(k): Category.model_validate(v) for k, v in data.get("categories", {}).items()}
             self._items = {UUID(k): Item.model_validate(v) for k, v in data.get("items", {}).items()}
@@ -95,7 +102,7 @@ class JsonRepository:
     def _flush(self) -> None:
         """Atomically write the current in-memory state to disk.
 
-        Serialises all collections to JSON, writes to a sibling temp file,
+        Serialises all collections to YAML, writes to a sibling temp file,
         calls ``os.fsync`` to flush OS buffers, then replaces the target file
         via ``os.replace`` (POSIX atomic rename).
         """
@@ -107,7 +114,7 @@ class JsonRepository:
             "category_parent_links": [lnk.model_dump(mode="json") for lnk in self._category_parent_links],
             "item_parent_links": [lnk.model_dump(mode="json") for lnk in self._item_parent_links],
         }
-        payload = json.dumps(data, indent=2, ensure_ascii=False)
+        payload = yaml.safe_dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
         dir_ = self._path.parent
         fd, tmp_path_str = tempfile.mkstemp(dir=dir_, suffix=".tmp")
         tmp_path = Path(tmp_path_str)
@@ -278,6 +285,23 @@ class JsonRepository:
             self._links.append(ItemTagLink(tag_id=tag_id, item_id=item_id))
             self._flush()
 
+    def remove_tag(self, tag_id: UUID, item_id: UUID) -> bool:
+        """Remove the association between a tag and an item.
+
+        Args:
+            tag_id: The library-assigned UUID of the tag.
+            item_id: The library-assigned UUID of the item.
+
+        Returns:
+            True if the association was found and removed; False if it did not exist.
+        """
+        before = len(self._links)
+        self._links = [lnk for lnk in self._links if not (lnk.tag_id == tag_id and lnk.item_id == item_id)]
+        if len(self._links) < before:
+            self._flush()
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # Category parent links
     # ------------------------------------------------------------------
@@ -333,27 +357,10 @@ class JsonRepository:
     # ------------------------------------------------------------------
 
     def get_config_summary(self) -> str:
-        """Return the as-configured path of the JSON storage file.
+        """Return the as-configured path of the YAML storage file.
 
         Returns:
             String representation of the path supplied at construction time.
             Never raises; never returns an empty string.
         """
         return str(self._path)
-
-    def remove_tag(self, tag_id: UUID, item_id: UUID) -> bool:
-        """Remove the association between a tag and an item.
-
-        Args:
-            tag_id: The library-assigned UUID of the tag.
-            item_id: The library-assigned UUID of the item.
-
-        Returns:
-            True if the association was found and removed; False if it did not exist.
-        """
-        before = len(self._links)
-        self._links = [lnk for lnk in self._links if not (lnk.tag_id == tag_id and lnk.item_id == item_id)]
-        if len(self._links) < before:
-            self._flush()
-            return True
-        return False

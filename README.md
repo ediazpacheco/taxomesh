@@ -23,15 +23,15 @@ Under the hood, every write to the category graph is protected by **cycle detect
 
 ## Key concepts
 
-| Concept | Description |
-|---|---|
-| **Item** | A generic reference to any external entity. The `external_id` can be a UUID, integer, or string — taxomesh does not care what your items *are*. |
-| **Category** | A named node in the taxonomy DAG. Can have zero or many parents. |
-| **Tag** | A free-form label (max 25 chars) attached to an item. |
-| **Per-parent sort index** | Each category–parent and item–category relationship carries its own `sort_index`. *Tango* can be rank 1 under *Argentina* and rank 5 under *World Music Genres* — independently. |
-| **Multi-parent hierarchy** | A category or item appears in every parent it is linked to. No deduplication. |
-| **Taxonomy graph** | A read-only snapshot of the full taxonomy — all categories with their items and children, ready for display or processing. |
-| **Repository** | A pluggable backend that stores everything. The default is an atomic JSON file; bring your own for anything else. |
+| Concept | Description                                                                                                                                                                                            |
+|---|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Item** | A generic reference to any external entity. The `external_id` can be a UUID, integer, or string — taxomesh does not care what your items *are*.                                                        |
+| **Category** | A named node in the taxonomy DAG. Can have zero or many parents.                                                                                                                                       |
+| **Tag** | A free-form label (max 25 chars) attached to an item.                                                                                                                                                  |
+| **Per-parent sort index** | Each category–parent and item–category relationship carries its own `sort_index`. *Tango* can be rank 1 under *Argentina* and rank 5 under *World Music Genres* — independently.                       |
+| **Multi-parent hierarchy** | A category or item appears in every parent it is linked to. No deduplication.                                                                                                                          |
+| **Taxonomy graph** | A read-only snapshot of the full taxonomy — all categories with their items and children, ready for display or processing.                                                                             |
+| **Repository** | A pluggable backend that stores everything. The CLI defaults to an atomic YAML file; `JsonRepository` is also available. Bring your own for anything else. |
 
 ---
 
@@ -45,12 +45,13 @@ Under the hood, every write to the category graph is protected by **cycle detect
 - [x] Free-form tags on items with idempotent assign/remove
 - [x] `get_graph()` — full taxonomy snapshot as a traversable `TaxomeshGraph` object
 - [x] Pluggable repository backend via `typing.Protocol` — no inheritance required
-- [x] Built-in JSON backend with atomic writes (no data corruption on crash)
+- [x] Built-in YAML backend with atomic writes — CLI default (`taxomesh.yaml`)
+- [x] Built-in JSON backend with atomic writes
 - [x] First-class CLI — `taxomesh category`, `item`, `tag`, `graph`
 - [x] `--verbose` flag for diagnostics (repository type, config path)
 - [x] Fully typed — passes `mypy --strict` with zero suppressions
 - [x] 220+ tests, ≥ 80% coverage enforced in CI
-- [ ] YAML file backend *(planned)*
+- [x] Example taxonomy in `examples/taxomesh_example.yaml`
 - [ ] SQLite3 backend *(planned)*
 - [ ] Query / filter capabilities *(planned)*
 
@@ -62,7 +63,7 @@ Under the hood, every write to the category graph is protected by **cycle detect
 pip install taxomesh
 ```
 
-Requires **Python 3.11+**. The default JSON backend has no extra dependencies.
+Requires **Python 3.11+**. The YAML backend (CLI default) uses `pyyaml`, which is included as a required dependency — no extras needed.
 
 ---
 
@@ -73,7 +74,7 @@ Requires **Python 3.11+**. The default JSON backend has no extra dependencies.
 ```python
 from taxomesh import TaxomeshService
 
-service = TaxomeshService()          # persists to taxomesh.json in the current directory
+service = TaxomeshService()          # auto-discovers taxomesh.toml; falls back to data/taxomesh.yaml
 ```
 
 Custom storage path:
@@ -301,24 +302,90 @@ assert s2.get_category(cat.category_id).name == "Electronic"
 
 ---
 
-## CLI
+### YAML backend
 
-taxomesh ships with a full command-line interface. After installation, the `taxomesh` command is available.
+```python
+from pathlib import Path
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
 
-### Configuration (optional)
+service = TaxomeshService(repository=YAMLRepository(Path("my_taxonomy.yaml")))
+```
+
+A ready-to-use example taxonomy is included in the repository:
+
+```python
+from pathlib import Path
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+
+repo = YAMLRepository(Path("examples/taxomesh_example.yaml"))
+svc = TaxomeshService(repository=repo)
+graph = svc.get_graph()
+print([n.category.name for n in graph.roots])
+# ['Animals', 'Plants', 'Vehicles', 'Music', 'Literature']
+```
+
+---
+
+## Configuration
+
+`taxomesh.toml` is optional — all settings have built-in defaults and the library works out of the box with no configuration file.
+
+### Python API
+
+`TaxomeshService` auto-reads `taxomesh.toml` from the current working directory when one is present. Pass an explicit path to override:
+
+```python
+from taxomesh import TaxomeshService
+
+# No config file → falls back to YAMLRepository (data/taxomesh.yaml)
+svc = TaxomeshService()
+
+# Auto-discovers taxomesh.toml in the current working directory if present
+svc = TaxomeshService()
+
+# Explicit config file
+svc = TaxomeshService(config_path="path/to/taxomesh.toml")
+
+# Bypass config entirely — supply your own repository
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+svc = TaxomeshService(repository=YAMLRepository(Path("data/taxonomy.yaml")))
+```
+
+### Config file format
 
 ```toml
 # taxomesh.toml — place in your project root
+
+# YAML backend (default)
+[repository]
+type = "yaml"
+path = "data/taxonomy.yaml"
+```
+
+```toml
+# JSON backend (alternative option)
 [repository]
 type = "json"
 path = "data/taxonomy.json"
 ```
 
-Override per-invocation with `--config`:
+For the full, authoritative setting reference — accepted values, defaults, and both backend examples — see [`taxomesh.toml.example`](./taxomesh.toml.example) at the repository root.
+
+---
+
+## CLI
+
+taxomesh ships with a full command-line interface. After installation, the `taxomesh` command is available.
+
+The CLI reads `taxomesh.toml` from the current working directory automatically. Override per-invocation with `--config`:
 
 ```sh
-taxomesh --config /etc/taxomesh.toml category list
+taxomesh --config /path/to/taxomesh.toml category list
 ```
+
+See [Configuration](#configuration) above for the full file format and all supported options.
 
 ---
 
@@ -427,9 +494,9 @@ Any command accepts `--verbose` to print the active repository backend and confi
 
 ```sh
 taxomesh --verbose category list
-# Repository  : JsonRepository
-# Config      : data/taxonomy.json
-# Config file : /home/user/project/taxomesh.toml
+# Repository  : YAMLRepository
+# Config      : taxomesh.yaml
+# Config file : /home/user/project/taxomesh.toml (not found — using defaults)
 # --- Categories ---
 # ...
 ```
@@ -454,8 +521,9 @@ taxomesh follows a **hexagonal architecture** (ports and adapters). Dependency d
                      │ satisfied structurally by
 ┌────────────────────▼───────────────────────────────┐
 │  Adapters  (taxomesh.adapters)                     │
-│  JsonRepository  (default, atomic writes)          │
-│  … future: YamlRepository, SqliteRepository …     │
+│  YAMLRepository  (atomic writes)                   │
+│  JsonRepository  (alternative option)              │
+│  … future: SqliteRepository …                     │
 │                                                    │
 │  CLI  (taxomesh.adapters.cli)                      │
 │  category · item · tag · graph                     │
@@ -558,8 +626,8 @@ from taxomesh import (
 
 | Version | Scope |
 |---|---|
-| **v0.1** *(in progress)* | Core models, service facade, JSON backend, DAG cycle detection, CLI, taxonomy graph |
-| **v0.2** | YAML and SQLite3 backends, bulk operations, filtering and querying |
+| **v0.1** *(in progress)* | Core models, service facade, JSON + YAML backends, DAG cycle detection, CLI, taxonomy graph |
+| **v0.2** | SQLite3 backend, bulk operations, filtering and querying |
 | **v0.3** | Async repository interface, additional backends (PostgreSQL, MongoDB) |
 | **v1.0** | Stable public API, documentation site, migration tooling |
 
