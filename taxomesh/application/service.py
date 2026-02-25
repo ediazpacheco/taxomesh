@@ -5,6 +5,8 @@ It delegates all reads and writes to a pluggable repository backend and
 contains no storage logic itself.
 """
 
+import tomllib
+from pathlib import Path
 from typing import Any, Final
 from uuid import UUID, uuid4
 
@@ -14,6 +16,7 @@ from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParen
 from taxomesh.domain.types import ExternalId
 from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
+    TaxomeshConfigError,
     TaxomeshItemNotFoundError,
     TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
@@ -21,6 +24,7 @@ from taxomesh.exceptions import (
 from taxomesh.ports.repository import TaxomeshRepositoryBase
 
 ROOT_CATEGORY_NAME: Final[str] = "__root__"
+_DEFAULT_CONFIG_FILENAME: Final[str] = "taxomesh.toml"
 
 
 class TaxomeshService:
@@ -28,28 +32,90 @@ class TaxomeshService:
 
     Accepts any object that structurally satisfies TaxomeshRepositoryBase at
     construction time. No inheritance from TaxomeshRepositoryBase is required.
-    When no repository is provided, defaults to JsonRepository with a sensible
-    default file path.
+
+    When no repository is provided the service resolves a storage backend from
+    configuration: it reads ``taxomesh.toml`` at ``config_path`` (if given) or
+    auto-discovers it from the current working directory. If no config file is
+    found it falls back to ``YAMLRepository`` with its built-in default path.
 
     Args:
-        repository: Storage backend. When None, defaults to
-            JsonRepository(Path("taxomesh.json")).
+        repository: Explicit storage backend. When provided, ``config_path`` is
+            ignored entirely.
+        config_path: Path to a ``taxomesh.toml`` file. When ``None`` the service
+            looks for ``taxomesh.toml`` in the current working directory.
+            Ignored when ``repository`` is provided.
     """
 
-    def __init__(self, repository: TaxomeshRepositoryBase | None = None) -> None:
+    def __init__(
+        self,
+        repository: TaxomeshRepositoryBase | None = None,
+        *,
+        config_path: Path | str | None = None,
+    ) -> None:
         """Initialise the service with a storage backend.
 
         Args:
-            repository: Storage backend. When None, defaults to
-                JsonRepository(Path("taxomesh.json")).
+            repository: Explicit storage backend. When provided, ``config_path``
+                is ignored entirely.
+            config_path: Path to a ``taxomesh.toml`` file. When ``None`` the
+                service looks for ``taxomesh.toml`` in the current working
+                directory. Ignored when ``repository`` is provided.
+
+        Raises:
+            TaxomeshConfigError: If the config file exists but cannot be parsed
+                or specifies an unsupported repository type.
+            TaxomeshRepositoryError: If the repository adapter fails to initialise.
         """
         if repository is None:
-            from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+            resolved = Path(config_path) if config_path is not None else Path.cwd() / _DEFAULT_CONFIG_FILENAME
+            if resolved.exists():
+                try:
+                    raw = tomllib.loads(resolved.read_text(encoding="utf-8"))
+                except tomllib.TOMLDecodeError as exc:
+                    raise TaxomeshConfigError(f"Could not parse config file {resolved}: {exc}") from exc
+                except OSError as exc:
+                    raise TaxomeshConfigError(f"Could not read config file {resolved}: {exc}") from exc
+                self._repo: TaxomeshRepositoryBase = self._build_repo_from_config(raw, resolved)
+            else:
+                from taxomesh.adapters.repositories.yaml_repository import YAMLRepository  # noqa: PLC0415
 
-            self._repo: TaxomeshRepositoryBase = JsonRepository()
+                self._repo = YAMLRepository()
         else:
             self._repo = repository
         self._root_id: UUID = self._ensure_root()
+
+    @property
+    def repository(self) -> TaxomeshRepositoryBase:
+        """Return the active storage backend."""
+        return self._repo
+
+    @staticmethod
+    def _build_repo_from_config(config: dict[str, Any], config_path: Path) -> TaxomeshRepositoryBase:
+        """Construct a repository adapter from a parsed taxomesh.toml config dict.
+
+        Args:
+            config: Parsed TOML document as a dict.
+            config_path: Resolved path to the config file (used in error messages).
+
+        Returns:
+            A repository adapter matching the ``[repository]`` section settings.
+
+        Raises:
+            TaxomeshConfigError: If ``type`` is not a supported value.
+            TaxomeshRepositoryError: If the adapter fails to initialise.
+        """
+        from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+        from taxomesh.adapters.repositories.yaml_repository import YAMLRepository  # noqa: PLC0415
+
+        section = config.get("repository", {})
+        repo_type: str = section.get("type", "yaml")
+        if repo_type == "yaml":
+            return YAMLRepository(Path(section["path"])) if "path" in section else YAMLRepository()
+        if repo_type == "json":
+            return JsonRepository(Path(section["path"])) if "path" in section else JsonRepository()
+        raise TaxomeshConfigError(
+            f"Unsupported repository type '{repo_type}' in {config_path}. Supported: 'yaml', 'json'."
+        )
 
     def _ensure_root(self) -> UUID:
         """Guarantee the reserved root category exists and return its UUID.

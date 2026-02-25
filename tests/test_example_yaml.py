@@ -6,7 +6,7 @@ from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
 from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.graph import CategoryNode
 
-EXAMPLE = Path(__file__).parent.parent / "examples" / "taxomesh_example.yaml"
+EXAMPLE = Path(__file__).parent.parent / "data" / "taxomesh_example.yaml"
 
 
 def _max_depth(node: CategoryNode) -> int:

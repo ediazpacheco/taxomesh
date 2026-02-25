@@ -41,7 +41,7 @@ def test_build_defaults_when_no_config_file(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.chdir(tmp_path)
     result = build()
     assert isinstance(result.service, TaxomeshService)
-    assert (tmp_path / "taxomesh.yaml").exists()
+    assert (tmp_path / "data" / "taxomesh.yaml").exists()
 
 
 def test_build_reads_json_path_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -920,11 +920,11 @@ def test_graph_performance_sc005() -> None:
 
 
 def test_cli_default_repo_is_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """No taxomesh.toml → CLI routes to taxomesh.yaml (FR-002, FR-003, SC-001)."""
+    """No taxomesh.toml → CLI falls back to data/taxomesh.yaml (service default)."""
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["--verbose", "category", "list"])
     assert result.exit_code == 0
-    assert "taxomesh.yaml" in result.output
+    assert "data/taxomesh.yaml" in result.output
 
 
 def test_cli_toml_type_yaml_uses_yaml_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -957,20 +957,13 @@ def test_cli_toml_type_unsupported_exits_nonzero(tmp_path: Path, monkeypatch: py
     assert exc_info.value.code != 0
 
 
-def test_cli_leaves_json_untouched_when_yaml_is_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Existing taxomesh.json is not modified when CLI defaults to YAML (FR-013)."""
+def test_cli_uses_yaml_when_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """taxomesh.toml with type=yaml → CLI creates data/taxomesh.yaml, not taxomesh.json."""
     monkeypatch.chdir(tmp_path)
-    json_file = tmp_path / "taxomesh.json"
-    json_file.write_text(
-        '{"categories":{},"items":{},"tags":{},"item_tag_links":[],"category_parent_links":[],"item_parent_links":[]}',
-        encoding="utf-8",
-    )
-    original_content = json_file.read_text(encoding="utf-8")
+    (tmp_path / "taxomesh.toml").write_text('[repository]\ntype = "yaml"\n', encoding="utf-8")
 
     result = runner.invoke(app, ["category", "list"])
     assert result.exit_code == 0
 
-    # JSON file must be unchanged
-    assert json_file.read_text(encoding="utf-8") == original_content
-    # YAML file must have been created instead
-    assert (tmp_path / "taxomesh.yaml").exists()
+    assert (tmp_path / "data" / "taxomesh.yaml").exists()
+    assert not (tmp_path / "taxomesh.json").exists()

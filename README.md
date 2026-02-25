@@ -74,8 +74,7 @@ Requires **Python 3.11+**. The YAML backend (CLI default) uses `pyyaml`, which i
 ```python
 from taxomesh import TaxomeshService
 
-service = TaxomeshService()          # persists to taxomesh.json in the current directory
-                                     # (direct API default; CLI default is taxomesh.yaml)
+service = TaxomeshService()          # auto-discovers taxomesh.toml; falls back to data/taxomesh.yaml
 ```
 
 Custom storage path:
@@ -329,13 +328,32 @@ print([n.category.name for n in graph.roots])
 
 ---
 
-## CLI
+## Configuration
 
-taxomesh ships with a full command-line interface. After installation, the `taxomesh` command is available.
+`taxomesh.toml` is optional — all settings have built-in defaults and the library works out of the box with no configuration file.
 
-### Configuration (optional)
+### Python API
 
-Without a config file the CLI writes to `taxomesh.yaml` in the current directory. Create `taxomesh.toml` to customise the backend:
+`TaxomeshService` auto-reads `taxomesh.toml` from the current working directory when one is present. Pass an explicit path to override:
+
+```python
+from taxomesh import TaxomeshService
+
+# No config file → falls back to YAMLRepository (data/taxomesh.yaml)
+svc = TaxomeshService()
+
+# Auto-discovers taxomesh.toml in the current working directory if present
+svc = TaxomeshService()
+
+# Explicit config file
+svc = TaxomeshService(config_path="path/to/taxomesh.toml")
+
+# Bypass config entirely — supply your own repository
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+svc = TaxomeshService(repository=YAMLRepository(Path("data/taxonomy.yaml")))
+```
+
+### Config file format
 
 ```toml
 # taxomesh.toml — place in your project root
@@ -347,17 +365,27 @@ path = "data/taxonomy.yaml"
 ```
 
 ```toml
-# JSON backend (backward-compatible)
+# JSON backend (alternative option)
 [repository]
 type = "json"
 path = "data/taxonomy.json"
 ```
 
-Override per-invocation with `--config`:
+For the full, authoritative setting reference — accepted values, defaults, and both backend examples — see [`taxomesh.toml.example`](./taxomesh.toml.example) at the repository root.
+
+---
+
+## CLI
+
+taxomesh ships with a full command-line interface. After installation, the `taxomesh` command is available.
+
+The CLI reads `taxomesh.toml` from the current working directory automatically. Override per-invocation with `--config`:
 
 ```sh
-taxomesh --config /etc/taxomesh.toml category list
+taxomesh --config /path/to/taxomesh.toml category list
 ```
+
+See [Configuration](#configuration) above for the full file format and all supported options.
 
 ---
 
@@ -493,8 +521,8 @@ taxomesh follows a **hexagonal architecture** (ports and adapters). Dependency d
                      │ satisfied structurally by
 ┌────────────────────▼───────────────────────────────┐
 │  Adapters  (taxomesh.adapters)                     │
-│  YAMLRepository  (CLI default, atomic writes)      │
-│  JsonRepository  (backward-compatible)             │
+│  YAMLRepository  (atomic writes)                   │
+│  JsonRepository  (alternative option)              │
 │  … future: SqliteRepository …                     │
 │                                                    │
 │  CLI  (taxomesh.adapters.cli)                      │

@@ -202,6 +202,11 @@ Do NOT update README during implement — only after
 - Pluggable via `TaxomeshRepositoryBase` (default: `JsonRepository`) (006-taxonomy-graph)
 - Python 3.11+ + pyyaml ≥ 6.0 (required runtime), types-PyYAML (dev — for mypy --strict) (007-yaml-repository)
 - Single YAML file on disk; atomic writes via tempfile + os.replace (007-yaml-repository)
+- N/A — pure content (TOML + Markdown) + None — no code changes (008-toml-config-template)
+- Python 3.11 (`tomllib` is stdlib from 3.11) + None new — stdlib `tomllib`, `pathlib.Path` (008-toml-config-template)
+- Single TOML file on disk (read-only at service init) (008-toml-config-template)
+- Python 3.11 (`tomllib` is stdlib from 3.11+) + stdlib `tomllib`, `pathlib.Path` — no new runtime dependencies (008-toml-config-template)
+- Single TOML file on disk (read-only at `TaxomeshService` init time) (008-toml-config-template)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

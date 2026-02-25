@@ -9,13 +9,15 @@ place with ``os.replace`` so the target file is never in a partial state.
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 import yaml
 
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemTagLink, Tag
 from taxomesh.exceptions import TaxomeshRepositoryError
+
+DEFAULT_YAML_PATH: Final[Path] = Path("data/taxomesh.yaml")
 
 
 class YAMLRepository:
@@ -29,7 +31,7 @@ class YAMLRepository:
     arbitrary object deserialisation from untrusted files.
 
     Args:
-        path: Path to the YAML storage file. Defaults to ``taxomesh.yaml`` in
+        path: Path to the YAML storage file. Defaults to ``data/taxomesh.yaml`` in
             the current working directory. Missing parent directories are
             created automatically.
 
@@ -38,11 +40,11 @@ class YAMLRepository:
             exists but cannot be parsed as valid storage content.
     """
 
-    def __init__(self, path: Path | str = Path("taxomesh.yaml")) -> None:
+    def __init__(self, path: Path | str = DEFAULT_YAML_PATH) -> None:
         """Initialise the repository from an existing file or create a new one.
 
         Args:
-            path: Path to the YAML storage file. Defaults to ``taxomesh.yaml``
+            path: Path to the YAML storage file. Defaults to ``data/taxomesh.yaml``
                 in the current working directory.
 
         Raises:

@@ -1,6 +1,44 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 1.2.3 → 1.2.4
+Bump type: PATCH — "Adapter defaults stay in adapters" clause added to Principle I.
+
+Previous version: 1.2.3 (composition-root exception extended, TaxomeshConfigError added)
+
+Modified principles:
+  - Principle I: added "Adapter defaults stay in adapters" clause prohibiting application layer
+    from defining or replicating adapter-specific defaults (e.g. default file paths).
+
+Template alignment:
+  ✅ All templates — no constitution-specific static content; aligned.
+
+Follow-up TODOs: none
+
+---
+
+SYNC IMPACT REPORT (previous)
+==============================
+Version change: 1.2.2 → 1.2.3
+Bump type: MINOR — composition-root exception extended (Principle I), TaxomeshService default
+description updated (Principle II), TaxomeshConfigError added to hierarchy (Principle V).
+
+Previous version: 1.2.2 (pyyaml promoted to required runtime dep)
+
+Modified principles:
+  - Principle I: composition-root exception clause extended to cover taxomesh.toml reading
+  - Principle II: default behaviour updated to describe auto-discovery + config_path parameter
+  - Principle V: TaxomeshConfigError added to the exception hierarchy diagram
+
+Template alignment:
+  ✅ All templates — no constitution-specific static content; aligned.
+
+Follow-up TODOs: none
+
+---
+
+SYNC IMPACT REPORT (previous)
+==============================
 Version change: 1.2.1 → 1.2.2
 Bump type: PATCH — pyyaml promoted from optional to required runtime dep (Toolchain section).
 
@@ -69,22 +107,34 @@ adapters → application → domain
 
 No layer may import from a layer further out than itself.
 
-**Composition-root exception**: A lazy `import` inside an `if parameter is None:` guard of
-`TaxomeshService.__init__` — used to instantiate a default adapter when none is provided — is
-exempt from this rule. The import MUST be the only `application → adapters` dependency in the
-service, MUST live inside the None-guard only, and the trade-off MUST be documented as a formal
-decision in the feature's `research.md`.
+**Composition-root exception**: Lazy `import` statements inside the `if repository is None:` guard of
+`TaxomeshService.__init__` — used to instantiate default adapters or read `taxomesh.toml` — are
+exempt from this rule. This includes:
+- Importing `JsonRepository` or `YAMLRepository` to create a default backend.
+- Reading `taxomesh.toml` using stdlib `tomllib` (no adapter imports at module level).
+
+All such imports MUST stay inside the `if repository is None:` guard only. The trade-off MUST be
+documented as a formal decision in the feature's spec or plan.
+
+**Adapter defaults stay in adapters**: The application layer (`application/`) MUST NOT define or
+replicate defaults that belong to the adapter layer — including default storage file paths. When
+the service needs to instantiate a repository with its default configuration, it MUST call the
+constructor with no explicit path argument, delegating the default entirely to the adapter module.
+Only the adapter module (e.g. `yaml_repository.py`, `json_repository.py`) defines its own
+`DEFAULT_*` constants. Duplicating them in `service.py` leaks adapter concerns into the
+application layer and violates the inward dependency rule.
 
 ### II. TaxomeshService Is the Single Public Facade
 `TaxomeshService` is the only class end-users instantiate. It accepts a
 `TaxomeshRepositoryBase`-compatible object at construction. If no repository is
-provided, it defaults to `JsonRepository`. Internal sub-services
-(`CategoryService`, `ItemService`, `QueryService`) are implementation details of
-`TaxomeshService` and are not part of the public API.
+provided, it auto-discovers `taxomesh.toml` from the current working directory
+(or reads an explicit `config_path`) and constructs the configured backend. If no
+config file is found, it defaults to `YAMLRepository`.
 
 ```python
-service = TaxomeshService()                          # uses JsonRepository
-service = TaxomeshService(repository=MyCustomRepo()) # custom backend
+service = TaxomeshService()                            # auto-discovers taxomesh.toml; falls back to YAMLRepository
+service = TaxomeshService(config_path="taxomesh.toml") # explicit config file
+service = TaxomeshService(repository=MyCustomRepo())   # custom backend; config ignored
 ```
 
 ### III. Repository as Protocol — Structural Typing, No Inheritance Required
@@ -121,7 +171,8 @@ TaxomeshError
 │   └── TaxomeshTagNotFoundError
 ├── TaxomeshValidationError
 │   └── TaxomeshCyclicDependencyError
-└── TaxomeshRepositoryError
+├── TaxomeshRepositoryError
+└── TaxomeshConfigError
 ```
 
 ### VI. DAG Integrity — Cycle Detection Is a Domain Responsibility
@@ -326,4 +377,4 @@ between this document and any other guideline, this document wins.
 All amendments MUST be proposed as a PR with an updated constitution file and
 a brief rationale. The amendment takes effect on merge to `main`.
 
-**Version**: 1.2.2 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-24
+**Version**: 1.2.4 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-24

@@ -10,11 +10,13 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemTagLink, Tag
 from taxomesh.exceptions import TaxomeshRepositoryError
+
+DEFAULT_JSON_PATH: Final[Path] = Path("data/taxomesh.json")
 
 
 class JsonRepository:
@@ -25,7 +27,7 @@ class JsonRepository:
     construction and written atomically after every mutation.
 
     Args:
-        path: Path to the JSON storage file. Defaults to ``taxomesh.json`` in
+        path: Path to the JSON storage file. Defaults to ``data/taxomesh.json`` in
             the current working directory. Missing parent directories are
             created automatically.
 
@@ -34,11 +36,11 @@ class JsonRepository:
             exists but cannot be parsed as valid storage content.
     """
 
-    def __init__(self, path: Path | str = Path("taxomesh.json")) -> None:
+    def __init__(self, path: Path | str = DEFAULT_JSON_PATH) -> None:
         """Initialise the repository from an existing file or create a new one.
 
         Args:
-            path: Path to the JSON storage file. Defaults to ``taxomesh.json``
+            path: Path to the JSON storage file. Defaults to ``data/taxomesh.json``
                 in the current working directory.
 
         Raises:
