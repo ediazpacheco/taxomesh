@@ -977,3 +977,22 @@ def test_cli_uses_yaml_when_configured(tmp_path: Path, monkeypatch: pytest.Monke
 
     assert (tmp_path / "data" / "taxomesh.yaml").exists()
     assert not (tmp_path / "taxomesh.json").exists()
+
+
+def test_cli_leaves_json_untouched_when_yaml_is_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing taxomesh.json is not modified when CLI defaults to YAML (FR-013)."""
+    monkeypatch.chdir(tmp_path)
+    json_file = tmp_path / "taxomesh.json"
+    json_file.write_text(
+        '{"categories":{},"items":{},"tags":{},"item_tag_links":[],"category_parent_links":[],"item_parent_links":[]}',
+        encoding="utf-8",
+    )
+    original_content = json_file.read_text(encoding="utf-8")
+
+    result = runner.invoke(app, ["category", "list"])
+    assert result.exit_code == 0
+
+    # JSON file must be unchanged
+    assert json_file.read_text(encoding="utf-8") == original_content
+    # YAML file must have been created instead
+    assert (tmp_path / "data" / "taxomesh.yaml").exists()

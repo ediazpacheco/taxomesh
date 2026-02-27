@@ -355,9 +355,55 @@ For the full, authoritative setting reference — accepted values, defaults, and
 
 ---
 
+### YAML backend
+
+```python
+from pathlib import Path
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+
+service = TaxomeshService(repository=YAMLRepository(Path("my_taxonomy.yaml")))
+```
+
+A ready-to-use example taxonomy is included in the repository:
+
+```python
+from pathlib import Path
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+
+repo = YAMLRepository(Path("examples/taxomesh_example.yaml"))
+svc = TaxomeshService(repository=repo)
+graph = svc.get_graph()
+print([n.category.name for n in graph.roots])
+# ['Animals', 'Plants', 'Vehicles', 'Music', 'Literature']
+```
+
+---
+
 ## CLI
 
 taxomesh ships with a full command-line interface. After installation, the `taxomesh` command is available.
+
+### Configuration (optional)
+
+Without a config file the CLI writes to `taxomesh.yaml` in the current directory. Create `taxomesh.toml` to customise the backend:
+
+```toml
+# taxomesh.toml — place in your project root
+
+# YAML backend (default)
+[repository]
+type = "yaml"
+path = "data/taxonomy.yaml"
+```
+
+```toml
+# JSON backend (backward-compatible)
+[repository]
+type = "json"
+path = "data/taxonomy.json"
+```
 
 The CLI reads `taxomesh.toml` from the current working directory automatically. Override per-invocation with `--config`:
 
@@ -501,7 +547,7 @@ taxomesh follows a **hexagonal architecture** (ports and adapters). Dependency d
                      │ satisfied structurally by
 ┌────────────────────▼───────────────────────────────┐
 │  Adapters  (taxomesh.adapters)                     │
-│  YAMLRepository  (atomic writes)                   │
+│  YAMLRepository  (CLI default, atomic writes)      │
 │  JsonRepository  (alternative option)              │
 │  … future: SqliteRepository …                     │
 │                                                    │
