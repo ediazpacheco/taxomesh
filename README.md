@@ -282,26 +282,6 @@ A category with multiple explicit parents appears as a separate `CategoryNode` u
 
 ---
 
-### Persistence across restarts
-
-```python
-from pathlib import Path
-from taxomesh import TaxomeshService
-from taxomesh.adapters.repositories.json_repository import JsonRepository
-
-DB = Path("my_taxonomy.json")
-
-# Session 1 — write
-s1 = TaxomeshService(repository=JsonRepository(DB))
-cat = s1.create_category(name="Electronic")
-
-# Session 2 — data survives
-s2 = TaxomeshService(repository=JsonRepository(DB))
-assert s2.get_category(cat.category_id).name == "Electronic"
-```
-
----
-
 ### YAML backend
 
 ```python

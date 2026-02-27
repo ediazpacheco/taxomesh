@@ -283,11 +283,19 @@ class JsonRepository:
     # ------------------------------------------------------------------
 
     def save_category_parent_link(self, link: CategoryParentLink) -> None:
-        """Persist a category-parent relationship.
+        """Upsert a category→parent relationship.
+
+        If a link with the same (category_id, parent_category_id) pair already
+        exists its sort_index is updated in-place. No duplicate is created.
 
         Args:
             link: The CategoryParentLink to persist.
         """
+        for i, existing in enumerate(self._category_parent_links):
+            if existing.category_id == link.category_id and existing.parent_category_id == link.parent_category_id:
+                self._category_parent_links[i] = link
+                self._flush()
+                return
         self._category_parent_links.append(link)
         self._flush()
 

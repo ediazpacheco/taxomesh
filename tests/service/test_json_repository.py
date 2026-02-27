@@ -8,6 +8,7 @@ import pytest
 
 from taxomesh.adapters.repositories.json_repository import JsonRepository
 from taxomesh.application.service import TaxomeshService
+from taxomesh.domain.models import CategoryParentLink
 from taxomesh.exceptions import TaxomeshCyclicDependencyError, TaxomeshRepositoryError
 
 
@@ -184,6 +185,40 @@ def test_legacy_json_without_item_parent_links_loads_empty(tmp_json_path: Path) 
     tmp_json_path.write_text(json.dumps(legacy), encoding="utf-8")
     repo = JsonRepository(tmp_json_path)
     assert repo.list_item_parent_links() == []
+
+
+# ---------------------------------------------------------------------------
+# T003: JsonRepository — category-parent upsert (010-unique-parent-links)
+# ---------------------------------------------------------------------------
+
+
+def test_json_save_category_parent_link_upserts_sort_index(tmp_json_path: Path) -> None:
+    """Saving the same (category_id, parent_category_id) pair twice updates sort_index."""
+    repo = JsonRepository(tmp_json_path)
+    cat_id = uuid4()
+    parent_id = uuid4()
+    repo.save_category_parent_link(CategoryParentLink(category_id=cat_id, parent_category_id=parent_id, sort_index=0))
+    repo.save_category_parent_link(CategoryParentLink(category_id=cat_id, parent_category_id=parent_id, sort_index=42))
+    links = repo.list_category_parent_links()
+    matching = [lnk for lnk in links if lnk.category_id == cat_id and lnk.parent_category_id == parent_id]
+    assert len(matching) == 1
+    assert matching[0].sort_index == 42
+
+
+def test_json_save_category_parent_link_upserts_persists(tmp_json_path: Path) -> None:
+    """Upserted category-parent link survives a process restart."""
+    repo1 = JsonRepository(tmp_json_path)
+    cat_id = uuid4()
+    parent_id = uuid4()
+    repo1.save_category_parent_link(CategoryParentLink(category_id=cat_id, parent_category_id=parent_id, sort_index=0))
+    repo1.save_category_parent_link(
+        CategoryParentLink(category_id=cat_id, parent_category_id=parent_id, sort_index=10)
+    )
+    repo2 = JsonRepository(tmp_json_path)
+    links = repo2.list_category_parent_links()
+    matching = [lnk for lnk in links if lnk.category_id == cat_id and lnk.parent_category_id == parent_id]
+    assert len(matching) == 1
+    assert matching[0].sort_index == 10
 
 
 def test_legacy_category_description_null_loads_empty_string(tmp_json_path: Path) -> None:
