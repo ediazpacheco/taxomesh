@@ -425,7 +425,9 @@ def _add_graph_node(tree_node: Tree, category_node: CategoryNode) -> None:
         tree_node: The Rich Tree node to attach category and item branches to.
         category_node: The CategoryNode supplying category and item data.
     """
-    branch = tree_node.add(f"[bold cyan]{category_node.category.name}[/bold cyan]")
+    branch = tree_node.add(
+        f"[bold cyan]{category_node.category.name}[/bold cyan]  [dim]{category_node.category.category_id}[/dim]"
+    )
     for item in category_node.items:
         enabled_style = "green" if item.enabled else "red"
         label = (

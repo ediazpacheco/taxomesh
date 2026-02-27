@@ -1,6 +1,24 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 1.2.4 → 1.3.0
+Bump type: MINOR — two new core principles added.
+
+Previous version: 1.2.4 ("Adapter defaults stay in adapters" clause added to Principle I)
+
+Added principles:
+  - Principle X: Named Constants — No Magic Literals
+  - Principle XI: Object-Oriented by Default
+
+Template alignment:
+  ✅ All templates — no constitution-specific static content; aligned.
+
+Follow-up TODOs: none
+
+---
+
+SYNC IMPACT REPORT (previous)
+==============================
 Version change: 1.2.3 → 1.2.4
 Bump type: PATCH — "Adapter defaults stay in adapters" clause added to Principle I.
 
@@ -256,6 +274,38 @@ taxomesh owns: the query logic, the category/tag graph, and the response envelop
 FastAPI is a **mandatory core runtime dependency** — not an optional extra. It is the
 primary delivery mechanism for the taxomesh REST surface and ships with every install.
 
+### X. Named Constants — No Magic Literals
+All domain-meaningful and configuration-meaningful values MUST be defined as named
+constants using `typing.Final`. No hardcoded magic literals in business logic, adapter
+code, or configuration handling.
+
+**Rules:**
+- Use `UPPER_SNAKE_CASE` naming with `Final[T]` type annotation.
+- Single source of truth — define the constant once, import it elsewhere. Never
+  duplicate the same literal in multiple locations.
+- Inline literals are permitted only when the value is self-evident in context and
+  carries no risk of divergent copies (e.g. `""`, `0`, `1`, `True`/`False`).
+
+**Violations** (non-exhaustive):
+- `indent=2` — extract to `DEFAULT_JSON_INDENT: Final[int] = 2`
+- Bare `"yaml"` / `"json"` strings used as format identifiers — extract to named constants
+- Repeated `"utf-8"` encoding strings — extract to `ENCODING: Final[str] = "utf-8"`
+- Repeated `".tmp"` suffix strings — extract to `TEMP_SUFFIX: Final[str] = ".tmp"`
+- Unnamed `max_length=256` — extract to `MAX_NAME_LENGTH: Final[int] = 256` (or similar)
+
+### XI. Object-Oriented by Default
+Prefer class-based design over module-level functions. Classes are the default unit of
+encapsulation and composition in taxomesh.
+
+**Rules:**
+- Stateful logic MUST live in classes. Module-level mutable state is forbidden.
+- Near-identical classes MUST extract a shared ABC or mixin to eliminate duplication.
+  `Protocol` stays structural (no implementation); shared implementation uses inheritance.
+- Pure stateless utility functions MAY remain module-level when they have no side effects
+  and do not logically belong to a class.
+- Factory logic SHOULD use a factory class or `@classmethod` constructor, not a bare
+  module-level factory function.
+
 ---
 
 ## Toolchain
@@ -377,4 +427,4 @@ between this document and any other guideline, this document wins.
 All amendments MUST be proposed as a PR with an updated constitution file and
 a brief rationale. The amendment takes effect on merge to `main`.
 
-**Version**: 1.2.4 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-24
+**Version**: 1.3.0 | **Ratified**: 2026-02-22 | **Last Amended**: 2026-02-26
