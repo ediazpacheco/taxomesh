@@ -441,6 +441,9 @@ class TaxomeshService:
     ) -> CategoryParentLink:
         """Add a parent relationship between two categories, enforcing DAG integrity.
 
+        Idempotent — calling with the same (category_id, parent_id) pair updates
+        sort_index if changed, without creating a duplicate link.
+
         Validates that both categories exist, then delegates cycle detection to
         the domain layer before persisting the link.
 

@@ -155,7 +155,10 @@ class TaxomeshRepositoryBase(Protocol):
     # --- Category parent links ---
 
     def save_category_parent_link(self, link: CategoryParentLink) -> None:
-        """Persist a category-parent relationship.
+        """Upsert a category→parent relationship.
+
+        If a link with the same (category_id, parent_category_id) pair already
+        exists its sort_index is updated in-place. No duplicate is created.
 
         Args:
             link: The CategoryParentLink to persist.

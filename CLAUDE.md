@@ -207,6 +207,8 @@ Do NOT update README during implement — only after
 - Single TOML file on disk (read-only at service init) (008-toml-config-template)
 - Python 3.11 (`tomllib` is stdlib from 3.11+) + stdlib `tomllib`, `pathlib.Path` — no new runtime dependencies (008-toml-config-template)
 - Single TOML file on disk (read-only at `TaxomeshService` init time) (008-toml-config-template)
+- Python 3.11 + Pydantic v2 (domain models) (010-unique-parent-links)
+- JSON file (`JsonRepository`), YAML file (`YAMLRepository`), in-memory (test fixture) (010-unique-parent-links)
 - Python 3.11 + Typer ≥ 0.12, Rich ≥ 13.0 (009-graph-category-uuid)
 - N/A — display-only change, no storage impac (009-graph-category-uuid)
 
