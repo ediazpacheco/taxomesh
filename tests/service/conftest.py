@@ -98,7 +98,11 @@ class InMemoryRepository:
     # --- Category parent links ---
 
     def save_category_parent_link(self, link: CategoryParentLink) -> None:
-        """Persist a category-parent relationship."""
+        """Upsert a category→parent relationship."""
+        for i, existing in enumerate(self._category_parent_links):
+            if existing.category_id == link.category_id and existing.parent_category_id == link.parent_category_id:
+                self._category_parent_links[i] = link
+                return
         self._category_parent_links.append(link)
 
     def list_category_parent_links(self) -> list[CategoryParentLink]:

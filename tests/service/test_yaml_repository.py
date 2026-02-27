@@ -243,6 +243,40 @@ def test_save_category_parent_link_and_list(tmp_yaml_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# T004: YAMLRepository — category-parent upsert (010-unique-parent-links)
+# ---------------------------------------------------------------------------
+
+
+def test_yaml_save_category_parent_link_upserts_sort_index(tmp_yaml_path: Path) -> None:
+    """Saving the same (category_id, parent_category_id) pair twice updates sort_index."""
+    repo = YAMLRepository(tmp_yaml_path)
+    cat_id = uuid4()
+    parent_id = uuid4()
+    repo.save_category_parent_link(CategoryParentLink(category_id=cat_id, parent_category_id=parent_id, sort_index=0))
+    repo.save_category_parent_link(CategoryParentLink(category_id=cat_id, parent_category_id=parent_id, sort_index=42))
+    links = repo.list_category_parent_links()
+    matching = [lnk for lnk in links if lnk.category_id == cat_id and lnk.parent_category_id == parent_id]
+    assert len(matching) == 1
+    assert matching[0].sort_index == 42
+
+
+def test_yaml_save_category_parent_link_upserts_persists(tmp_yaml_path: Path) -> None:
+    """Upserted category-parent link survives a process restart."""
+    repo1 = YAMLRepository(tmp_yaml_path)
+    cat_id = uuid4()
+    parent_id = uuid4()
+    repo1.save_category_parent_link(CategoryParentLink(category_id=cat_id, parent_category_id=parent_id, sort_index=0))
+    repo1.save_category_parent_link(
+        CategoryParentLink(category_id=cat_id, parent_category_id=parent_id, sort_index=10)
+    )
+    repo2 = YAMLRepository(tmp_yaml_path)
+    links = repo2.list_category_parent_links()
+    matching = [lnk for lnk in links if lnk.category_id == cat_id and lnk.parent_category_id == parent_id]
+    assert len(matching) == 1
+    assert matching[0].sort_index == 10
+
+
+# ---------------------------------------------------------------------------
 # Item parent links
 # ---------------------------------------------------------------------------
 
