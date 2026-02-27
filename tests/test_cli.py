@@ -785,6 +785,16 @@ def test_graph_shows_category_name() -> None:
     assert "Animals" in result.output
 
 
+def test_graph_shows_category_uuid() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.create_category("Animals")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["graph"])
+    assert result.exit_code == 0
+    assert str(cat.category_id) in result.output
+
+
 def test_graph_shows_item_external_id() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
