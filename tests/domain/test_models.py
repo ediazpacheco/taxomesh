@@ -110,6 +110,42 @@ class TestCategory:
         cat = Category(category_id=uuid4(), name="Pop")
         assert cat.metadata == {}
 
+    def test_enabled_defaults_true(self) -> None:
+        cat = Category(category_id=uuid4(), name="Rock")
+        assert cat.enabled is True
+
+    def test_external_id_defaults_empty_string(self) -> None:
+        cat = Category(category_id=uuid4(), name="Rock")
+        assert cat.external_id == ""
+
+    def test_explicit_enabled_false_and_external_id(self) -> None:
+        cat = Category(
+            category_id=uuid4(),
+            name="Jazz",
+            enabled=False,
+            external_id="genre-rock",
+        )
+        assert cat.enabled is False
+        assert cat.external_id == "genre-rock"
+
+    def test_backward_compat_missing_enabled_and_external_id(self) -> None:
+        data = {"category_id": str(uuid4()), "name": "Legacy"}
+        cat = Category.model_validate(data)
+        assert cat.enabled is True
+        assert cat.external_id == ""
+
+    def test_round_trip_persistence(self) -> None:
+        cat = Category(
+            category_id=uuid4(),
+            name="Rock",
+            enabled=False,
+            external_id="genre-rock",
+        )
+        dumped = cat.model_dump()
+        restored = Category.model_validate(dumped)
+        assert restored.enabled is False
+        assert restored.external_id == "genre-rock"
+
 
 class TestTag:
     def test_construction(self) -> None:

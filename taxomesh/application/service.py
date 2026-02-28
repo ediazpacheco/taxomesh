@@ -22,9 +22,11 @@ from taxomesh.exceptions import (
     TaxomeshTagNotFoundError,
 )
 from taxomesh.ports.repository import TaxomeshRepositoryBase
+from taxomesh.utils.memoize import clear_all_caches, memoize
 
 ROOT_CATEGORY_NAME: Final[str] = "__root__"
 _DEFAULT_CONFIG_FILENAME: Final[str] = "taxomesh.toml"
+DEFAULT_CACHE_TTL: Final[int] = 5
 
 
 class TaxomeshService:
@@ -162,8 +164,10 @@ class TaxomeshService:
         self._repo.save_category_parent_link(
             CategoryParentLink(category_id=category.category_id, parent_category_id=self._root_id, sort_index=0)
         )
+        clear_all_caches()
         return category
 
+    @memoize(DEFAULT_CACHE_TTL)
     def get_category(self, category_id: UUID) -> Category:
         """Retrieve a category by its identifier.
 
@@ -181,6 +185,7 @@ class TaxomeshService:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
         return result
 
+    @memoize(DEFAULT_CACHE_TTL)
     def list_categories(self, *, parent_id: UUID | None = None) -> list[Category]:
         """Return stored categories, optionally filtered by parent.
 
@@ -218,6 +223,7 @@ class TaxomeshService:
         found = self._repo.delete_category(category_id)
         if not found:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
+        clear_all_caches()
 
     def update_category(
         self,
@@ -246,6 +252,7 @@ class TaxomeshService:
         if description is not None:
             category.description = description
         self._repo.save_category(category)
+        clear_all_caches()
         return category
 
     # ------------------------------------------------------------------
@@ -272,8 +279,10 @@ class TaxomeshService:
             metadata=metadata if metadata is not None else {},
         )
         self._repo.save_item(item)
+        clear_all_caches()
         return item
 
+    @memoize(DEFAULT_CACHE_TTL)
     def get_item(self, item_id: UUID) -> Item:
         """Retrieve an item by its internal identifier.
 
@@ -291,6 +300,7 @@ class TaxomeshService:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
         return result
 
+    @memoize(DEFAULT_CACHE_TTL)
     def list_items(self, *, category_id: UUID | None = None) -> list[Item]:
         """Return stored items, optionally filtered by category.
 
@@ -325,6 +335,7 @@ class TaxomeshService:
         found = self._repo.delete_item(item_id)
         if not found:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
+        clear_all_caches()
 
     def update_item(self, item_id: UUID, enabled: bool | None = None) -> Item:
         """Update an item's enabled state.
@@ -343,6 +354,7 @@ class TaxomeshService:
         if enabled is not None:
             item.enabled = enabled
         self._repo.save_item(item)
+        clear_all_caches()
         return item
 
     # ------------------------------------------------------------------
@@ -369,8 +381,10 @@ class TaxomeshService:
             metadata=metadata if metadata is not None else {},
         )
         self._repo.save_tag(tag)
+        clear_all_caches()
         return tag
 
+    @memoize(DEFAULT_CACHE_TTL)
     def list_tags(self) -> list[Tag]:
         """Return all stored tags.
 
@@ -398,6 +412,7 @@ class TaxomeshService:
         if name is not None:
             result.name = name
         self._repo.save_tag(result)
+        clear_all_caches()
         return result
 
     def delete_tag(self, tag_id: UUID) -> None:
@@ -412,6 +427,7 @@ class TaxomeshService:
         found = self._repo.delete_tag(tag_id)
         if not found:
             raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
+        clear_all_caches()
 
     def assign_tag(self, tag_id: UUID, item_id: UUID) -> None:
         """Associate a tag with an item. Idempotent.
@@ -432,6 +448,7 @@ class TaxomeshService:
         if self._repo.get_item(item_id) is None:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
         self._repo.assign_tag(tag_id, item_id)
+        clear_all_caches()
 
     def add_category_parent(
         self,
@@ -472,8 +489,10 @@ class TaxomeshService:
             sort_index=sort_index,
         )
         self._repo.save_category_parent_link(link)
+        clear_all_caches()
         return link
 
+    @memoize(DEFAULT_CACHE_TTL)
     def get_graph(self) -> TaxomeshGraph:
         """Build and return a full taxonomy snapshot.
 
@@ -546,6 +565,7 @@ class TaxomeshService:
         self.get_category(category_id)
         link = ItemParentLink(item_id=item_id, category_id=category_id, sort_index=sort_index)
         self._repo.save_item_parent_link(link)
+        clear_all_caches()
         return link
 
     def remove_tag(self, tag_id: UUID, item_id: UUID) -> None:
@@ -567,3 +587,4 @@ class TaxomeshService:
         if self._repo.get_item(item_id) is None:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
         self._repo.remove_tag(tag_id, item_id)
+        clear_all_caches()

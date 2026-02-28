@@ -8,7 +8,7 @@ or from an explicit path supplied via --config.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 import typer
@@ -19,6 +19,9 @@ from taxomesh.adapters.cli.config import BuildResult, build
 from taxomesh.domain.graph import CategoryNode
 from taxomesh.domain.types import ExternalId
 from taxomesh.exceptions import TaxomeshError
+
+ENABLED_ICON: Final[str] = "✓"
+DISABLED_ICON: Final[str] = "✗"
 
 app = typer.Typer(no_args_is_help=True)
 category_app = typer.Typer(no_args_is_help=True)
@@ -425,15 +428,24 @@ def _add_graph_node(tree_node: Tree, category_node: CategoryNode) -> None:
         tree_node: The Rich Tree node to attach category and item branches to.
         category_node: The CategoryNode supplying category and item data.
     """
-    branch = tree_node.add(
-        f"[bold cyan]{category_node.category.name}[/bold cyan]  [dim]{category_node.category.category_id}[/dim]"
+    cat = category_node.category
+    cat_icon = ENABLED_ICON if cat.enabled else DISABLED_ICON
+    cat_icon_style = "green" if cat.enabled else "red"
+    cat_label = (
+        f"[bold cyan]{cat.name}[/bold cyan]"
+        f"  [dim]{cat.category_id}[/dim]"
+        f"  [{cat_icon_style}]{cat_icon}[/{cat_icon_style}]"
     )
+    if cat.external_id:
+        cat_label += f"  [yellow]{cat.external_id}[/yellow]"
+    branch = tree_node.add(cat_label)
     for item in category_node.items:
-        enabled_style = "green" if item.enabled else "red"
+        item_icon = ENABLED_ICON if item.enabled else DISABLED_ICON
+        item_icon_style = "green" if item.enabled else "red"
         label = (
             f"[yellow]{item.external_id}[/yellow]"
             f"  [dim]{item.item_id}[/dim]"
-            f"  [{enabled_style}]enabled={item.enabled}[/{enabled_style}]"
+            f"  [{item_icon_style}]{item_icon}[/{item_icon_style}]"
         )
         branch.add(label)
     for child in category_node.children:
