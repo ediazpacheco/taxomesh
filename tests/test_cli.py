@@ -828,7 +828,8 @@ def test_graph_shows_item_enabled_true() -> None:
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["graph"])
     assert result.exit_code == 0
-    assert "enabled=True" in result.output
+    assert "✓" in result.output
+    assert "enabled=True" not in result.output
 
 
 def test_graph_shows_item_enabled_false() -> None:
@@ -841,7 +842,8 @@ def test_graph_shows_item_enabled_false() -> None:
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["graph"])
     assert result.exit_code == 0
-    assert "enabled=False" in result.output
+    assert "✗" in result.output
+    assert "enabled=False" not in result.output
 
 
 def test_graph_shows_tree_connectors() -> None:
