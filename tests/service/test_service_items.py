@@ -13,7 +13,7 @@ def test_create_item_with_uuid_external_id(service: TaxomeshService) -> None:
     item = service.create_item(external_id=ext)
     assert isinstance(item.item_id, UUID)
     assert item.item_id != ext
-    assert item.external_id == ext
+    assert item.external_id == str(ext)
 
 
 def test_create_item_with_str_external_id(service: TaxomeshService) -> None:
@@ -23,7 +23,7 @@ def test_create_item_with_str_external_id(service: TaxomeshService) -> None:
 
 def test_create_item_with_int_external_id(service: TaxomeshService) -> None:
     item = service.create_item(external_id=42)
-    assert item.external_id == 42
+    assert item.external_id == "42"
 
 
 def test_get_item_returns_item_with_all_fields(service: TaxomeshService) -> None:

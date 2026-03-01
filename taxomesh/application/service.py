@@ -6,6 +6,7 @@ contains no storage logic itself.
 """
 
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 from uuid import UUID, uuid4
@@ -109,15 +110,38 @@ class TaxomeshService:
         from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
         from taxomesh.adapters.repositories.yaml_repository import YAMLRepository  # noqa: PLC0415
 
+        def _build_yaml(section: dict[str, Any]) -> TaxomeshRepositoryBase:
+            return YAMLRepository(Path(section["path"])) if "path" in section else YAMLRepository()
+
+        def _build_json(section: dict[str, Any]) -> TaxomeshRepositoryBase:
+            return JsonRepository(Path(section["path"])) if "path" in section else JsonRepository()
+
+        def _build_django(section: dict[str, Any]) -> TaxomeshRepositoryBase:
+            from taxomesh.adapters.repositories.django_repository import (  # noqa: PLC0415
+                _USING_DEFAULT as _DJANGO_USING_DEFAULT,
+            )
+            from taxomesh.adapters.repositories.django_repository import (  # noqa: PLC0415
+                DjangoRepository,
+            )
+
+            using: str = section.get("using", _DJANGO_USING_DEFAULT)
+            return DjangoRepository(using=using)
+
+        _REPO_BUILDERS: dict[str, Callable[[dict[str, Any]], TaxomeshRepositoryBase]] = {
+            "yaml": _build_yaml,
+            "json": _build_json,
+            "django": _build_django,
+        }
+
         section = config.get("repository", {})
         repo_type: str = section.get("type", "yaml")
-        if repo_type == "yaml":
-            return YAMLRepository(Path(section["path"])) if "path" in section else YAMLRepository()
-        if repo_type == "json":
-            return JsonRepository(Path(section["path"])) if "path" in section else JsonRepository()
-        raise TaxomeshConfigError(
-            f"Unsupported repository type '{repo_type}' in {config_path}. Supported: 'yaml', 'json'."
-        )
+        builder = _REPO_BUILDERS.get(repo_type)
+        if builder is None:
+            supported = ", ".join(f"'{k}'" for k in _REPO_BUILDERS)
+            raise TaxomeshConfigError(
+                f"Unsupported repository type '{repo_type}' in {config_path}. Supported: {supported}."
+            )
+        return builder(section)
 
     def _ensure_root(self) -> UUID:
         """Guarantee the reserved root category exists and return its UUID.
@@ -275,7 +299,7 @@ class TaxomeshService:
             The newly created Item with a library-assigned internal UUID.
         """
         item = Item(
-            external_id=external_id,
+            external_id=str(external_id),
             metadata=metadata if metadata is not None else {},
         )
         self._repo.save_item(item)
@@ -588,3 +612,50 @@ class TaxomeshService:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
         self._repo.remove_tag(tag_id, item_id)
         clear_all_caches()
+
+    # ------------------------------------------------------------------
+    # External-ID lookup
+    # ------------------------------------------------------------------
+
+    def get_items_by_external_id(self, external_id: ExternalId) -> list[Item]:
+        """Return all items whose external_id matches the given value.
+
+        Delegates to the repository without additional business logic.
+        The returned list length signals the item's state to the consumer:
+        - ``len == 0`` — orphan: no item is registered for this external_id.
+        - ``len == 1`` — normal: exactly one item matches.
+        - ``len > 1`` — duplicates exist: more than one item shares the same
+          external_id (consumer decides how to handle).
+
+        Args:
+            external_id: The external identifier to look up — UUID, int, or str.
+
+        Returns:
+            List of matching Item instances; empty list if none match.
+
+        Raises:
+            TaxomeshRepositoryError: If the underlying repository raises it.
+        """
+        return self._repo.list_items_by_external_id(str(external_id))
+
+    def get_categories_by_external_id(self, external_id: ExternalId) -> list[Category]:
+        """Return all categories whose external_id matches the given value.
+
+        Delegates to the repository without additional business logic.
+        The returned list length signals the category's state to the consumer:
+        - ``len == 0`` — orphan: no category is registered for this external_id.
+        - ``len == 1`` — normal: exactly one category matches.
+        - ``len > 1`` — duplicates exist: more than one category shares the same
+          external_id (consumer decides how to handle).
+
+        Args:
+            external_id: The external identifier to look up — UUID, int, or str.
+
+        Returns:
+            List of matching Category instances; empty list if none match.
+
+        Raises:
+            TaxomeshRepositoryError: If the underlying repository raises it.
+        """
+        results = self._repo.list_categories_by_external_id(str(external_id))
+        return [cat for cat in results if cat.category_id != self._root_id]

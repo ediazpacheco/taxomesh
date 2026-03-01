@@ -361,6 +361,42 @@ class YAMLRepository:
         return list(self._item_parent_links)
 
     # ------------------------------------------------------------------
+    # External-ID lookup
+    # ------------------------------------------------------------------
+
+    def list_items_by_external_id(self, external_id: str) -> list[Item]:
+        """Return all items whose external_id matches the given value.
+
+        Performs an exact-type match (str vs int vs UUID are distinct).
+        Returns an empty list when no item matches (orphan signal for the
+        consumer). Returns multiple items when the same external_id was used
+        more than once (duplicate signal).
+
+        Args:
+            external_id: The external identifier to look up.
+
+        Returns:
+            List of matching Item instances; empty list if none match.
+        """
+        return [item for item in self._items.values() if item.external_id == external_id]
+
+    def list_categories_by_external_id(self, external_id: str) -> list[Category]:
+        """Return all categories whose external_id matches the given value.
+
+        Performs an exact-type match (str vs int vs UUID are distinct).
+        Returns an empty list when no category matches (orphan signal for the
+        consumer). Returns multiple categories when the same external_id was
+        used more than once (duplicate signal).
+
+        Args:
+            external_id: The external identifier to look up.
+
+        Returns:
+            List of matching Category instances; empty list if none match.
+        """
+        return [cat for cat in self._categories.values() if cat.external_id == external_id]
+
+    # ------------------------------------------------------------------
     # Configuration introspection
     # ------------------------------------------------------------------
 
