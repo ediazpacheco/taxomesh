@@ -64,6 +64,8 @@ class CategoryModel(models.Model):
     class Meta:
         app_label = APP_LABEL
         db_table = CATEGORY_TABLE
+        verbose_name = "Category"
+        verbose_name_plural = "Categories"
 
 
 class ItemModel(models.Model):
@@ -77,6 +79,8 @@ class ItemModel(models.Model):
     class Meta:
         app_label = APP_LABEL
         db_table = ITEM_TABLE
+        verbose_name = "Item"
+        verbose_name_plural = "Items"
 
 
 class TagModel(models.Model):
@@ -89,6 +93,8 @@ class TagModel(models.Model):
     class Meta:
         app_label = APP_LABEL
         db_table = TAG_TABLE
+        verbose_name = "Tag"
+        verbose_name_plural = "Tags"
 
 
 class CategoryParentLinkModel(models.Model):
