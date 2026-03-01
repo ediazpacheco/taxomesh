@@ -18,19 +18,29 @@ class Migration(migrations.Migration):
                 ("description", models.CharField(blank=True, default="", max_length=100000)),
                 ("enabled", models.BooleanField(default=True)),
                 ("external_id", models.CharField(blank=True, default="", max_length=256)),
+                ("slug", models.CharField(blank=True, db_index=True, default="", max_length=256)),
                 ("metadata", models.JSONField(blank=True, default=dict)),
             ],
             options={
                 "verbose_name": "Category",
                 "verbose_name_plural": "Categories",
                 "db_table": "taxomesh_category",
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=["slug"],
+                        condition=~models.Q(slug=""),
+                        name="taxomesh_category_slug_unique_nonempty",
+                    )
+                ],
             },
         ),
         migrations.CreateModel(
             name="ItemModel",
             fields=[
                 ("item_id", models.UUIDField(default=uuid.uuid4, primary_key=True, serialize=False)),
+                ("name", models.CharField(blank=True, default="", max_length=256)),
                 ("external_id", models.CharField(max_length=256)),
+                ("slug", models.CharField(blank=True, db_index=True, default="", max_length=256)),
                 ("enabled", models.BooleanField(default=True)),
                 ("metadata", models.JSONField(blank=True, default=dict)),
             ],
@@ -38,6 +48,13 @@ class Migration(migrations.Migration):
                 "verbose_name": "Item",
                 "verbose_name_plural": "Items",
                 "db_table": "taxomesh_item",
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=["slug"],
+                        condition=~models.Q(slug=""),
+                        name="taxomesh_item_slug_unique_nonempty",
+                    )
+                ],
             },
         ),
         migrations.CreateModel(

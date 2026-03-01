@@ -32,29 +32,45 @@ def test_core_models_admin_plural_labels() -> None:
 
 
 def test_category_model_str_shows_name_and_uuid() -> None:
-    """CategoryModel.__str__ must return '<name> (<category_id>)' for inline dropdowns."""
+    """CategoryModel.__str__ without slug returns '📂 Name (id: <category_id>)'."""
     cat = CategoryModel(name="Electronics")
-    expected = f"Electronics ({cat.category_id})"
-    assert str(cat) == expected
+    assert str(cat) == f"📂 Electronics (id: {cat.category_id})"
 
 
-def test_item_model_str_labels_external_id_and_internal_id() -> None:
-    """ItemModel.__str__ must label both external_id and item_id."""
-    item = ItemModel(external_id="some-slug")
+def test_category_model_str_with_slug_shows_name_slug_and_uuid() -> None:
+    """CategoryModel.__str__ with slug returns '📂 Name (s: <slug> - id: <category_id>)'."""
+    cat = CategoryModel(name="Electronics", slug="electronics")
+    assert str(cat) == f"📂 Electronics (s: electronics - id: {cat.category_id})"
+
+
+def test_item_model_str_shows_icon_name_and_uuid() -> None:
+    """ItemModel.__str__ without slug returns '🏷️ Name (id: <item_id>)'."""
+    item = ItemModel(name="My Item", external_id="some-ext")
     s = str(item)
-    assert "ext:some-slug" in s
-    assert f"id:{item.item_id}" in s
+    assert s.startswith("🏷️")
+    assert "My Item" in s
+    assert str(item.item_id) in s
+
+
+def test_item_model_str_with_slug_shows_icon_name_slug_and_uuid() -> None:
+    """ItemModel.__str__ with slug returns '🏷️ Name (s: <slug> - id: <item_id>)'."""
+    item = ItemModel(name="My Track", external_id="track-1", slug="my-track")
+    s = str(item)
+    assert s.startswith("🏷️")
+    assert "My Track" in s
+    assert "s: my-track" in s
+    assert str(item.item_id) in s
 
 
 @pytest.mark.django_db
-def test_item_parent_link_model_str_labels_external_id_and_category() -> None:
-    """ItemParentLinkModel.__str__ must show item external_id, item_id, and category name."""
+def test_item_parent_link_model_str_shows_item_and_category() -> None:
+    """ItemParentLinkModel.__str__ delegates to Item.__str__ and appends category name."""
     cat = CategoryModel.objects.create(name="Music")
-    item = ItemModel.objects.create(external_id="track-1")
+    item = ItemModel.objects.create(name="track-1", external_id="track-1")
     link = ItemParentLinkModel.objects.create(item=item, category=cat)
     s = str(link)
-    assert "ext:track-1" in s
-    assert f"id:{item.item_id}" in s
+    assert str(item.item_id) in s
+    assert "track-1" in s
     assert "Music" in s
 
 
@@ -201,3 +217,94 @@ class TestRootCategoryHidden:
         names = list(form_field.queryset.values_list("name", flat=True))  # type: ignore[union-attr]
         assert ROOT_CATEGORY_NAME not in names
         assert "Electronics" in names
+
+
+# ---------------------------------------------------------------------------
+# Slug field visibility and filter
+# ---------------------------------------------------------------------------
+
+
+class TestSlugAdminConfig:
+    """Verify slug is exposed in admin fields, search_fields, and list_filter."""
+
+    def test_category_admin_fields_includes_slug(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
+
+        admin_obj = CategoryModelAdmin(CategoryModel, AdminSite())
+        assert "slug" in admin_obj.fields
+
+    def test_category_admin_search_fields_includes_slug(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
+
+        admin_obj = CategoryModelAdmin(CategoryModel, AdminSite())
+        assert "slug" in admin_obj.search_fields
+
+    def test_category_admin_list_filter_includes_has_slug_filter(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin, HasSlugFilter  # noqa: PLC0415
+
+        admin_obj = CategoryModelAdmin(CategoryModel, AdminSite())
+        assert HasSlugFilter in admin_obj.list_filter
+
+    def test_item_admin_fields_includes_slug(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
+
+        admin_obj = ItemModelAdmin(ItemModel, AdminSite())
+        assert "slug" in admin_obj.fields
+
+    def test_item_admin_search_fields_includes_slug(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
+
+        admin_obj = ItemModelAdmin(ItemModel, AdminSite())
+        assert "slug" in admin_obj.search_fields
+
+    def test_item_admin_list_filter_includes_has_slug_filter(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import HasSlugFilter, ItemModelAdmin  # noqa: PLC0415
+
+        admin_obj = ItemModelAdmin(ItemModel, AdminSite())
+        assert HasSlugFilter in admin_obj.list_filter
+
+    @pytest.mark.django_db
+    def test_has_slug_filter_yes_returns_only_slugged(self) -> None:
+        from unittest.mock import MagicMock  # noqa: PLC0415
+
+        from django.http import HttpRequest, QueryDict  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import HasSlugFilter  # noqa: PLC0415
+
+        CategoryModel.objects.create(name="With Slug", slug="w")
+        CategoryModel.objects.create(name="No Slug", slug="")
+
+        f = HasSlugFilter(MagicMock(spec=HttpRequest), QueryDict("has_slug=yes").copy(), CategoryModel, None)
+        qs = f.queryset(MagicMock(spec=HttpRequest), CategoryModel.objects.all())
+        names = list(qs.values_list("name", flat=True))  # type: ignore[union-attr]
+        assert "With Slug" in names
+        assert "No Slug" not in names
+
+    @pytest.mark.django_db
+    def test_has_slug_filter_no_returns_only_unslugged(self) -> None:
+        from unittest.mock import MagicMock  # noqa: PLC0415
+
+        from django.http import HttpRequest, QueryDict  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import HasSlugFilter  # noqa: PLC0415
+
+        CategoryModel.objects.create(name="With Slug", slug="w")
+        CategoryModel.objects.create(name="No Slug", slug="")
+
+        f = HasSlugFilter(MagicMock(spec=HttpRequest), QueryDict("has_slug=no").copy(), CategoryModel, None)
+        qs = f.queryset(MagicMock(spec=HttpRequest), CategoryModel.objects.all())
+        names = list(qs.values_list("name", flat=True))  # type: ignore[union-attr]
+        assert "No Slug" in names
+        assert "With Slug" not in names

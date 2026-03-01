@@ -239,6 +239,28 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
+    def get_item_by_slug(self, slug: str) -> Item | None:
+        """Return the item with the given non-empty slug, or None.
+
+        Args:
+            slug: A non-empty slug string to look up.
+
+        Returns:
+            The matching Item, or None if no item has this slug.
+        """
+        ...
+
+    def get_category_by_slug(self, slug: str) -> Category | None:
+        """Return the category with the given non-empty slug, or None.
+
+        Args:
+            slug: A non-empty slug string to look up.
+
+        Returns:
+            The matching Category, or None if no category has this slug.
+        """
+        ...
+
     # --- Configuration introspection ---
 
     def get_config_summary(self) -> str:

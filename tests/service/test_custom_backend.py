@@ -18,7 +18,7 @@ def test_service_delegates_writes_to_custom_backend() -> None:
     """Service must store data in the provided backend, not bypass it."""
     repo = InMemoryRepository()
     svc = TaxomeshService(repository=repo)
-    item = svc.create_item(external_id="custom-123")
+    item = svc.create_item(name="custom-123", external_id="custom-123")
     assert item.item_id in repo._items
     assert repo._items[item.item_id].external_id == "custom-123"
 
@@ -53,7 +53,7 @@ def test_service_delegates_delete_tag_to_backend() -> None:
 def test_service_delegates_place_item_in_category_to_backend() -> None:
     repo = InMemoryRepository()
     svc = TaxomeshService(repository=repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     cat = svc.create_category(name="C")
     svc.place_item_in_category(item.item_id, cat.category_id)
     assert len(repo._item_parent_links) == 1

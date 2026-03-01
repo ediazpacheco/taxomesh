@@ -20,6 +20,7 @@ from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
     TaxomeshConfigError,
     TaxomeshCyclicDependencyError,
+    TaxomeshDuplicateSlugError,
     TaxomeshItemNotFoundError,
     TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
@@ -167,6 +168,7 @@ class TaxomeshService:
         name: str,
         description: str = "",
         metadata: dict[str, Any] | None = None,
+        slug: str = "",
     ) -> Category:
         """Create a new category and persist it.
 
@@ -174,16 +176,25 @@ class TaxomeshService:
             name: Category name; max 256 characters.
             description: Optional description; max 100 000 characters. Defaults to "".
             metadata: Optional arbitrary key-value pairs; defaults to {}.
+            slug: Optional URL-friendly identifier; must be unique when non-empty. Defaults to "".
 
         Returns:
             The newly created Category with a library-assigned UUID.
+
+        Raises:
+            TaxomeshDuplicateSlugError: If slug is non-empty and already used by another category.
         """
         if name == ROOT_CATEGORY_NAME:
             raise TaxomeshRootCategoryError(f"Category name '{ROOT_CATEGORY_NAME}' is reserved")
+        if slug:
+            existing = self._repo.get_category_by_slug(slug)
+            if existing is not None:
+                raise TaxomeshDuplicateSlugError(f"Slug '{slug}' is already in use")
         category = Category(
             category_id=uuid4(),
             name=name,
             description=description,
+            slug=slug,
             metadata=metadata if metadata is not None else {},
         )
         self._repo.save_category(category)
@@ -256,27 +267,36 @@ class TaxomeshService:
         category_id: UUID,
         name: str | None = None,
         description: str | None = None,
+        slug: str | None = None,
     ) -> Category:
-        """Update a category's name and/or description.
+        """Update a category's name, description, and/or slug.
 
         Args:
             category_id: The library-assigned UUID of the category to update.
             name: New name; unchanged if None.
             description: New description; unchanged if None.
+            slug: New slug; unchanged if None. Pass "" to clear the slug.
 
         Returns:
             The updated Category.
 
         Raises:
             TaxomeshCategoryNotFoundError: If no category with the given id exists.
+            TaxomeshDuplicateSlugError: If slug is non-empty and already used by another category.
         """
         if category_id == self._root_id:
             raise TaxomeshRootCategoryError("Cannot update the root category")
         category = self.get_category(category_id)
+        if slug is not None and slug:
+            existing = self._repo.get_category_by_slug(slug)
+            if existing is not None and existing.category_id != category_id:
+                raise TaxomeshDuplicateSlugError(f"Slug '{slug}' is already in use")
         if name is not None:
             category.name = name
         if description is not None:
             category.description = description
+        if slug is not None:
+            category.slug = slug
         self._repo.save_category(category)
         clear_all_caches()
         return category
@@ -287,21 +307,34 @@ class TaxomeshService:
 
     def create_item(
         self,
+        name: str,
         external_id: ExternalId,
         metadata: dict[str, Any] | None = None,
+        slug: str = "",
     ) -> Item:
         """Create a new item and persist it.
 
         Args:
+            name: Human-readable item name; max 256 characters.
             external_id: Caller-provided identifier. May be a UUID, a string
                 (max 256 chars), or an int.
             metadata: Optional arbitrary key-value pairs; defaults to {}.
+            slug: Optional URL-friendly identifier; must be unique when non-empty. Defaults to "".
 
         Returns:
             The newly created Item with a library-assigned internal UUID.
+
+        Raises:
+            TaxomeshDuplicateSlugError: If slug is non-empty and already used by another item.
         """
+        if slug:
+            existing = self._repo.get_item_by_slug(slug)
+            if existing is not None:
+                raise TaxomeshDuplicateSlugError(f"Slug '{slug}' is already in use")
         item = Item(
+            name=name,
             external_id=str(external_id),
+            slug=slug,
             metadata=metadata if metadata is not None else {},
         )
         self._repo.save_item(item)
@@ -363,22 +396,39 @@ class TaxomeshService:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
         clear_all_caches()
 
-    def update_item(self, item_id: UUID, enabled: bool | None = None) -> Item:
-        """Update an item's enabled state.
+    def update_item(
+        self,
+        item_id: UUID,
+        enabled: bool | None = None,
+        slug: str | None = None,
+        name: str | None = None,
+    ) -> Item:
+        """Update an item's enabled state, slug, and/or name.
 
         Args:
             item_id: The library-assigned UUID of the item to update.
             enabled: New enabled state; unchanged if None.
+            slug: New slug; unchanged if None. Pass "" to clear the slug.
+            name: New name; unchanged if None.
 
         Returns:
             The updated Item.
 
         Raises:
             TaxomeshItemNotFoundError: If no item with the given id exists.
+            TaxomeshDuplicateSlugError: If slug is non-empty and already used by another item.
         """
         item = self.get_item(item_id)
+        if slug is not None and slug:
+            existing = self._repo.get_item_by_slug(slug)
+            if existing is not None and existing.item_id != item_id:
+                raise TaxomeshDuplicateSlugError(f"Slug '{slug}' is already in use")
         if enabled is not None:
             item.enabled = enabled
+        if slug is not None:
+            item.slug = slug
+        if name is not None:
+            item.name = name
         self._repo.save_item(item)
         clear_all_caches()
         return item

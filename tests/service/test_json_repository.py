@@ -21,7 +21,7 @@ def test_json_repository_creates_file_on_init(tmp_json_path: Path) -> None:
 def test_json_repository_persistence_across_restart(tmp_json_path: Path) -> None:
     svc1 = TaxomeshService(repository=JsonRepository(tmp_json_path))
     cat = svc1.create_category(name="Persistent")
-    item = svc1.create_item(external_id="ext-1")
+    item = svc1.create_item(name="ext-1", external_id="ext-1")
     tag = svc1.create_tag(name="mytag")
     svc1.assign_tag(tag.tag_id, item.item_id)
 
@@ -78,7 +78,7 @@ def test_json_repository_no_temp_files_left_behind(tmp_json_path: Path) -> None:
     repo = JsonRepository(tmp_json_path)
     svc = TaxomeshService(repository=repo)
     svc.create_category(name="Clean")
-    svc.create_item(external_id="x")
+    svc.create_item(name="x", external_id="x")
     tmp_files = list(tmp_json_path.parent.glob("*.tmp"))
     assert tmp_files == []
 
@@ -139,7 +139,7 @@ def test_delete_tag_persists_to_file(tmp_json_path: Path) -> None:
 def test_save_item_parent_link_persists(tmp_json_path: Path) -> None:
     repo = JsonRepository(tmp_json_path)
     svc = TaxomeshService(repository=repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     cat = svc.create_category(name="C")
     svc.place_item_in_category(item.item_id, cat.category_id)
     content = json.loads(tmp_json_path.read_text())
@@ -149,7 +149,7 @@ def test_save_item_parent_link_persists(tmp_json_path: Path) -> None:
 def test_save_item_parent_link_upserts_sort_index(tmp_json_path: Path) -> None:
     repo = JsonRepository(tmp_json_path)
     svc = TaxomeshService(repository=repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     cat = svc.create_category(name="C")
     svc.place_item_in_category(item.item_id, cat.category_id, sort_index=1)
     svc.place_item_in_category(item.item_id, cat.category_id, sort_index=99)
@@ -165,7 +165,7 @@ def test_list_item_parent_links_empty(tmp_json_path: Path) -> None:
 
 def test_item_parent_links_survive_restart(tmp_json_path: Path) -> None:
     svc1 = TaxomeshService(repository=JsonRepository(tmp_json_path))
-    item = svc1.create_item(external_id="x")
+    item = svc1.create_item(name="x", external_id="x")
     cat = svc1.create_category(name="C")
     svc1.place_item_in_category(item.item_id, cat.category_id, sort_index=3)
     repo2 = JsonRepository(tmp_json_path)
@@ -236,3 +236,64 @@ def test_legacy_category_description_null_loads_empty_string(tmp_json_path: Path
     cat = repo.get_category(UUID(cat_id))
     assert cat is not None
     assert cat.description == ""
+
+
+# ---------------------------------------------------------------------------
+# Slug round-trip and lookup
+# ---------------------------------------------------------------------------
+
+
+def test_item_slug_round_trips_through_json(tmp_json_path: Path) -> None:
+    from taxomesh.domain.models import Item  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_json_path)
+    item = Item(external_id="ext-1", slug="my-item")
+    repo.save_item(item)
+    repo2 = JsonRepository(tmp_json_path)
+    loaded = repo2.get_item(item.item_id)
+    assert loaded is not None
+    assert loaded.slug == "my-item"
+
+
+def test_category_slug_round_trips_through_json(tmp_json_path: Path) -> None:
+    from taxomesh.domain.models import Category  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_json_path)
+    cat = Category(name="Books", slug="books")
+    repo.save_category(cat)
+    repo2 = JsonRepository(tmp_json_path)
+    loaded = repo2.get_category(cat.category_id)
+    assert loaded is not None
+    assert loaded.slug == "books"
+
+
+def test_get_item_by_slug_found(tmp_json_path: Path) -> None:
+    from taxomesh.domain.models import Item  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_json_path)
+    item = Item(external_id="ext-1", slug="my-item")
+    repo.save_item(item)
+    found = repo.get_item_by_slug("my-item")
+    assert found is not None
+    assert found.item_id == item.item_id
+
+
+def test_get_item_by_slug_not_found(tmp_json_path: Path) -> None:
+    repo = JsonRepository(tmp_json_path)
+    assert repo.get_item_by_slug("nonexistent") is None
+
+
+def test_get_category_by_slug_found(tmp_json_path: Path) -> None:
+    from taxomesh.domain.models import Category  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_json_path)
+    cat = Category(name="Books", slug="books")
+    repo.save_category(cat)
+    found = repo.get_category_by_slug("books")
+    assert found is not None
+    assert found.category_id == cat.category_id
+
+
+def test_get_category_by_slug_not_found(tmp_json_path: Path) -> None:
+    repo = JsonRepository(tmp_json_path)
+    assert repo.get_category_by_slug("nonexistent") is None

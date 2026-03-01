@@ -35,6 +35,10 @@ class TaxomeshCyclicDependencyError(TaxomeshValidationError):
     """Raised when a cyclic dependency is detected in the category DAG."""
 
 
+class TaxomeshDuplicateSlugError(TaxomeshValidationError):
+    """Raised when a non-empty slug is already used by another entity of the same type."""
+
+
 class TaxomeshRepositoryError(TaxomeshError):
     """Raised when a storage I/O or parse failure occurs in a repository adapter."""
 

@@ -160,6 +160,14 @@ class InMemoryRepository:
         """Return all categories whose external_id matches the given value."""
         return [cat for cat in self._categories.values() if cat.external_id == external_id]
 
+    def get_item_by_slug(self, slug: str) -> Item | None:
+        """Return the item with the given slug, or None."""
+        return next((i for i in self._items.values() if i.slug == slug), None)
+
+    def get_category_by_slug(self, slug: str) -> Category | None:
+        """Return the category with the given slug, or None."""
+        return next((c for c in self._categories.values() if c.slug == slug), None)
+
     # --- Configuration introspection ---
 
     def get_config_summary(self) -> str:

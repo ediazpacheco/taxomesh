@@ -23,6 +23,8 @@ from taxomesh.domain.constants import (
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EXTERNAL_ID_STR_LENGTH,
+    MAX_ITEM_NAME_LENGTH,
+    MAX_SLUG_LENGTH,
     MAX_TAG_NAME_LENGTH,
 )
 
@@ -59,35 +61,54 @@ class CategoryModel(models.Model):
     external_id = models.CharField(
         max_length=MAX_EXTERNAL_ID_STR_LENGTH, blank=True, default=DEFAULT_CATEGORY_EXTERNAL_ID
     )
+    slug = models.CharField(max_length=MAX_SLUG_LENGTH, blank=True, default="", db_index=True)
     metadata = models.JSONField(blank=True, default=dict)
 
     def __str__(self) -> str:
         """Return a human-readable label used in admin dropdowns."""
-        return f"{self.name} ({self.category_id})"
+        slug_part = f"s: {self.slug} - " if self.slug else ""
+        return f"📂 {self.name} ({slug_part}id: {self.category_id})"
 
     class Meta:
         app_label = APP_LABEL
         db_table = CATEGORY_TABLE
         verbose_name = "Category"
         verbose_name_plural = "Categories"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["slug"],
+                condition=~models.Q(slug=""),
+                name="taxomesh_category_slug_unique_nonempty",
+            )
+        ]
 
 
 class ItemModel(models.Model):
     """ORM representation of a taxomesh Item."""
 
     item_id = models.UUIDField(primary_key=True, default=uuid4)
+    name = models.CharField(max_length=MAX_ITEM_NAME_LENGTH, blank=True, default="")
     external_id = models.CharField(max_length=MAX_EXTERNAL_ID_STR_LENGTH)
+    slug = models.CharField(max_length=MAX_SLUG_LENGTH, blank=True, default="", db_index=True)
     enabled = models.BooleanField(default=True)
     metadata = models.JSONField(blank=True, default=dict)
 
     def __str__(self) -> str:
-        return f"ext:{self.external_id}  (id:{self.item_id})"
+        slug_part = f"s: {self.slug} - " if self.slug else ""
+        return f"🏷️ {self.name} ({slug_part}id: {self.item_id})"
 
     class Meta:
         app_label = APP_LABEL
         db_table = ITEM_TABLE
         verbose_name = "Item"
         verbose_name_plural = "Items"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["slug"],
+                condition=~models.Q(slug=""),
+                name="taxomesh_item_slug_unique_nonempty",
+            )
+        ]
 
 
 class TagModel(models.Model):
@@ -145,7 +166,7 @@ class ItemParentLinkModel(models.Model):
     sort_index = models.IntegerField(default=0)
 
     def __str__(self) -> str:
-        return f"ext:{self.item.external_id}  (id:{self.item.item_id}) → {self.category.name}"
+        return f"{self.item} → {self.category.name}"
 
     class Meta:
         app_label = APP_LABEL

@@ -449,7 +449,7 @@ def test_get_graph_returns_correct_structure() -> None:
     parent = svc.create_category("ParentCat")
     child = svc.create_category("ChildCat")
     svc.add_category_parent(child.category_id, parent.category_id)
-    item = svc.create_item("test-item")
+    item = svc.create_item("test-item", "test-item")
     svc.place_item_in_category(item.item_id, parent.category_id)
     tag = svc.create_tag("fiction")
     svc.assign_tag(tag.tag_id, item.item_id)
@@ -482,7 +482,7 @@ def test_get_graph_structure_matches_json_repository() -> None:
         parent = svc.create_category("Alpha")
         child = svc.create_category("Beta")
         svc.add_category_parent(child.category_id, parent.category_id)
-        item = svc.create_item("item-x")
+        item = svc.create_item("item-x", "item-x")
         svc.place_item_in_category(item.item_id, parent.category_id)
         tag = svc.create_tag("t1")
         svc.assign_tag(tag.tag_id, item.item_id)
@@ -497,3 +497,68 @@ def test_get_graph_structure_matches_json_repository() -> None:
         json_names = _build_taxonomy(TaxomeshService(repository=JsonRepository(json_path)))
 
     assert django_names == json_names
+
+
+# ---------------------------------------------------------------------------
+# Slug save/retrieve and lookup tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_save_and_retrieve_item_with_slug() -> None:
+    from taxomesh.domain.models import Item  # noqa: PLC0415
+
+    repo = make_repo()
+    item = Item(external_id="ext-slug", slug="my-item-slug")
+    repo.save_item(item)
+    loaded = repo.get_item(item.item_id)
+    assert loaded is not None
+    assert loaded.slug == "my-item-slug"
+
+
+@pytest.mark.django_db
+def test_save_and_retrieve_category_with_slug() -> None:
+    from taxomesh.domain.models import Category  # noqa: PLC0415
+
+    repo = make_repo()
+    cat = Category(name="Slugged", slug="slugged-cat")
+    repo.save_category(cat)
+    loaded = repo.get_category(cat.category_id)
+    assert loaded is not None
+    assert loaded.slug == "slugged-cat"
+
+
+@pytest.mark.django_db
+def test_get_item_by_slug_found() -> None:
+    from taxomesh.domain.models import Item  # noqa: PLC0415
+
+    repo = make_repo()
+    item = Item(external_id="ext-1", slug="find-me")
+    repo.save_item(item)
+    found = repo.get_item_by_slug("find-me")
+    assert found is not None
+    assert found.item_id == item.item_id
+
+
+@pytest.mark.django_db
+def test_get_item_by_slug_not_found() -> None:
+    repo = make_repo()
+    assert repo.get_item_by_slug("no-such-slug") is None
+
+
+@pytest.mark.django_db
+def test_get_category_by_slug_found() -> None:
+    from taxomesh.domain.models import Category  # noqa: PLC0415
+
+    repo = make_repo()
+    cat = Category(name="FindMe", slug="find-cat")
+    repo.save_category(cat)
+    found = repo.get_category_by_slug("find-cat")
+    assert found is not None
+    assert found.category_id == cat.category_id
+
+
+@pytest.mark.django_db
+def test_get_category_by_slug_not_found() -> None:
+    repo = make_repo()
+    assert repo.get_category_by_slug("no-such-slug") is None
