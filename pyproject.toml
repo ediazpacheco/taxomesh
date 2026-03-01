@@ -74,7 +74,7 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-exclude = ["taxomesh/contrib/django/", "tests/contrib/django/"]
+exclude = ["taxomesh/contrib/django/", "tests/contrib/django/", "tests/django_urls.py"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"

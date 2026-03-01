@@ -1,0 +1,21 @@
+{% extends "admin/app_index.html" %}
+{% load i18n %}
+
+{% block content %}
+{{ block.super }}
+<div class="module">
+  <table>
+    <caption>{% trans 'Visualization' %}</caption>
+    <tbody>
+      <tr>
+        <th scope="row">
+          <a href="{% url 'admin:taxomesh_contrib_django_graph' %}">{% trans 'Graph' %}</a>
+        </th>
+        <td>{% trans 'View the full taxonomy as a tree' %}</td>
+        <td></td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}

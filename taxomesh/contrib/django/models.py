@@ -163,3 +163,13 @@ class ItemTagLinkModel(models.Model):
         app_label = APP_LABEL
         db_table = ITEM_TAG_LINK_TABLE
         unique_together = [("tag", "item")]
+
+
+class CategoryGraphProxy(CategoryModel):
+    """Proxy of CategoryModel used solely to surface the Graph link in admin."""
+
+    class Meta:
+        proxy = True
+        verbose_name = "Graph"
+        verbose_name_plural = " Graph"  # leading space forces top position in alphabetical app list
+        app_label = APP_LABEL

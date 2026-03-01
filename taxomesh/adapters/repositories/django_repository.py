@@ -12,7 +12,7 @@ Usage::
     svc = TaxomeshService(repository=DjangoRepository())
 """
 
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 from taxomesh.application.service import ROOT_CATEGORY_NAME
@@ -29,6 +29,7 @@ from taxomesh.domain.models import (
 # ---------------------------------------------------------------------------
 
 _USING_DEFAULT = "default"
+DJANGO_REPO_TYPE: Final[str] = "django"
 
 
 class DjangoRepository:
@@ -70,6 +71,23 @@ class DjangoRepository:
             from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
 
             raise TaxomeshRepositoryError("Django is not installed. Run: pip install taxomesh[django]") from exc
+        except Exception as exc:
+            try:
+                from django.core.exceptions import (  # type: ignore[import-untyped]  # noqa: PLC0415
+                    ImproperlyConfigured,
+                )
+
+                if isinstance(exc, ImproperlyConfigured):
+                    from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+                    raise TaxomeshRepositoryError(
+                        "Django settings are not configured. "
+                        "Set the DJANGO_SETTINGS_MODULE environment variable before running "
+                        "taxomesh with type = 'django'."
+                    ) from exc
+            except ImportError:
+                pass
+            raise
 
         self._using = using
         # Keep references to avoid repeated imports in hot paths
