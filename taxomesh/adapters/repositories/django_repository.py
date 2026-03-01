@@ -146,7 +146,6 @@ class DjangoRepository:
         Returns:
             A non-empty summary string safe for display in CLI output.
         """
-        # django is an optional dependency; import-not-found is expected when Django is absent.
         from django.conf import settings  # type: ignore[import-untyped]  # noqa: PLC0415
 
         engine: str = settings.DATABASES[self._using]["ENGINE"].split(".")[-1]
@@ -165,7 +164,6 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On database error.
         """
-        # django is an optional dependency; import-not-found is expected when Django is absent.
         from django.db import DatabaseError, transaction  # type: ignore[import-untyped]  # noqa: PLC0415
 
         from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
