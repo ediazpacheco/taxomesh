@@ -31,13 +31,14 @@ Under the hood, every write to the category graph is protected by **cycle detect
 | **Per-parent sort index** | Each category–parent and item–category relationship carries its own `sort_index`. *Tango* can be rank 1 under *Argentina* and rank 5 under *World Music Genres* — independently.                       |
 | **Multi-parent hierarchy** | A category or item appears in every parent it is linked to. No deduplication.                                                                                                                          |
 | **Taxonomy graph** | A read-only snapshot of the full taxonomy — all categories with their items and children, ready for display or processing.                                                                             |
-| **Repository** | A pluggable backend that stores everything. The CLI defaults to an atomic YAML file; `JsonRepository` is also available. Bring your own for anything else. |
+| **Repository** | A pluggable backend that stores everything. Any class satisfying `TaxomeshRepositoryBase` works. Three built-in options: `YAMLRepository` (default), `DjangoRepository`, and `JsonRepository`. |
 
 ---
 
 ## Features
 
 - [x] Generic item references — UUID, int, or string external ID
+- [x] Reverse lookup — `get_items_by_external_id` / `get_categories_by_external_id` bridge consumer IDs to taxomesh internals
 - [x] Category hierarchies as a full DAG (not just a tree)
 - [x] Per-parent sort index — independent ordering in each parent context
 - [x] Multi-parent categories and items — appear under every parent they belong to
@@ -45,14 +46,17 @@ Under the hood, every write to the category graph is protected by **cycle detect
 - [x] Free-form tags on items with idempotent assign/remove
 - [x] `get_graph()` — full taxonomy snapshot as a traversable `TaxomeshGraph` object
 - [x] Pluggable repository backend via `typing.Protocol` — no inheritance required
-- [x] Built-in YAML backend with atomic writes — CLI default (`taxomesh.yaml`)
+- [x] Built-in Django ORM backend (`taxomesh[django]`) — one `pip install`, one `migrate`, done
+- [x] Plug-and-play Django admin — Category, Item, and Tag models registered out of the box; no extra configuration
+- [x] `assignable_categories_qs()` — ready-to-use queryset for admin autocomplete widgets
+- [x] Multi-database support — pass any Django database alias to `DjangoRepository(using="...")`
+- [x] Built-in YAML backend with atomic writes — default when no repository is configured
 - [x] Built-in JSON backend with atomic writes
 - [x] First-class CLI — `taxomesh category`, `item`, `tag`, `graph`
 - [x] `--verbose` flag for diagnostics (repository type, config path)
 - [x] Fully typed — passes `mypy --strict` with zero suppressions
-- [x] 220+ tests, ≥ 80% coverage enforced in CI
+- [x] 380+ tests, ≥ 80% coverage enforced in CI
 - [x] Example taxonomy in `examples/taxomesh_example.yaml`
-- [ ] SQLite3 backend *(planned)*
 - [ ] Query / filter capabilities *(planned)*
 
 ---
@@ -63,7 +67,7 @@ Under the hood, every write to the category graph is protected by **cycle detect
 pip install taxomesh
 ```
 
-Requires **Python 3.11+**. The YAML backend (CLI default) uses `pyyaml`, which is included as a required dependency — no extras needed.
+Requires **Python 3.11+**. The YAML backend uses `pyyaml`, which is included as a required dependency — no extras needed. For the Django backend, install `taxomesh[django]`.
 
 ---
 
@@ -282,14 +286,28 @@ A category with multiple explicit parents appears as a separate `CategoryNode` u
 
 ---
 
-### YAML backend
+## Repositories
+
+taxomesh uses a **repository pattern** — storage is a pluggable detail. Any class that satisfies `TaxomeshRepositoryBase` (a `typing.Protocol` from `taxomesh.ports.repository`) works as a backend. No inheritance is required; structural compatibility is sufficient.
+
+```python
+from taxomesh.ports.repository import TaxomeshRepositoryBase
+```
+
+All application interfaces — the Python API, the CLI, and any custom integration — are repository-agnostic. Switching backends requires changing exactly one constructor argument.
+
+Three built-in repositories are included:
+
+### YAML (`YAMLRepository`)
+
+Stores the taxonomy in a single YAML file. Writes are atomic (via `tempfile` + `os.replace`). This is the default when no repository is explicitly configured.
 
 ```python
 from pathlib import Path
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
 
-service = TaxomeshService(repository=YAMLRepository(Path("my_taxonomy.yaml")))
+service = TaxomeshService(repository=YAMLRepository(Path("data/taxonomy.yaml")))
 ```
 
 A ready-to-use example taxonomy is included in the repository:
@@ -304,6 +322,78 @@ svc = TaxomeshService(repository=repo)
 graph = svc.get_graph()
 print([n.category.name for n in graph.roots])
 # ['Animals', 'Plants', 'Vehicles', 'Music', 'Literature']
+```
+
+### Django ORM (`DjangoRepository`)
+
+Backed by Django's ORM. Stores taxonomy data in the same database as your Django application, with support for any database Django supports — PostgreSQL, MySQL, SQLite, and others.
+
+Install the extra:
+
+```bash
+pip install taxomesh[django]
+```
+
+Add the app to `INSTALLED_APPS` and run migrations:
+
+```python
+# settings.py
+INSTALLED_APPS = [
+    ...
+    "taxomesh.contrib.django",
+]
+```
+
+```bash
+python manage.py migrate
+```
+
+**Plug-and-play admin.** The `Category`, `Item`, and `Tag` models are registered in Django admin out of the box — no extra code needed. Add `taxomesh.contrib.django` to `INSTALLED_APPS`, migrate, and your taxonomy is immediately browsable and editable through the standard admin interface.
+
+For admin autocomplete widgets that let operators pick categories for an item, use `assignable_categories_qs()` directly on the repository — it returns a lazy, chainable `QuerySet` of enabled, non-root categories:
+
+```python
+from taxomesh.adapters.repositories.django_repository import DjangoRepository
+
+repo = DjangoRepository()
+qs = repo.assignable_categories_qs()           # QuerySet[CategoryModel], enabled & non-root
+qs = qs.filter(name__icontains="music")        # supports further chaining
+```
+
+```python
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.django_repository import DjangoRepository
+
+service = TaxomeshService(repository=DjangoRepository())
+```
+
+Or via the convenience factory:
+
+```python
+from taxomesh.contrib.django import get_taxomesh_service_with_django
+
+service = get_taxomesh_service_with_django()                  # uses "default" DB alias
+service = get_taxomesh_service_with_django(using="secondary") # custom DB alias
+```
+
+Or via `taxomesh.toml`:
+
+```toml
+[repository]
+type = "django"
+using = "default"   # optional — defaults to "default"
+```
+
+### JSON (`JsonRepository`)
+
+Stores the taxonomy in a single JSON file. Writes are atomic.
+
+```python
+from pathlib import Path
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.json_repository import JsonRepository
+
+service = TaxomeshService(repository=JsonRepository(Path("data/taxonomy.json")))
 ```
 
 ---
@@ -338,46 +428,24 @@ svc = TaxomeshService(repository=YAMLRepository(Path("data/taxonomy.yaml")))
 ```toml
 # taxomesh.toml — place in your project root
 
-# YAML backend (default)
 [repository]
 type = "yaml"
 path = "data/taxonomy.yaml"
 ```
 
 ```toml
-# JSON backend (alternative option)
 [repository]
 type = "json"
 path = "data/taxonomy.json"
 ```
 
-For the full, authoritative setting reference — accepted values, defaults, and both backend examples — see [`taxomesh.toml.example`](./taxomesh.toml.example) at the repository root.
-
----
-
-### YAML backend
-
-```python
-from pathlib import Path
-from taxomesh import TaxomeshService
-from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
-
-service = TaxomeshService(repository=YAMLRepository(Path("my_taxonomy.yaml")))
+```toml
+[repository]
+type = "django"
+using = "default"
 ```
 
-A ready-to-use example taxonomy is included in the repository:
-
-```python
-from pathlib import Path
-from taxomesh import TaxomeshService
-from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
-
-repo = YAMLRepository(Path("examples/taxomesh_example.yaml"))
-svc = TaxomeshService(repository=repo)
-graph = svc.get_graph()
-print([n.category.name for n in graph.roots])
-# ['Animals', 'Plants', 'Vehicles', 'Music', 'Literature']
-```
+For the full, authoritative setting reference — accepted values and defaults — see [`taxomesh.toml.example`](./taxomesh.toml.example) at the repository root.
 
 ---
 
@@ -387,22 +455,13 @@ taxomesh ships with a full command-line interface. After installation, the `taxo
 
 ### Configuration (optional)
 
-Without a config file the CLI writes to `taxomesh.yaml` in the current directory. Create `taxomesh.toml` to customise the backend:
+Without a config file the CLI defaults to `YAMLRepository` (writing to `taxomesh.yaml` in the current directory). Create `taxomesh.toml` to use a different backend:
 
 ```toml
 # taxomesh.toml — place in your project root
-
-# YAML backend (default)
 [repository]
 type = "yaml"
 path = "data/taxonomy.yaml"
-```
-
-```toml
-# JSON backend (backward-compatible)
-[repository]
-type = "json"
-path = "data/taxonomy.json"
 ```
 
 The CLI reads `taxomesh.toml` from the current working directory automatically. Override per-invocation with `--config`:
@@ -547,9 +606,9 @@ taxomesh follows a **hexagonal architecture** (ports and adapters). Dependency d
                      │ satisfied structurally by
 ┌────────────────────▼───────────────────────────────┐
 │  Adapters  (taxomesh.adapters)                     │
-│  YAMLRepository  (CLI default, atomic writes)      │
-│  JsonRepository  (alternative option)              │
-│  … future: SqliteRepository …                     │
+│  DjangoRepository  (ORM-backed, taxomesh[django])  │
+│  YAMLRepository    (default, atomic writes)        │
+│  JsonRepository    (atomic writes)                 │
 │                                                    │
 │  CLI  (taxomesh.adapters.cli)                      │
 │  category · item · tag · graph                     │
@@ -652,8 +711,8 @@ from taxomesh import (
 
 | Version | Scope |
 |---|---|
-| **v0.1** *(in progress)* | Core models, service facade, JSON + YAML backends, DAG cycle detection, CLI, taxonomy graph |
-| **v0.2** | SQLite3 backend, bulk operations, filtering and querying |
+| **v0.1** *(in progress)* | Core models, service facade, Django ORM + JSON + YAML backends, DAG cycle detection, CLI, taxonomy graph |
+| **v0.2** | Bulk operations, filtering and querying |
 | **v0.3** | Async repository interface, additional backends (PostgreSQL, MongoDB) |
 | **v1.0** | Stable public API, documentation site, migration tooling |
 

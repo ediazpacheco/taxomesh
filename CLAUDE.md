@@ -214,6 +214,9 @@ Do NOT update README during implement — only after
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models), Typer ≥ 0.12 (CLI), Rich ≥ 13.0 (terminal rendering) (011-category-models-cli)
 - JsonRepository (JSON file), YAMLRepository (YAML file) — both must persist new Category fields (011-category-models-cli)
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models), Typer ≥ 0.12 (CLI), Rich ≥ 13.0 (terminal rendering), `time.monotonic` (TTL clock — stdlib) (011-category-models-cli)
+- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (via FastAPI), Typer ≥ 0.12, Rich ≥ 13.0, pyyaml ≥ 6.0, Django ≥ 4.2 (optional) (013-external-id-lookup)
+- JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM, optional) (013-external-id-lookup)
+- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models, transitive via FastAPI), Typer ≥ 0.12, Rich ≥ 13.0, pyyaml ≥ 6.0, Django ≥ 4.2 (optional) (013-external-id-lookup)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

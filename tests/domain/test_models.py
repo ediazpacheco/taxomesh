@@ -29,30 +29,30 @@ class TestModelBase:
 
 class TestItem:
     def test_construction(self) -> None:
-        item = Item(external_id=42)
-        assert item.external_id == 42  # noqa: PLR2004
+        item = Item(external_id=42)  # type: ignore[arg-type]
+        assert item.external_id == "42"
 
     def test_item_id_auto_generated(self) -> None:
-        item = Item(external_id=1)
+        item = Item(external_id="1")
         assert isinstance(item.item_id, UUID)
 
     def test_item_id_unique_per_instance(self) -> None:
-        a = Item(external_id=1)
-        b = Item(external_id=1)
+        a = Item(external_id="1")
+        b = Item(external_id="1")
         assert a.item_id != b.item_id
 
     def test_external_id_accepts_uuid(self) -> None:
         uid = uuid4()
-        item = Item(external_id=uid)
-        assert item.external_id == uid
+        item = Item(external_id=uid)  # type: ignore[arg-type]
+        assert item.external_id == str(uid)
 
     def test_external_id_accepts_str(self) -> None:
         item = Item(external_id="abc")
         assert item.external_id == "abc"
 
     def test_external_id_accepts_int(self) -> None:
-        item = Item(external_id=99)
-        assert item.external_id == 99  # noqa: PLR2004
+        item = Item(external_id=99)  # type: ignore[arg-type]
+        assert item.external_id == "99"
 
     def test_external_id_str_at_max_length_is_valid(self) -> None:
         item = Item(external_id="a" * 256)
@@ -63,16 +63,16 @@ class TestItem:
             Item(external_id="x" * 257)
 
     def test_enabled_defaults_true(self) -> None:
-        item = Item(external_id=1)
+        item = Item(external_id="1")
         assert item.enabled is True
 
     def test_metadata_defaults_empty_dict(self) -> None:
-        item = Item(external_id=1)
+        item = Item(external_id="1")
         assert item.metadata == {}
 
     def test_metadata_instances_are_independent(self) -> None:
-        a = Item(external_id=1)
-        b = Item(external_id=2)
+        a = Item(external_id="1")
+        b = Item(external_id="2")
         a.metadata["key"] = "value"
         assert b.metadata == {}
 

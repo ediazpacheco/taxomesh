@@ -132,6 +132,16 @@ class InMemoryRepository:
         """Return all item→category placement records."""
         return list(self._item_parent_links)
 
+    # --- External-ID lookup ---
+
+    def list_items_by_external_id(self, external_id: str) -> list[Item]:
+        """Return all items whose external_id matches the given value."""
+        return [item for item in self._items.values() if item.external_id == external_id]
+
+    def list_categories_by_external_id(self, external_id: str) -> list[Category]:
+        """Return all categories whose external_id matches the given value."""
+        return [cat for cat in self._categories.values() if cat.external_id == external_id]
+
     # --- Configuration introspection ---
 
     def get_config_summary(self) -> str:

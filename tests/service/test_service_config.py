@@ -1,11 +1,12 @@
 """Tests for TaxomeshService config_path parameter and repository property (FR-008–FR-012)."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.django_repository import DjangoRepository
 from taxomesh.exceptions import TaxomeshConfigError
 
 
@@ -130,3 +131,49 @@ def test_os_error_on_config_read_raises_config_error_with_chain(tmp_path: Path) 
     ):
         TaxomeshService(config_path=cfg)
     assert isinstance(exc_info.value.__cause__, PermissionError)
+
+
+# ---------------------------------------------------------------------------
+# US6 — TOML config: type = "django" (FR-013, FR-014)
+# ---------------------------------------------------------------------------
+
+
+def test_build_repo_from_config_django_type(tmp_path: Path) -> None:
+    """type = "django" in config constructs a DjangoRepository instance."""
+    cfg = tmp_path / "taxomesh.toml"
+    cfg.write_text('[repository]\ntype = "django"\n', encoding="utf-8")
+
+    mock_repo = MagicMock(spec=DjangoRepository)
+    mock_repo.list_categories.return_value = []
+
+    with patch(
+        "taxomesh.adapters.repositories.django_repository.DjangoRepository",
+        return_value=mock_repo,
+    ):
+        svc = TaxomeshService(config_path=cfg)
+
+    assert svc.repository is mock_repo
+
+
+def test_build_repo_from_config_django_type_with_using(tmp_path: Path) -> None:
+    """Optional 'using' key is passed to DjangoRepository constructor."""
+    cfg = tmp_path / "taxomesh.toml"
+    cfg.write_text('[repository]\ntype = "django"\nusing = "secondary"\n', encoding="utf-8")
+
+    mock_repo = MagicMock(spec=DjangoRepository)
+    mock_repo.list_categories.return_value = []
+
+    with patch(
+        "taxomesh.adapters.repositories.django_repository.DjangoRepository",
+    ) as MockDjangoRepo:
+        MockDjangoRepo.return_value = mock_repo
+        TaxomeshService(config_path=cfg)
+        MockDjangoRepo.assert_called_once_with(using="secondary")
+
+
+def test_build_repo_from_config_unsupported_type_lists_django_in_error(tmp_path: Path) -> None:
+    """Error message for unsupported type mentions 'django' as supported option (FR-014)."""
+    cfg = tmp_path / "bad_type.toml"
+    cfg.write_text('[repository]\ntype = "mongodb"\n', encoding="utf-8")
+    with pytest.raises(TaxomeshConfigError, match="'django'"):
+        TaxomeshService(config_path=cfg)

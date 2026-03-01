@@ -207,6 +207,38 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
+    # --- External-ID lookup ---
+
+    def list_items_by_external_id(self, external_id: str) -> list[Item]:
+        """Return all items whose ``external_id`` matches the given string.
+
+        Returns an empty list when no item matches (orphan signal for the
+        consumer). Returns multiple items when the same external_id was used
+        more than once (duplicate signal for the consumer).
+
+        Args:
+            external_id: The external identifier to look up (already a str).
+
+        Returns:
+            List of matching Item instances; empty list if none match.
+        """
+        ...
+
+    def list_categories_by_external_id(self, external_id: str) -> list[Category]:
+        """Return all categories whose ``external_id`` matches the given string.
+
+        Returns an empty list when no category matches (orphan signal for the
+        consumer). Returns multiple categories when the same external_id was
+        used more than once (duplicate signal for the consumer).
+
+        Args:
+            external_id: The external identifier to look up (already a str).
+
+        Returns:
+            List of matching Category instances; empty list if none match.
+        """
+        ...
+
     # --- Configuration introspection ---
 
     def get_config_summary(self) -> str:
