@@ -15,10 +15,10 @@ import typer
 from rich.console import Console
 from rich.tree import Tree
 
-from taxomesh.adapters.cli.config import BuildResult, build
+from taxomesh.adapters.cli.config import BuildResult, _resolve_effective_config, build, dump_config
 from taxomesh.domain.graph import CategoryNode
 from taxomesh.domain.types import ExternalId
-from taxomesh.exceptions import TaxomeshError
+from taxomesh.exceptions import TaxomeshConfigError, TaxomeshError
 
 ENABLED_ICON: Final[str] = "✓"
 DISABLED_ICON: Final[str] = "✗"
@@ -81,16 +81,27 @@ def _err(msg: str) -> None:
     raise typer.Exit(code=1)
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
     config: Path | None = typer.Option(None, "--config", help="Path to taxomesh.toml"),
     verbose: bool = typer.Option(False, "--verbose", help="Show repository type and config file path before output."),
+    show_config: bool = typer.Option(
+        False, "--show-config", help="Print effective configuration in TOML format and exit."
+    ),  # noqa: E501
 ) -> None:
     """taxomesh — multi-parent taxonomy management CLI."""
     ctx.ensure_object(dict)
     # Any: ctx.obj is a typed dict accessed only via _verbose()/_config_path() helpers
     ctx.obj = {"config_path": config, "verbose": verbose}
+    if show_config:
+        try:
+            repo_type, repo_path = _resolve_effective_config(config)
+            typer.echo(dump_config(repo_type, repo_path), nl=False)
+            raise typer.Exit()
+        except TaxomeshConfigError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from None
 
 
 # ---------------------------------------------------------------------------

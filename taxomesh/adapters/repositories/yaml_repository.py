@@ -19,6 +19,9 @@ from taxomesh.exceptions import TaxomeshRepositoryError
 
 DEFAULT_YAML_PATH: Final[Path] = Path("data/taxomesh.yaml")
 
+# TOML config identifier for the YAML backend (value of [repository] type).
+YAML_REPO_TYPE: Final[str] = "yaml"
+
 
 class YAMLRepository:
     """Repository that persists taxomesh data to a YAML file on disk.

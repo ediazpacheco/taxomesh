@@ -18,6 +18,9 @@ from taxomesh.exceptions import TaxomeshRepositoryError
 
 DEFAULT_JSON_PATH: Final[Path] = Path("data/taxomesh.json")
 
+# TOML config identifier for the JSON backend (value of [repository] type).
+JSON_REPO_TYPE: Final[str] = "json"
+
 
 class JsonRepository:
     """Repository that persists taxomesh data to a JSON file on disk.
