@@ -11,6 +11,7 @@ from taxomesh.domain.constants import (
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EXTERNAL_ID_STR_LENGTH,
+    ROOT_CATEGORY_NAME,
 )
 from taxomesh.domain.models.base import ModelBase
 
@@ -30,6 +31,11 @@ class Category(ModelBase):
     def _coerce_none_description(cls, v: object) -> object:
         """Coerce None description to empty string."""
         return "" if v is None else v
+
+    @property
+    def is_root(self) -> bool:
+        """True if this category is the internal root node (name equals ROOT_CATEGORY_NAME)."""
+        return self.name == ROOT_CATEGORY_NAME
 
     @field_validator("external_id", mode="before")
     @classmethod

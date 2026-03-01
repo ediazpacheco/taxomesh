@@ -25,3 +25,7 @@ DEFAULT_DESCRIPTION: Final[str] = ""
 
 # Default value for Category.external_id — empty string means "no external ID".
 DEFAULT_CATEGORY_EXTERNAL_ID: Final[str] = ""
+
+# Reserved name for the internal root category node.  Categories with this
+# name must never be exposed to end users or administrators.
+ROOT_CATEGORY_NAME: Final[str] = "__root__"

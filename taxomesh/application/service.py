@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Final
 from uuid import UUID, uuid4
 
+from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
 from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
@@ -18,6 +19,7 @@ from taxomesh.domain.types import ExternalId
 from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
     TaxomeshConfigError,
+    TaxomeshCyclicDependencyError,
     TaxomeshItemNotFoundError,
     TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
@@ -25,7 +27,6 @@ from taxomesh.exceptions import (
 from taxomesh.ports.repository import TaxomeshRepositoryBase
 from taxomesh.utils.memoize import clear_all_caches, memoize
 
-ROOT_CATEGORY_NAME: Final[str] = "__root__"
 _DEFAULT_CONFIG_FILENAME: Final[str] = "taxomesh.toml"
 DEFAULT_CACHE_TTL: Final[int] = 5
 
@@ -503,6 +504,8 @@ class TaxomeshService:
         """
         if category_id == self._root_id:
             raise TaxomeshRootCategoryError("Cannot add a parent to the root category")
+        if category_id == parent_id:
+            raise TaxomeshCyclicDependencyError(f"Category {category_id} cannot be its own parent.")
         if self._repo.get_category(category_id) is None:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
         if self._repo.get_category(parent_id) is None:
@@ -660,3 +663,38 @@ class TaxomeshService:
         """
         results = self._repo.list_categories_by_external_id(str(external_id))
         return [cat for cat in results if cat.category_id != self._root_id]
+
+    def remove_category_parent(self, category_id: UUID, parent_id: UUID) -> None:
+        """Remove a parent relationship from a category. No-op if the link does not exist.
+
+        Args:
+            category_id: The child category's UUID.
+            parent_id: The parent category's UUID.
+
+        Raises:
+            TaxomeshCategoryNotFoundError: If either category does not exist.
+        """
+        if self._repo.get_category(category_id) is None:
+            raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
+        if self._repo.get_category(parent_id) is None:
+            raise TaxomeshCategoryNotFoundError(f"Category not found: {parent_id}")
+        self._repo.delete_category_parent_link(category_id, parent_id)
+        clear_all_caches()
+
+    def remove_item_from_category(self, item_id: UUID, category_id: UUID) -> None:
+        """Remove an item's placement from a category. No-op if the placement does not exist.
+
+        Args:
+            item_id: The item's UUID.
+            category_id: The category's UUID.
+
+        Raises:
+            TaxomeshItemNotFoundError: If no item with the given item_id exists.
+            TaxomeshCategoryNotFoundError: If no category with the given category_id exists.
+        """
+        if self._repo.get_item(item_id) is None:
+            raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
+        if self._repo.get_category(category_id) is None:
+            raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
+        self._repo.delete_item_parent_link(item_id, category_id)
+        clear_all_caches()

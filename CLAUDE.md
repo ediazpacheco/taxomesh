@@ -221,6 +221,8 @@ Do NOT update README during implement — only after
 - N/A — read-only feature; no writes to any repository (014-cli-config-dump)
 - Python 3.11 + Typer ≥ 0.12 (CLI), Django ≥ 4.2 (optional — admin view), stdlib `tomllib` (015-django-cli-admin)
 - Django ORM (optional backend) — no new storage changes (015-django-cli-admin)
+- Python 3.11 + Django ≥ 4.2 (admin framework), Pydantic v2 (domain models), Typer ≥ 0.12 (016-admin-service-layer)
+- DjangoRepository — Django ORM (PostgreSQL/SQLite compatible) (016-admin-service-layer)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
