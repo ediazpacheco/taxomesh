@@ -1,0 +1,48 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Taxonomy Graph{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; {% trans 'Taxonomy Graph' %}
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Taxonomy Graph</h1>
+
+{% if error %}
+  <p class="errornote">{{ error }}</p>
+{% elif not has_entries %}
+  <p>No categories found. Add one to get started.</p>
+{% else %}
+  <div id="taxomesh-graph" style="font-family: monospace; line-height: 1.8;">
+    {% for entry in entries %}
+      {% if entry.kind == "category" %}
+      <div class="taxomesh-category" style="padding-left: {{ entry.indent_em }}rem; margin: 2px 0;">
+      {% else %}
+      <div class="taxomesh-item" style="padding-left: {{ entry.indent_em }}rem; margin: 2px 0;">
+      {% endif %}
+        {% if entry.enabled %}
+          <span style="color: #28a745;" title="enabled">&#10003;</span>
+        {% else %}
+          <span style="color: #dc3545;" title="disabled">&#10007;</span>
+        {% endif %}
+        {% if entry.kind == "category" %}
+          <strong>{{ entry.name }}</strong>
+          <span style="color: #888; font-size: 0.85em;">&nbsp;{{ entry.uuid }}</span>
+          {% if entry.external_id %}
+            <span style="color: #666;">&nbsp;[{{ entry.external_id }}]</span>
+          {% endif %}
+        {% else %}
+          <span style="color: #555;">{{ entry.name }}</span>
+          <span style="color: #888; font-size: 0.85em;">&nbsp;{{ entry.uuid }}</span>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

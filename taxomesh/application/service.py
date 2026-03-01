@@ -107,8 +107,9 @@ class TaxomeshService:
             TaxomeshConfigError: If ``type`` is not a supported value.
             TaxomeshRepositoryError: If the adapter fails to initialise.
         """
-        from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
-        from taxomesh.adapters.repositories.yaml_repository import YAMLRepository  # noqa: PLC0415
+        from taxomesh.adapters.repositories.django_repository import DJANGO_REPO_TYPE  # noqa: PLC0415
+        from taxomesh.adapters.repositories.json_repository import JSON_REPO_TYPE, JsonRepository  # noqa: PLC0415
+        from taxomesh.adapters.repositories.yaml_repository import YAML_REPO_TYPE, YAMLRepository  # noqa: PLC0415
 
         def _build_yaml(section: dict[str, Any]) -> TaxomeshRepositoryBase:
             return YAMLRepository(Path(section["path"])) if "path" in section else YAMLRepository()
@@ -128,13 +129,13 @@ class TaxomeshService:
             return DjangoRepository(using=using)
 
         _REPO_BUILDERS: dict[str, Callable[[dict[str, Any]], TaxomeshRepositoryBase]] = {
-            "yaml": _build_yaml,
-            "json": _build_json,
-            "django": _build_django,
+            YAML_REPO_TYPE: _build_yaml,
+            JSON_REPO_TYPE: _build_json,
+            DJANGO_REPO_TYPE: _build_django,
         }
 
         section = config.get("repository", {})
-        repo_type: str = section.get("type", "yaml")
+        repo_type: str = section.get("type", YAML_REPO_TYPE)
         builder = _REPO_BUILDERS.get(repo_type)
         if builder is None:
             supported = ", ".join(f"'{k}'" for k in _REPO_BUILDERS)

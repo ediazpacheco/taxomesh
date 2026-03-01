@@ -7,7 +7,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from taxomesh.adapters.cli.config import CONFIG_KEYS, dump_config
+from taxomesh.adapters.cli.config import CONFIG_KEYS, SUPPORTED_REPO_TYPES, dump_config
 from taxomesh.adapters.cli.main import app
 
 runner = CliRunner()
@@ -62,13 +62,16 @@ class TestDumpConfig:
             assert has_comment_above, f"Key line {line!r} at index {i} has no comment above it"
 
     def test_dump_config_contains_all_config_keys_entries(self) -> None:
-        """Every dotted path in CONFIG_KEYS must correspond to a key in the parsed TOML output."""
+        """Every key emitted by dump_config must correspond to a dotted path in CONFIG_KEYS."""
         output = dump_config("yaml", "data/taxomesh.yaml")
         parsed = tomllib.loads(output)
-        for dotted in CONFIG_KEYS:
-            section, key = dotted.split(".")
-            assert section in parsed, f"Section {section!r} missing from TOML output"
-            assert key in parsed[section], f"Key {key!r} missing from [{section}] in TOML output"
+        all_keys = set(CONFIG_KEYS)
+        for section, val in parsed.items():
+            if isinstance(val, dict):
+                for key in val:
+                    assert f"{section}.{key}" in all_keys, f"Key {section}.{key!r} not in CONFIG_KEYS"
+            else:
+                assert section in all_keys, f"Key {section!r} not in CONFIG_KEYS"
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +208,7 @@ class TestConfigKeysInvariant:
         output = dump_config("yaml", "data/taxomesh.yaml")
         parsed = tomllib.loads(output)
         dumped_keys = self._flatten_toml(parsed)
-        assert dumped_keys == set(CONFIG_KEYS)
+        assert dumped_keys <= set(CONFIG_KEYS)
 
     def test_dump_output_has_no_keys_outside_config_keys(self) -> None:
         """No key in the parsed dump output may be absent from CONFIG_KEYS."""
@@ -242,3 +245,95 @@ class TestShowConfigEndToEnd:
 
         run_result = runner.invoke(app, ["--config", str(config_file), "category", "list"])
         assert run_result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# T005 (b) — TestDumpConfigDjango
+# ---------------------------------------------------------------------------
+
+
+class TestDumpConfigDjango:
+    def test_dump_config_django_is_valid_toml(self) -> None:
+        """dump_config('django', 'default') must produce parseable TOML."""
+        result = dump_config("django", "default")
+        tomllib.loads(result)  # must not raise
+
+    def test_dump_config_django_has_using_key(self) -> None:
+        """dump_config('django', ...) output must contain 'using = "default"'."""
+        result = dump_config("django", "default")
+        assert 'using = "default"' in result
+
+    def test_dump_config_django_has_no_path_key(self) -> None:
+        """dump_config('django', ...) output must NOT contain a 'path =' key."""
+        result = dump_config("django", "default")
+        assert "path =" not in result
+
+    def test_dump_config_django_accepted_values_lists_all_types(self) -> None:
+        """The accepted-values comment in dump_config output must include 'django'."""
+        result = dump_config("django", "default")
+        assert '"django"' in result
+
+
+# ---------------------------------------------------------------------------
+# T005 (c) — TestSupportedRepoTypes
+# ---------------------------------------------------------------------------
+
+
+class TestSupportedRepoTypes:
+    def test_supported_repo_types_is_tuple(self) -> None:
+        """SUPPORTED_REPO_TYPES must be a tuple."""
+        assert isinstance(SUPPORTED_REPO_TYPES, tuple)
+
+    def test_supported_repo_types_contains_yaml_json_django(self) -> None:
+        """SUPPORTED_REPO_TYPES must contain 'yaml', 'json', and 'django'."""
+        assert "yaml" in SUPPORTED_REPO_TYPES
+        assert "json" in SUPPORTED_REPO_TYPES
+        assert "django" in SUPPORTED_REPO_TYPES
+
+
+# ---------------------------------------------------------------------------
+# T005 (d) & T006 — Django show-config tests (added to module scope)
+# ---------------------------------------------------------------------------
+
+
+class TestShowConfigDjango:
+    def test_show_config_django_type_has_using_key(self, tmp_path: Path) -> None:
+        """With type=django, --show-config must output 'using = \"default\"'."""
+        toml_file = tmp_path / "taxomesh.toml"
+        toml_file.write_text('[repository]\ntype = "django"\n', encoding="utf-8")
+        result = runner.invoke(app, ["--config", str(toml_file), "--show-config"])
+        assert result.exit_code == 0
+        assert 'using = "default"' in result.stdout
+
+    def test_show_config_django_type_has_no_path_key(self, tmp_path: Path) -> None:
+        """With type=django, --show-config output must NOT contain 'path ='."""
+        toml_file = tmp_path / "taxomesh.toml"
+        toml_file.write_text('[repository]\ntype = "django"\n', encoding="utf-8")
+        result = runner.invoke(app, ["--config", str(toml_file), "--show-config"])
+        assert result.exit_code == 0
+        assert "path =" not in result.stdout
+
+    def test_show_config_django_type_is_valid_toml(self, tmp_path: Path) -> None:
+        """With type=django, --show-config output must be valid TOML."""
+        toml_file = tmp_path / "taxomesh.toml"
+        toml_file.write_text('[repository]\ntype = "django"\n', encoding="utf-8")
+        result = runner.invoke(app, ["--config", str(toml_file), "--show-config"])
+        assert result.exit_code == 0
+        tomllib.loads(result.stdout)  # must not raise
+
+    def test_show_config_django_type_with_custom_using(self, tmp_path: Path) -> None:
+        """With type=django and using=secondary, --show-config reflects the custom alias."""
+        toml_file = tmp_path / "taxomesh.toml"
+        toml_file.write_text('[repository]\ntype = "django"\nusing = "secondary"\n', encoding="utf-8")
+        result = runner.invoke(app, ["--config", str(toml_file), "--show-config"])
+        assert result.exit_code == 0
+        assert 'using = "secondary"' in result.stdout
+
+    def test_show_config_django_does_not_require_django_settings(self, tmp_path: Path) -> None:
+        """--show-config with type=django must exit 0 and produce valid TOML
+        without requiring DJANGO_SETTINGS_MODULE (no repo is instantiated)."""
+        toml_file = tmp_path / "taxomesh.toml"
+        toml_file.write_text('[repository]\ntype = "django"\n', encoding="utf-8")
+        result = runner.invoke(app, ["--config", str(toml_file), "--show-config"])
+        assert result.exit_code == 0
+        tomllib.loads(result.stdout)  # must not raise

@@ -177,3 +177,15 @@ def test_build_repo_from_config_unsupported_type_lists_django_in_error(tmp_path:
     cfg.write_text('[repository]\ntype = "mongodb"\n', encoding="utf-8")
     with pytest.raises(TaxomeshConfigError, match="'django'"):
         TaxomeshService(config_path=cfg)
+
+
+# ---------------------------------------------------------------------------
+# T001 — DJANGO_REPO_TYPE named constant
+# ---------------------------------------------------------------------------
+
+
+def test_django_repo_type_importable_and_equals_django() -> None:
+    """DJANGO_REPO_TYPE must be importable from django_repository and equal 'django'."""
+    from taxomesh.adapters.repositories.django_repository import DJANGO_REPO_TYPE  # noqa: PLC0415
+
+    assert DJANGO_REPO_TYPE == "django"

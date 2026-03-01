@@ -64,6 +64,8 @@ class CategoryModel(models.Model):
     class Meta:
         app_label = APP_LABEL
         db_table = CATEGORY_TABLE
+        verbose_name = "Category"
+        verbose_name_plural = "Categories"
 
 
 class ItemModel(models.Model):
@@ -77,6 +79,8 @@ class ItemModel(models.Model):
     class Meta:
         app_label = APP_LABEL
         db_table = ITEM_TABLE
+        verbose_name = "Item"
+        verbose_name_plural = "Items"
 
 
 class TagModel(models.Model):
@@ -89,6 +93,8 @@ class TagModel(models.Model):
     class Meta:
         app_label = APP_LABEL
         db_table = TAG_TABLE
+        verbose_name = "Tag"
+        verbose_name_plural = "Tags"
 
 
 class CategoryParentLinkModel(models.Model):
@@ -157,3 +163,13 @@ class ItemTagLinkModel(models.Model):
         app_label = APP_LABEL
         db_table = ITEM_TAG_LINK_TABLE
         unique_together = [("tag", "item")]
+
+
+class CategoryGraphProxy(CategoryModel):
+    """Proxy of CategoryModel used solely to surface the Graph link in admin."""
+
+    class Meta:
+        proxy = True
+        verbose_name = "Graph"
+        verbose_name_plural = " Graph"  # leading space forces top position in alphabetical app list
+        app_label = APP_LABEL
