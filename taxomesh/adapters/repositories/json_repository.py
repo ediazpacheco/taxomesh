@@ -339,6 +339,46 @@ class JsonRepository:
         """
         return list(self._item_parent_links)
 
+    def delete_category_parent_link(self, category_id: UUID, parent_category_id: UUID) -> bool:
+        """Delete a category→parent relationship.
+
+        Args:
+            category_id: The child category's UUID.
+            parent_category_id: The parent category's UUID.
+
+        Returns:
+            True if the link was found and deleted; False if it did not exist.
+        """
+        before = len(self._category_parent_links)
+        self._category_parent_links = [
+            lnk
+            for lnk in self._category_parent_links
+            if not (lnk.category_id == category_id and lnk.parent_category_id == parent_category_id)
+        ]
+        if len(self._category_parent_links) < before:
+            self._flush()
+            return True
+        return False
+
+    def delete_item_parent_link(self, item_id: UUID, category_id: UUID) -> bool:
+        """Delete an item→category placement.
+
+        Args:
+            item_id: The item's UUID.
+            category_id: The category's UUID.
+
+        Returns:
+            True if the placement was found and deleted; False if it did not exist.
+        """
+        before = len(self._item_parent_links)
+        self._item_parent_links = [
+            lnk for lnk in self._item_parent_links if not (lnk.item_id == item_id and lnk.category_id == category_id)
+        ]
+        if len(self._item_parent_links) < before:
+            self._flush()
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # External-ID lookup
     # ------------------------------------------------------------------

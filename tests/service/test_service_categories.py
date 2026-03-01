@@ -4,7 +4,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from taxomesh.application.service import ROOT_CATEGORY_NAME, TaxomeshService
+from taxomesh.application.service import TaxomeshService
+from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshCyclicDependencyError, TaxomeshRootCategoryError
 
 

@@ -2,8 +2,11 @@
 
 from uuid import uuid4
 
+import pytest
+
 from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.models import CategoryParentLink
+from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshCyclicDependencyError
 
 from .conftest import InMemoryRepository
 
@@ -92,3 +95,58 @@ def test_upsert_does_not_affect_distinct_pairs(service: TaxomeshService) -> None
     )
     assert link_p1.sort_index == 99
     assert link_p2.sort_index == 2
+
+
+# ---------------------------------------------------------------------------
+# T006: Service-level remove_category_parent()
+# ---------------------------------------------------------------------------
+
+
+def test_remove_category_parent_valid(service: TaxomeshService) -> None:
+    """Removing an existing link removes it from list_category_parent_links()."""
+    cat_a = service.create_category(name="Child")
+    cat_b = service.create_category(name="Parent")
+    service.add_category_parent(cat_a.category_id, cat_b.category_id, sort_index=0)
+
+    # Confirm the explicit link exists before removal
+    explicit_before = [
+        lnk
+        for lnk in service._repo.list_category_parent_links()
+        if lnk.category_id == cat_a.category_id and lnk.parent_category_id == cat_b.category_id
+    ]
+    assert len(explicit_before) == 1
+
+    service.remove_category_parent(cat_a.category_id, cat_b.category_id)
+
+    explicit_after = [
+        lnk
+        for lnk in service._repo.list_category_parent_links()
+        if lnk.category_id == cat_a.category_id and lnk.parent_category_id == cat_b.category_id
+    ]
+    assert len(explicit_after) == 0
+
+
+def test_remove_category_parent_noop_if_not_linked(service: TaxomeshService) -> None:
+    """Removing a non-existent link raises no error."""
+    cat_a = service.create_category(name="A")
+    cat_b = service.create_category(name="B")
+    # No link exists — must not raise
+    service.remove_category_parent(cat_a.category_id, cat_b.category_id)
+
+
+def test_remove_category_parent_raises_if_category_not_found(service: TaxomeshService) -> None:
+    """Removing with an unknown category_id raises TaxomeshCategoryNotFoundError."""
+    with pytest.raises(TaxomeshCategoryNotFoundError):
+        service.remove_category_parent(uuid4(), uuid4())
+
+
+# ---------------------------------------------------------------------------
+# Self-reference guard in add_category_parent()
+# ---------------------------------------------------------------------------
+
+
+def test_add_category_parent_self_reference_raises_cyclic_error(service: TaxomeshService) -> None:
+    """add_category_parent(A, A) raises TaxomeshCyclicDependencyError with a clear message."""
+    cat = service.create_category(name="SelfRef")
+    with pytest.raises(TaxomeshCyclicDependencyError, match="cannot be its own parent"):
+        service.add_category_parent(cat.category_id, cat.category_id)

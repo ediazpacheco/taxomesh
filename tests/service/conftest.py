@@ -132,6 +132,24 @@ class InMemoryRepository:
         """Return all item→category placement records."""
         return list(self._item_parent_links)
 
+    def delete_category_parent_link(self, category_id: UUID, parent_category_id: UUID) -> bool:
+        """Delete a category→parent relationship; return True if found."""
+        before = len(self._category_parent_links)
+        self._category_parent_links = [
+            lnk
+            for lnk in self._category_parent_links
+            if not (lnk.category_id == category_id and lnk.parent_category_id == parent_category_id)
+        ]
+        return len(self._category_parent_links) < before
+
+    def delete_item_parent_link(self, item_id: UUID, category_id: UUID) -> bool:
+        """Delete an item→category placement; return True if found."""
+        before = len(self._item_parent_links)
+        self._item_parent_links = [
+            lnk for lnk in self._item_parent_links if not (lnk.item_id == item_id and lnk.category_id == category_id)
+        ]
+        return len(self._item_parent_links) < before
+
     # --- External-ID lookup ---
 
     def list_items_by_external_id(self, external_id: str) -> list[Item]:

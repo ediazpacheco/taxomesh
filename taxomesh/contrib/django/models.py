@@ -61,6 +61,10 @@ class CategoryModel(models.Model):
     )
     metadata = models.JSONField(blank=True, default=dict)
 
+    def __str__(self) -> str:
+        """Return a human-readable label used in admin dropdowns."""
+        return f"{self.name} ({self.category_id})"
+
     class Meta:
         app_label = APP_LABEL
         db_table = CATEGORY_TABLE

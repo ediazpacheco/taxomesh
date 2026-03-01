@@ -146,6 +146,18 @@ class TestCategory:
         assert restored.enabled is False
         assert restored.external_id == "genre-rock"
 
+    def test_is_root_true_for_root_name(self) -> None:
+        """Category.is_root is True when name equals the reserved root constant."""
+        from taxomesh.domain.constants import ROOT_CATEGORY_NAME  # noqa: PLC0415
+
+        cat = Category(category_id=uuid4(), name=ROOT_CATEGORY_NAME)
+        assert cat.is_root is True
+
+    def test_is_root_false_for_regular_name(self) -> None:
+        """Category.is_root is False for any non-root name."""
+        cat = Category(category_id=uuid4(), name="Electronics")
+        assert cat.is_root is False
+
 
 class TestTag:
     def test_construction(self) -> None:

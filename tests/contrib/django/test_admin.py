@@ -1,5 +1,7 @@
 """Admin registration smoke tests for taxomesh Django models."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
 django = pytest.importorskip("django", reason="Django is not installed")
@@ -26,6 +28,13 @@ def test_core_models_admin_plural_labels() -> None:
     assert CategoryModel._meta.verbose_name_plural == "Categories"
     assert ItemModel._meta.verbose_name_plural == "Items"
     assert TagModel._meta.verbose_name_plural == "Tags"
+
+
+def test_category_model_str_shows_name_and_uuid() -> None:
+    """CategoryModel.__str__ must return '<name> (<category_id>)' for inline dropdowns."""
+    cat = CategoryModel(name="Electronics")
+    expected = f"Electronics ({cat.category_id})"
+    assert str(cat) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -118,3 +127,56 @@ class TestGraphProxyAdminIndex:
         response = admin_client.get(changelist_url)  # type: ignore[attr-defined]
         assert response.status_code == 302
         assert response["Location"] == graph_url
+
+
+# ---------------------------------------------------------------------------
+# Root category hidden from list view and dropdowns
+# ---------------------------------------------------------------------------
+
+
+class TestRootCategoryHidden:
+    """Root category must not appear in CategoryModelAdmin list view or FK dropdowns."""
+
+    def test_get_queryset_excludes_root(self) -> None:
+        """CategoryModelAdmin.get_queryset() must not return the root category."""
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryModel  # noqa: PLC0415
+        from taxomesh.domain.constants import ROOT_CATEGORY_NAME  # noqa: PLC0415
+
+        CategoryModel.objects.create(name=ROOT_CATEGORY_NAME)
+        CategoryModel.objects.create(name="Electronics")
+
+        site = AdminSite()
+        admin_obj = CategoryModelAdmin(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+        qs = admin_obj.get_queryset(request)
+
+        names = list(qs.values_list("name", flat=True))
+        assert ROOT_CATEGORY_NAME not in names
+        assert "Electronics" in names
+
+    def test_parent_category_dropdown_excludes_root(self) -> None:
+        """CategoryParentLinkInline FK dropdown for parent_category must exclude root."""
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryParentLinkInline  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryModel, CategoryParentLinkModel  # noqa: PLC0415
+        from taxomesh.domain.constants import ROOT_CATEGORY_NAME  # noqa: PLC0415
+
+        CategoryModel.objects.create(name=ROOT_CATEGORY_NAME)
+        CategoryModel.objects.create(name="Electronics")
+
+        site = AdminSite()
+        inline = CategoryParentLinkInline(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        db_field = CategoryParentLinkModel._meta.get_field("parent_category")
+        form_field = inline.formfield_for_foreignkey(db_field, request)  # type: ignore[arg-type]
+
+        names = list(form_field.queryset.values_list("name", flat=True))  # type: ignore[union-attr]
+        assert ROOT_CATEGORY_NAME not in names
+        assert "Electronics" in names
