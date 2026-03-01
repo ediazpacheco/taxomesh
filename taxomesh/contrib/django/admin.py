@@ -1,6 +1,7 @@
 """Django admin registrations for taxomesh ORM models."""
 
 from typing import Any
+from uuid import UUID
 
 from django import forms
 from django.contrib import admin
@@ -77,6 +78,143 @@ class TaxomeshAdminMixin:
             A fresh TaxomeshService instance per request.
         """
         return TaxomeshService(repository=DjangoRepository())
+
+
+# ---------------------------------------------------------------------------
+# ItemCategoryAssignmentMixin helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_item_category_ids(obj: Any, external_id_attr: str) -> list[UUID]:
+    """Return current category UUIDs assigned to the taxomesh item for obj.
+
+    Args:
+        obj: The Django model instance whose PK maps to a taxomesh Item external_id.
+        external_id_attr: Name of the attribute on obj that holds the external_id value.
+
+    Returns:
+        List of category UUIDs currently assigned to the item; empty if item not found.
+    """
+    external_id = str(getattr(obj, external_id_attr))
+    svc = TaxomeshService(repository=DjangoRepository())
+    items = svc.get_items_by_external_id(external_id)
+    if not items:
+        return []
+    item_id = items[0].item_id
+    return [link.category_id for link in svc.repository.list_item_parent_links() if link.item_id == item_id]
+
+
+def _reconcile_categories(obj: Any, form: Any, external_id_attr: str) -> None:
+    """Diff selected vs. current categories and apply place/remove via service.
+
+    Args:
+        obj: The Django model instance being saved.
+        form: The bound admin form (must have ``cleaned_data``).
+        external_id_attr: Name of the attribute on obj that holds the external_id value.
+    """
+    if "categories" not in form.cleaned_data:
+        return
+    external_id = str(getattr(obj, external_id_attr))
+    svc = TaxomeshService(repository=DjangoRepository())
+    items = svc.get_items_by_external_id(external_id)
+    if not items:
+        return
+    item_id = items[0].item_id
+    current_ids = {link.category_id for link in svc.repository.list_item_parent_links() if link.item_id == item_id}
+    selected = {cat.category_id for cat in form.cleaned_data["categories"]}
+    for cat_id in selected - current_ids:
+        svc.place_item_in_category(item_id, cat_id)
+    for cat_id in current_ids - selected:
+        svc.remove_item_from_category(item_id, cat_id)
+
+
+# ---------------------------------------------------------------------------
+# ItemCategoryAssignmentMixin
+# ---------------------------------------------------------------------------
+
+
+class ItemCategoryAssignmentMixin(TaxomeshAdminMixin):
+    """Admin mixin that adds a 'categories' multi-select field to any ModelAdmin
+    whose model PK maps to a taxomesh Item external_id.
+
+    Usage::
+
+        class MyModelAdmin(ItemCategoryAssignmentMixin, admin.ModelAdmin):
+            taxomesh_external_id_attr = "id"   # default: "pk"
+    """
+
+    taxomesh_external_id_attr: str = "pk"
+
+    def get_form(self, request: HttpRequest, obj: Any = None, **kwargs: Any) -> Any:
+        """Inject a 'categories' ModelMultipleChoiceField into the admin form.
+
+        Django's ``ModelAdmin._get_form_for_get_fields`` calls ``get_form(fields=None)``
+        recursively to discover available fields. The ``fields=None`` sentinel signals
+        this discovery path; injection is skipped then to avoid polluting the field
+        list with a non-model field.
+
+        For all other call paths (add/change views), the ``categories`` field is
+        registered on the base form class as a declared field before passing it to
+        ``super().get_form()``. This lets ``modelform_factory`` see it in
+        ``declared_fields``, preventing the ``FieldError`` that would occur when the
+        field name appears in ``fieldsets`` but not on the model.
+
+        Args:
+            request: The current HTTP request.
+            obj: The model instance being edited; ``None`` for the add view.
+            **kwargs: Passed through to ``super().get_form()``.
+
+        Returns:
+            A form class with an additional ``categories`` field populated from
+            the enabled, non-root categories in ``DjangoRepository``.
+        """
+        # fields=None is the _get_form_for_get_fields sentinel — skip injection.
+        if "fields" in kwargs and kwargs.get("fields") is None:
+            return super().get_form(request, obj, **kwargs)  # type: ignore[misc]
+
+        from django import forms as dj_forms  # noqa: PLC0415
+        from django.contrib.admin.widgets import FilteredSelectMultiple  # noqa: PLC0415
+
+        qs = DjangoRepository().assignable_categories_qs()
+        cat_field = dj_forms.ModelMultipleChoiceField(
+            queryset=qs,
+            required=False,
+            widget=FilteredSelectMultiple("categories", is_stacked=False),
+            label="Categories",
+        )
+
+        # Register categories on the base form as a declared field so that
+        # modelform_factory does not raise FieldError when 'categories' appears
+        # in fieldsets (which become the fields= argument to modelform_factory).
+        base_form: Any = kwargs.pop("form", None) or self.form
+        kwargs["form"] = type(base_form.__name__, (base_form,), {"categories": cat_field})
+
+        form_class = super().get_form(request, obj, **kwargs)  # type: ignore[misc]
+
+        if obj is not None:
+            initial_ids = _get_item_category_ids(obj, self.taxomesh_external_id_attr)
+            if initial_ids:
+                form_class.base_fields["categories"].initial = CategoryModel.objects.filter(  # type: ignore[index]
+                    category_id__in=initial_ids
+                )
+
+        return form_class
+
+    def save_model(self, request: HttpRequest, obj: Any, form: Any, change: bool) -> None:
+        """Save the model and reconcile category assignments via the service layer.
+
+        Calls ``super().save_model()`` first (which persists the model instance),
+        then diffs the selected categories against the current assignments and
+        applies ``place_item_in_category`` / ``remove_item_from_category`` as needed.
+
+        Args:
+            request: The current HTTP request.
+            obj: The model instance being saved.
+            form: The bound admin form with ``cleaned_data``.
+            change: ``True`` if updating an existing record; ``False`` if creating.
+        """
+        super().save_model(request, obj, form, change)  # type: ignore[misc]
+        _reconcile_categories(obj, form, self.taxomesh_external_id_attr)
 
 
 # ---------------------------------------------------------------------------
