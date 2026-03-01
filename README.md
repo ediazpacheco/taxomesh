@@ -305,6 +305,15 @@ taxomesh tag list
 taxomesh graph
 ```
 
+Example output:
+
+```text
+Taxonomy
+└── Music  11111111-1111-1111-1111-111111111111  ✓
+    └── Jazz  22222222-2222-2222-2222-222222222222  ✓
+        └── kind-of-blue  33333333-3333-3333-3333-333333333333  ✓
+```
+
 Verbose diagnostics:
 
 ```bash
