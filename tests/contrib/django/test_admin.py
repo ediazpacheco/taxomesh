@@ -22,6 +22,12 @@ def test_core_models_registered_in_admin() -> None:
     assert not missing, f"Models not registered in admin: {missing}"
 
 
+def test_core_models_admin_plural_labels() -> None:
+    assert CategoryModel._meta.verbose_name_plural == "Categories"
+    assert ItemModel._meta.verbose_name_plural == "Items"
+    assert TagModel._meta.verbose_name_plural == "Tags"
+
+
 # ---------------------------------------------------------------------------
 # T012 — TestGraphAdminView
 # ---------------------------------------------------------------------------
