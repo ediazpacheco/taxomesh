@@ -76,6 +76,11 @@ warn_return_any = true
 warn_unused_configs = true
 exclude = ["taxomesh/contrib/django/", "tests/contrib/django/"]
 
+[[tool.mypy.overrides]]
+# Django is an optional dependency; ignore import errors when it is absent (CI without Django).
+module = "taxomesh.adapters.repositories.django_repository"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
