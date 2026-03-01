@@ -80,6 +80,9 @@ class ItemModel(models.Model):
     enabled = models.BooleanField(default=True)
     metadata = models.JSONField(blank=True, default=dict)
 
+    def __str__(self) -> str:
+        return f"ext:{self.external_id}  (id:{self.item_id})"
+
     class Meta:
         app_label = APP_LABEL
         db_table = ITEM_TABLE
@@ -140,6 +143,9 @@ class ItemParentLinkModel(models.Model):
         db_column="category_id",
     )
     sort_index = models.IntegerField(default=0)
+
+    def __str__(self) -> str:
+        return f"ext:{self.item.external_id}  (id:{self.item.item_id}) → {self.category.name}"
 
     class Meta:
         app_label = APP_LABEL

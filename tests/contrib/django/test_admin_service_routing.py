@@ -667,3 +667,258 @@ class TestCategoryParentLinkForm:
             result = form.clean()
 
         assert result is expected
+
+
+# ---------------------------------------------------------------------------
+# T025 — ItemCategoryAssignmentMixin tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetItemCategoryIdsHelper:
+    """Tests for the _get_item_category_ids module-level helper."""
+
+    def test_returns_empty_list_when_no_item_found(self) -> None:
+        """Returns [] when get_items_by_external_id returns no items."""
+        from taxomesh.contrib.django.admin import _get_item_category_ids  # noqa: PLC0415
+
+        obj = MagicMock()
+        obj.pk = "no-such-item"
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.get_items_by_external_id.return_value = []
+
+            result = _get_item_category_ids(obj, "pk")
+
+        assert result == []
+
+    def test_returns_category_ids_for_item(self) -> None:
+        """Returns the category_ids of all item-parent links belonging to the item."""
+        from taxomesh.contrib.django.admin import _get_item_category_ids  # noqa: PLC0415
+
+        obj = MagicMock()
+        obj.pk = "ext-1"
+        item_id = uuid4()
+        cat_id_a = uuid4()
+        other_item_id = uuid4()
+        cat_id_b = uuid4()  # belongs to a different item — must be excluded
+
+        mock_item = MagicMock()
+        mock_item.item_id = item_id
+
+        link_own = MagicMock()
+        link_own.item_id = item_id
+        link_own.category_id = cat_id_a
+
+        link_other = MagicMock()
+        link_other.item_id = other_item_id
+        link_other.category_id = cat_id_b
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.get_items_by_external_id.return_value = [mock_item]
+            mock_svc.repository.list_item_parent_links.return_value = [link_own, link_other]
+
+            result = _get_item_category_ids(obj, "pk")
+
+        assert result == [cat_id_a]
+
+
+class TestReconcileCategoriesHelper:
+    """Tests for the _reconcile_categories module-level helper."""
+
+    def test_no_op_when_categories_key_absent(self) -> None:
+        """Returns immediately without calling service when 'categories' not in cleaned_data."""
+        from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
+
+        obj = MagicMock()
+        form = MagicMock()
+        form.cleaned_data = {}
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            _reconcile_categories(obj, form, "pk")
+            mock_svc.get_items_by_external_id.assert_not_called()
+            mock_svc.place_item_in_category.assert_not_called()
+            mock_svc.remove_item_from_category.assert_not_called()
+
+    def test_no_op_when_item_not_found(self) -> None:
+        """Returns without calling place/remove when get_items_by_external_id is empty."""
+        from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
+
+        obj = MagicMock()
+        obj.pk = "ghost"
+        form = MagicMock()
+        form.cleaned_data = {"categories": []}
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.get_items_by_external_id.return_value = []
+            _reconcile_categories(obj, form, "pk")
+            mock_svc.place_item_in_category.assert_not_called()
+            mock_svc.remove_item_from_category.assert_not_called()
+
+    def test_places_newly_selected_categories(self) -> None:
+        """Calls place_item_in_category for categories in selected but not in current."""
+        from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
+
+        obj = MagicMock()
+        obj.pk = "ext-1"
+        item_id = uuid4()
+        cat_id_new = uuid4()
+
+        mock_item = MagicMock()
+        mock_item.item_id = item_id
+
+        mock_cat = MagicMock()
+        mock_cat.category_id = cat_id_new
+
+        form = MagicMock()
+        form.cleaned_data = {"categories": [mock_cat]}
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.get_items_by_external_id.return_value = [mock_item]
+            mock_svc.repository.list_item_parent_links.return_value = []
+            _reconcile_categories(obj, form, "pk")
+            mock_svc.place_item_in_category.assert_called_once_with(item_id, cat_id_new)
+            mock_svc.remove_item_from_category.assert_not_called()
+
+    def test_removes_deselected_categories(self) -> None:
+        """Calls remove_item_from_category for categories in current but not in selected."""
+        from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
+
+        obj = MagicMock()
+        obj.pk = "ext-1"
+        item_id = uuid4()
+        cat_id_old = uuid4()
+
+        mock_item = MagicMock()
+        mock_item.item_id = item_id
+
+        link = MagicMock()
+        link.item_id = item_id
+        link.category_id = cat_id_old
+
+        form = MagicMock()
+        form.cleaned_data = {"categories": []}
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.get_items_by_external_id.return_value = [mock_item]
+            mock_svc.repository.list_item_parent_links.return_value = [link]
+            _reconcile_categories(obj, form, "pk")
+            mock_svc.remove_item_from_category.assert_called_once_with(item_id, cat_id_old)
+            mock_svc.place_item_in_category.assert_not_called()
+
+    def test_places_and_removes_correctly_for_mixed_diff(self) -> None:
+        """Correctly adds new and removes old categories in a single call."""
+        from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
+
+        obj = MagicMock()
+        obj.pk = "ext-1"
+        item_id = uuid4()
+        cat_id_keep = uuid4()
+        cat_id_remove = uuid4()
+        cat_id_add = uuid4()
+
+        mock_item = MagicMock()
+        mock_item.item_id = item_id
+
+        link_keep = MagicMock()
+        link_keep.item_id = item_id
+        link_keep.category_id = cat_id_keep
+
+        link_remove = MagicMock()
+        link_remove.item_id = item_id
+        link_remove.category_id = cat_id_remove
+
+        mock_cat_keep = MagicMock()
+        mock_cat_keep.category_id = cat_id_keep
+
+        mock_cat_add = MagicMock()
+        mock_cat_add.category_id = cat_id_add
+
+        form = MagicMock()
+        form.cleaned_data = {"categories": [mock_cat_keep, mock_cat_add]}
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.get_items_by_external_id.return_value = [mock_item]
+            mock_svc.repository.list_item_parent_links.return_value = [link_keep, link_remove]
+            _reconcile_categories(obj, form, "pk")
+            mock_svc.place_item_in_category.assert_called_once_with(item_id, cat_id_add)
+            mock_svc.remove_item_from_category.assert_called_once_with(item_id, cat_id_remove)
+
+
+class TestItemCategoryAssignmentMixin:
+    """Tests for ItemCategoryAssignmentMixin.get_form and save_model."""
+
+    def _make_concrete_admin(self) -> object:
+        """Return a ModelAdmin that uses ItemCategoryAssignmentMixin backed by ItemModel."""
+        from django.contrib.admin import ModelAdmin  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import (  # noqa: PLC0415
+            ItemCategoryAssignmentMixin,
+        )
+
+        class ConcreteAdmin(ItemCategoryAssignmentMixin, ModelAdmin):  # type: ignore[type-arg]
+            pass
+
+        site = AdminSite()
+        return ConcreteAdmin(ItemModel, site)
+
+    def test_get_form_injects_categories_field(self) -> None:
+        """get_form returns a form class that contains a 'categories' field."""
+        admin_obj = self._make_concrete_admin()
+        request = _make_mock_request()
+
+        with patch(_PATCH_REPO) as MockRepo:
+            MockRepo.return_value.assignable_categories_qs.return_value = CategoryModel.objects.none()
+            form_class = admin_obj.get_form(request, obj=None)  # type: ignore[union-attr]
+
+        assert "categories" in form_class.base_fields
+
+    def test_get_form_categories_field_not_required(self) -> None:
+        """The injected 'categories' field is not required (allows saving with no categories)."""
+        admin_obj = self._make_concrete_admin()
+        request = _make_mock_request()
+
+        with patch(_PATCH_REPO) as MockRepo:
+            MockRepo.return_value.assignable_categories_qs.return_value = CategoryModel.objects.none()
+            form_class = admin_obj.get_form(request, obj=None)  # type: ignore[union-attr]
+
+        assert form_class.base_fields["categories"].required is False
+
+    def test_save_model_calls_reconcile_via_service(self) -> None:
+        """save_model triggers _reconcile_categories after super().save_model()."""
+        admin_obj = self._make_concrete_admin()
+        request = _make_mock_request()
+
+        obj = MagicMock(spec=ItemModel)
+        obj.pk = str(uuid4())
+
+        form = MagicMock()
+        form.cleaned_data = {"categories": []}
+
+        from django.contrib.admin import ModelAdmin as _ModelAdmin  # noqa: PLC0415
+
+        with patch(_PATCH_TARGET) as MockSvc, patch.object(_ModelAdmin, "save_model"):
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.get_items_by_external_id.return_value = []
+            admin_obj.save_model(request, obj, form, False)  # type: ignore[union-attr]
+            mock_svc.get_items_by_external_id.assert_called_once()
+
+    def test_taxomesh_external_id_attr_default_is_pk(self) -> None:
+        """Default taxomesh_external_id_attr is 'pk'."""
+        from taxomesh.contrib.django.admin import ItemCategoryAssignmentMixin  # noqa: PLC0415
+
+        assert ItemCategoryAssignmentMixin.taxomesh_external_id_attr == "pk"

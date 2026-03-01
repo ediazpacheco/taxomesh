@@ -11,6 +11,7 @@ from django.contrib import admin  # noqa: E402
 from taxomesh.contrib.django.models import (  # noqa: E402
     CategoryModel,
     ItemModel,
+    ItemParentLinkModel,
     TagModel,
 )
 
@@ -35,6 +36,26 @@ def test_category_model_str_shows_name_and_uuid() -> None:
     cat = CategoryModel(name="Electronics")
     expected = f"Electronics ({cat.category_id})"
     assert str(cat) == expected
+
+
+def test_item_model_str_labels_external_id_and_internal_id() -> None:
+    """ItemModel.__str__ must label both external_id and item_id."""
+    item = ItemModel(external_id="some-slug")
+    s = str(item)
+    assert "ext:some-slug" in s
+    assert f"id:{item.item_id}" in s
+
+
+@pytest.mark.django_db
+def test_item_parent_link_model_str_labels_external_id_and_category() -> None:
+    """ItemParentLinkModel.__str__ must show item external_id, item_id, and category name."""
+    cat = CategoryModel.objects.create(name="Music")
+    item = ItemModel.objects.create(external_id="track-1")
+    link = ItemParentLinkModel.objects.create(item=item, category=cat)
+    s = str(link)
+    assert "ext:track-1" in s
+    assert f"id:{item.item_id}" in s
+    assert "Music" in s
 
 
 # ---------------------------------------------------------------------------
