@@ -69,6 +69,9 @@ pip install taxomesh
 
 Requires **Python 3.11+**. The YAML backend uses `pyyaml`, which is included as a required dependency — no extras needed. For the Django backend, install `taxomesh[django]`.
 
+> `taxomesh` is currently **pre-alpha** (`0.1.x`), and API/behavior may still
+> evolve between alpha releases.
+
 ---
 
 ## Python API
@@ -161,7 +164,11 @@ except TaxomeshCyclicDependencyError:
 
 ### Items
 
-Items carry a library-assigned internal UUID (`item_id`) and a user-supplied `external_id` that can be a UUID, integer, or string slug.
+Items carry a library-assigned internal UUID (`item_id`) and a user-supplied
+`external_id`.
+
+Inputs may be UUID, integer, or string. Internally, `external_id` is
+normalized to `str` when persisted.
 
 ```python
 from uuid import uuid4
@@ -174,7 +181,7 @@ article = service.create_item(external_id="how-to-brew-coffee")
 product = service.create_item(external_id=uuid4())
 
 print(song.item_id)      # internal UUID (assigned by the library)
-print(song.external_id)  # 42
+print(song.external_id)  # "42" (normalized to string)
 
 # Enable / disable
 service.update_item(song.item_id, enabled=False)
@@ -412,9 +419,6 @@ from taxomesh import TaxomeshService
 # No config file → falls back to YAMLRepository (data/taxomesh.yaml)
 svc = TaxomeshService()
 
-# Auto-discovers taxomesh.toml in the current working directory if present
-svc = TaxomeshService()
-
 # Explicit config file
 svc = TaxomeshService(config_path="path/to/taxomesh.toml")
 
@@ -581,7 +585,7 @@ Any command accepts `--verbose` to print the active repository backend and confi
 taxomesh --verbose category list
 # Repository  : YAMLRepository
 # Config      : taxomesh.yaml
-# Config file : /home/user/project/taxomesh.toml (not found — using defaults)
+# Config file : /home/user/project/taxomesh.toml [not found]
 # --- Categories ---
 # ...
 ```
@@ -629,7 +633,7 @@ The domain layer (`taxomesh/domain/`) has zero dependencies on storage, framewor
 class MyDatabaseBackend:
     def save_category(self, category): ...
     def get_category(self, category_id): ...
-    # ... implement all 18 protocol methods ...
+    # ... implement all protocol methods ...
 
 service = TaxomeshService(repository=MyDatabaseBackend())
 # Everything — categories, items, tags, graph — works identically.
@@ -653,6 +657,7 @@ from taxomesh.ports.repository import TaxomeshRepositoryBase
 | Tag ↔ Item | `assign_tag`, `remove_tag` |
 | Category parent links | `save_category_parent_link`, `list_category_parent_links` |
 | Item → Category placement | `save_item_parent_link`, `list_item_parent_links` |
+| External-ID lookup | `list_items_by_external_id`, `list_categories_by_external_id` |
 | Diagnostics | `get_config_summary` |
 
 ---
@@ -661,8 +666,8 @@ from taxomesh.ports.repository import TaxomeshRepositoryBase
 
 | Class | Description |
 |---|---|
-| `Item` | External entity reference. `item_id` (internal UUID) + `external_id` (UUID / int / str) + `enabled` flag. |
-| `Category` | Named DAG node. `category_id`, `name`, optional `description`, free-form `metadata`. |
+| `Item` | External entity reference. `item_id` (internal UUID) + `external_id` (stored as normalized `str`) + `enabled` flag. |
+| `Category` | Named DAG node. `category_id`, `name`, optional `description`, `enabled`, `external_id` (normalized `str`), free-form `metadata`. |
 | `Tag` | Short label (max 25 chars). `tag_id`, `name`, free-form `metadata`. |
 | `CategoryParentLink` | Junction linking a category to one parent, with an independent `sort_index`. |
 | `ItemParentLink` | Junction placing an item under a category, with a `sort_index`. |
@@ -686,10 +691,12 @@ TaxomeshError                          ← catch any taxomesh error
 │   └── TaxomeshTagNotFoundError
 ├── TaxomeshValidationError            ← domain constraint violated
 │   └── TaxomeshCyclicDependencyError  ← DAG cycle detected in add_category_parent
-└── TaxomeshRepositoryError            ← storage I/O or parse failure
+├── TaxomeshRepositoryError            ← storage I/O or parse failure
+├── TaxomeshConfigError                ← invalid/unsupported taxomesh.toml
+└── TaxomeshRootCategoryError          ← reserved root mutation attempted
 ```
 
-All names are importable from the top-level package:
+Most exception names are importable from the top-level package:
 
 ```python
 from taxomesh import (
@@ -702,8 +709,11 @@ from taxomesh import (
     TaxomeshValidationError,
     TaxomeshCyclicDependencyError,
     TaxomeshRepositoryError,
+    TaxomeshConfigError,
 )
 ```
+
+`TaxomeshRootCategoryError` is available from `taxomesh.exceptions`.
 
 ---
 
