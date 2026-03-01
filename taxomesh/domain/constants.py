@@ -29,3 +29,12 @@ DEFAULT_CATEGORY_EXTERNAL_ID: Final[str] = ""
 # Reserved name for the internal root category node.  Categories with this
 # name must never be exposed to end users or administrators.
 ROOT_CATEGORY_NAME: Final[str] = "__root__"
+
+# Maximum character length for an item name.
+MAX_ITEM_NAME_LENGTH: Final[int] = 256
+
+# Maximum character length for a slug (URL-friendly short identifier).
+MAX_SLUG_LENGTH: Final[int] = 256
+
+# Default value for slug — empty string means "no slug".
+DEFAULT_SLUG: Final[str] = ""

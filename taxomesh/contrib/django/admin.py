@@ -38,6 +38,7 @@ def _flatten_graph(graph: TaxomeshGraph) -> list[dict[str, object]]:
                 "kind": "category",
                 "name": cat.name,
                 "uuid": str(cat.category_id),
+                "slug": cat.slug or None,
                 "enabled": cat.enabled,
                 "external_id": cat.external_id if cat.external_id else None,
             }
@@ -51,6 +52,7 @@ def _flatten_graph(graph: TaxomeshGraph) -> list[dict[str, object]]:
                     "kind": "item",
                     "name": str(item.external_id),
                     "uuid": str(item.item_id),
+                    "slug": item.slug or None,
                     "enabled": item.enabled,
                     "external_id": None,
                 }
@@ -414,6 +416,30 @@ class ItemTagLinkInline(TaxomeshAdminMixin, admin.TabularInline):
 
 
 # ---------------------------------------------------------------------------
+# Shared filters
+# ---------------------------------------------------------------------------
+
+
+class HasSlugFilter(admin.SimpleListFilter):
+    """Filter by slug presence: 'Has slug' / 'No slug'."""
+
+    title = "has slug"
+    parameter_name = "has_slug"
+
+    def lookups(self, request: HttpRequest, model_admin: object) -> list[tuple[str, str]]:
+        """Return the filter options."""
+        return [("yes", "Has slug"), ("no", "No slug")]
+
+    def queryset(self, request: HttpRequest, queryset: object) -> object:
+        """Apply the filter to the queryset."""
+        if self.value() == "yes":
+            return queryset.exclude(slug="")  # type: ignore[union-attr]
+        if self.value() == "no":
+            return queryset.filter(slug="")  # type: ignore[union-attr]
+        return queryset
+
+
+# ---------------------------------------------------------------------------
 # CategoryModelAdmin
 # ---------------------------------------------------------------------------
 
@@ -422,9 +448,10 @@ class ItemTagLinkInline(TaxomeshAdminMixin, admin.TabularInline):
 class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
     """Admin view for Category records."""
 
-    list_display = ("category_id", "name", "enabled", "external_id")
-    search_fields = ("name",)
-    list_filter = ("enabled",)
+    list_display = ("category_id", "name", "slug", "enabled", "external_id")
+    search_fields = ("name", "slug")
+    list_filter = ("enabled", HasSlugFilter)
+    fields = ("name", "slug", "description", "enabled", "external_id")
     inlines = [CategoryParentLinkInline]
 
     def get_queryset(self, request: HttpRequest) -> object:  # type: ignore[override]
@@ -496,6 +523,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
                 domain_cat = svc.create_category(
                     name=obj.name,
                     description=obj.description,
+                    slug=obj.slug,
                 )
                 # Sync obj so Django can use it as a FK target for inline saves.
                 # Without this, Django 4.0+ raises ValueError ("unsaved related object")
@@ -507,6 +535,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
                     category_id=obj.category_id,
                     name=obj.name,
                     description=obj.description,
+                    slug=obj.slug,
                 )
         except TaxomeshValidationError as exc:
             self.message_user(request, str(exc), level=messages.ERROR)
@@ -552,9 +581,10 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
 class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
     """Admin view for Item records."""
 
-    list_display = ("item_id", "external_id", "enabled")
-    search_fields = ()
-    list_filter = ("enabled",)
+    list_display = ("name", "external_id", "slug", "enabled")
+    search_fields = ("name", "external_id", "slug")
+    list_filter = ("enabled", HasSlugFilter)
+    fields = ("name", "external_id", "slug", "enabled")
     inlines = [ItemParentLinkInline, ItemTagLinkInline]
 
     def save_model(
@@ -577,12 +607,12 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
         svc = self._make_service()
         try:
             if not change:
-                domain_item = svc.create_item(external_id=obj.external_id)
+                domain_item = svc.create_item(name=obj.name, external_id=obj.external_id, slug=obj.slug)
                 # Sync obj so Django can use it as a FK target for inline saves.
                 obj.item_id = domain_item.item_id
                 obj._state.adding = False  # type: ignore[union-attr]
             else:
-                svc.update_item(item_id=obj.item_id, enabled=obj.enabled)
+                svc.update_item(item_id=obj.item_id, enabled=obj.enabled, slug=obj.slug, name=obj.name)
         except TaxomeshValidationError as exc:
             self.message_user(request, str(exc), level=messages.ERROR)
 

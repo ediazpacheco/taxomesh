@@ -50,7 +50,7 @@ def test_inmemory_item_parent_upsert_same_sort_index_no_duplicate() -> None:
 def test_remove_item_from_category_valid(service: TaxomeshService) -> None:
     """Removing an existing item-category placement removes it from the link list."""
     cat = service.create_category(name="Cat")
-    item = service.create_item(external_id="ext-1")
+    item = service.create_item(name="ext-1", external_id="ext-1")
     service.place_item_in_category(item.item_id, cat.category_id, sort_index=0)
 
     links_before = [
@@ -73,7 +73,7 @@ def test_remove_item_from_category_valid(service: TaxomeshService) -> None:
 def test_remove_item_from_category_noop_if_not_placed(service: TaxomeshService) -> None:
     """Removing a placement that does not exist raises no error."""
     cat = service.create_category(name="Cat")
-    item = service.create_item(external_id="ext-1")
+    item = service.create_item(name="ext-1", external_id="ext-1")
     # No placement — must not raise
     service.remove_item_from_category(item.item_id, cat.category_id)
 

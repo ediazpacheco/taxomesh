@@ -111,6 +111,7 @@ class DjangoRepository:
             description=row.description,  # type: ignore[attr-defined]
             enabled=row.enabled,  # type: ignore[attr-defined]
             external_id=row.external_id,  # type: ignore[attr-defined]
+            slug=row.slug,  # type: ignore[attr-defined]
             metadata=row.metadata,  # type: ignore[attr-defined]
         )
 
@@ -119,7 +120,9 @@ class DjangoRepository:
         # row is typed as object because Django ORM classes are only available at runtime (deferred import).
         return Item(
             item_id=row.item_id,  # type: ignore[attr-defined]
+            name=row.name,  # type: ignore[attr-defined]
             external_id=row.external_id,  # type: ignore[attr-defined]
+            slug=row.slug,  # type: ignore[attr-defined]
             enabled=row.enabled,  # type: ignore[attr-defined]
             metadata=row.metadata,  # type: ignore[attr-defined]
         )
@@ -195,6 +198,7 @@ class DjangoRepository:
                         "description": category.description,
                         "enabled": category.enabled,
                         "external_id": category.external_id,
+                        "slug": category.slug,
                         "metadata": category.metadata,
                     },
                 )
@@ -266,7 +270,9 @@ class DjangoRepository:
                 self._ItemModel.objects.using(self._using).update_or_create(
                     item_id=item.item_id,
                     defaults={
+                        "name": item.name,
                         "external_id": item.external_id,
+                        "slug": item.slug,
                         "enabled": item.enabled,
                         "metadata": item.metadata,
                     },
@@ -625,6 +631,30 @@ class DjangoRepository:
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
         return [self._row_to_category(row) for row in rows]
+
+    def get_item_by_slug(self, slug: str) -> Item | None:
+        """Return the item with the given slug, or None.
+
+        Args:
+            slug: The slug to look up.
+
+        Returns:
+            The matching Item domain object, or None.
+        """
+        row = self._ItemModel.objects.using(self._using).filter(slug=slug).first()
+        return self._row_to_item(row) if row is not None else None
+
+    def get_category_by_slug(self, slug: str) -> Category | None:
+        """Return the category with the given slug, or None.
+
+        Args:
+            slug: The slug to look up.
+
+        Returns:
+            The matching Category domain object, or None.
+        """
+        row = self._CategoryModel.objects.using(self._using).filter(slug=slug).first()
+        return self._row_to_category(row) if row is not None else None
 
     # ------------------------------------------------------------------
     # Django-specific extras (outside protocol)

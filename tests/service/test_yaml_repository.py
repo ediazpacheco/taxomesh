@@ -310,3 +310,56 @@ def test_get_config_summary_returns_path_string(tmp_yaml_path: Path) -> None:
     summary = repo.get_config_summary()
     assert summary != ""
     assert str(tmp_yaml_path) in summary
+
+
+# ---------------------------------------------------------------------------
+# Slug round-trip and lookup
+# ---------------------------------------------------------------------------
+
+
+def test_item_slug_round_trips_through_yaml(tmp_yaml_path: Path) -> None:
+    repo = YAMLRepository(tmp_yaml_path)
+    item = Item(external_id="ext-1", slug="my-item")
+    repo.save_item(item)
+    repo2 = YAMLRepository(tmp_yaml_path)
+    loaded = repo2.get_item(item.item_id)
+    assert loaded is not None
+    assert loaded.slug == "my-item"
+
+
+def test_category_slug_round_trips_through_yaml(tmp_yaml_path: Path) -> None:
+    repo = YAMLRepository(tmp_yaml_path)
+    cat = Category(name="Books", slug="books")
+    repo.save_category(cat)
+    repo2 = YAMLRepository(tmp_yaml_path)
+    loaded = repo2.get_category(cat.category_id)
+    assert loaded is not None
+    assert loaded.slug == "books"
+
+
+def test_get_item_by_slug_found(tmp_yaml_path: Path) -> None:
+    repo = YAMLRepository(tmp_yaml_path)
+    item = Item(external_id="ext-1", slug="my-item")
+    repo.save_item(item)
+    found = repo.get_item_by_slug("my-item")
+    assert found is not None
+    assert found.item_id == item.item_id
+
+
+def test_get_item_by_slug_not_found(tmp_yaml_path: Path) -> None:
+    repo = YAMLRepository(tmp_yaml_path)
+    assert repo.get_item_by_slug("nonexistent") is None
+
+
+def test_get_category_by_slug_found(tmp_yaml_path: Path) -> None:
+    repo = YAMLRepository(tmp_yaml_path)
+    cat = Category(name="Books", slug="books")
+    repo.save_category(cat)
+    found = repo.get_category_by_slug("books")
+    assert found is not None
+    assert found.category_id == cat.category_id
+
+
+def test_get_category_by_slug_not_found(tmp_yaml_path: Path) -> None:
+    repo = YAMLRepository(tmp_yaml_path)
+    assert repo.get_category_by_slug("nonexistent") is None

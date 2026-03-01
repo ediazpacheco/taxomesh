@@ -21,14 +21,14 @@ def svc(tmp_path: Path) -> TaxomeshService:
 
 
 def test_get_items_by_external_id_str_found(svc: TaxomeshService) -> None:
-    item = svc.create_item("my-entity-uuid")
+    item = svc.create_item("my-entity-uuid", "my-entity-uuid")
     results = svc.get_items_by_external_id("my-entity-uuid")
     assert len(results) == 1
     assert results[0].item_id == item.item_id
 
 
 def test_get_items_by_external_id_str_not_found(svc: TaxomeshService) -> None:
-    svc.create_item("other-id")
+    svc.create_item("other-id", "other-id")
     results = svc.get_items_by_external_id("my-entity-uuid")
     assert results == []
 
@@ -44,14 +44,14 @@ def test_get_items_by_external_id_empty_store(svc: TaxomeshService) -> None:
 
 
 def test_get_items_by_external_id_int_found(svc: TaxomeshService) -> None:
-    item = svc.create_item(42)
+    item = svc.create_item("42", 42)
     results = svc.get_items_by_external_id(42)
     assert len(results) == 1
     assert results[0].item_id == item.item_id
 
 
 def test_get_items_by_external_id_int_not_found(svc: TaxomeshService) -> None:
-    svc.create_item(99)
+    svc.create_item("99", 99)
     results = svc.get_items_by_external_id(42)
     assert results == []
 
@@ -63,14 +63,15 @@ def test_get_items_by_external_id_int_not_found(svc: TaxomeshService) -> None:
 
 def test_get_items_by_external_id_uuid_found(svc: TaxomeshService) -> None:
     ext = uuid4()
-    item = svc.create_item(ext)
+    item = svc.create_item(str(ext), ext)
     results = svc.get_items_by_external_id(ext)
     assert len(results) == 1
     assert results[0].item_id == item.item_id
 
 
 def test_get_items_by_external_id_uuid_not_found(svc: TaxomeshService) -> None:
-    svc.create_item(uuid4())
+    _u = uuid4()
+    svc.create_item(str(_u), _u)
     results = svc.get_items_by_external_id(uuid4())
     assert results == []
 
@@ -82,14 +83,14 @@ def test_get_items_by_external_id_uuid_not_found(svc: TaxomeshService) -> None:
 
 def test_get_items_by_external_id_multiple_matches(svc: TaxomeshService) -> None:
     """Returns all items sharing the same external_id (consumer detects duplicates via len > 1)."""
-    svc.create_item("dup-id")
-    svc.create_item("dup-id")
+    svc.create_item("dup-id", "dup-id")
+    svc.create_item("dup-id", "dup-id")
     results = svc.get_items_by_external_id("dup-id")
     assert len(results) == 2
 
 
 def test_get_items_by_external_id_returns_list_of_item_instances(svc: TaxomeshService) -> None:
-    svc.create_item("check-type")
+    svc.create_item("check-type", "check-type")
     results = svc.get_items_by_external_id("check-type")
     assert all(isinstance(r, Item) for r in results)
 
@@ -177,6 +178,6 @@ def test_get_categories_by_external_id_returns_list_of_category_instances(svc: T
 
 def test_smoke_get_items_by_external_id(tmp_path: Path) -> None:
     svc = TaxomeshService(repository=JsonRepository(tmp_path / "smoke.json"))
-    svc.create_item("my-entity-uuid")
+    svc.create_item("my-entity-uuid", "my-entity-uuid")
     results = svc.get_items_by_external_id("my-entity-uuid")
     assert len(results) == 1

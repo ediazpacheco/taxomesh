@@ -93,7 +93,8 @@ def test_category_add() -> None:
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "add", "--name", "Music"])
     assert result.exit_code == 0
-    assert "Music" in result.output
+    # Category.__str__ now returns "(uuid)" format; check a UUID-like string is present
+    assert "(" in result.output
 
 
 def test_category_add_with_description() -> None:
@@ -135,6 +136,14 @@ def test_category_delete_not_found() -> None:
     assert result.exit_code == 1
 
 
+def test_category_add_with_slug() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "add", "--name", "Music", "--slug", "music"])
+    assert result.exit_code == 0
+    assert "music" in result.output
+
+
 def test_category_update_name() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
@@ -142,7 +151,18 @@ def test_category_update_name() -> None:
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "update", str(cat.category_id), "--name", "New"])
     assert result.exit_code == 0
-    assert "New" in result.output
+    # Category.__str__ now returns "(uuid)" format; check UUID is present
+    assert str(cat.category_id) in result.output
+
+
+def test_category_update_slug() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.create_category(name="Old")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["category", "update", str(cat.category_id), "--slug", "old-cat"])
+    assert result.exit_code == 0
+    assert "old-cat" in result.output
 
 
 def test_category_update_no_options() -> None:
@@ -184,7 +204,8 @@ def test_category_list_with_parent_id() -> None:
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "list", "--parent-id", str(parent.category_id)])
     assert result.exit_code == 0
-    assert "Child" in result.output
+    # Category.__str__ now returns "(uuid)" format; check child UUID is in output
+    assert str(child.category_id) in result.output
 
 
 def test_category_list_parent_not_found() -> None:
@@ -204,6 +225,14 @@ def test_item_list_empty() -> None:
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "list"])
     assert result.exit_code == 0
+
+
+def test_item_add_with_slug() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["item", "add", "--external-id", "42", "--slug", "item-42"])
+    assert result.exit_code == 0
+    assert "item-42" in result.output
 
 
 def test_item_add_int_external_id() -> None:
@@ -255,7 +284,7 @@ def test_item_add_category_not_found() -> None:
 def test_item_delete() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "delete", str(item.item_id)])
     assert result.exit_code == 0
@@ -268,10 +297,20 @@ def test_item_delete_not_found() -> None:
     assert result.exit_code == 1
 
 
+def test_item_update_slug() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    item = svc.create_item(name="x", external_id="x")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["item", "update", str(item.item_id), "--slug", "my-item"])
+    assert result.exit_code == 0
+    assert "my-item" in result.output
+
+
 def test_item_update_disable() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id), "--disable"])
     assert result.exit_code == 0
@@ -280,7 +319,7 @@ def test_item_update_disable() -> None:
 def test_item_update_no_options() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id)])
     assert result.exit_code != 0
@@ -289,7 +328,7 @@ def test_item_update_no_options() -> None:
 def test_item_update_with_category_id() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     cat = svc.create_category(name="C")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id), "--category-id", str(cat.category_id)])
@@ -299,7 +338,7 @@ def test_item_update_with_category_id() -> None:
 def test_item_update_with_tag_id() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     tag = svc.create_tag(name="live")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id), "--tag-id", str(tag.tag_id)])
@@ -309,7 +348,7 @@ def test_item_update_with_tag_id() -> None:
 def test_item_update_category_not_found() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "update", str(item.item_id), "--category-id", str(uuid4())])
     assert result.exit_code == 1
@@ -318,7 +357,7 @@ def test_item_update_category_not_found() -> None:
 def test_item_add_to_category() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     cat = svc.create_category(name="C")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(
@@ -337,7 +376,7 @@ def test_item_add_to_category_not_found() -> None:
 def test_item_add_to_tag() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     tag = svc.create_tag(name="live")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "add-to-tag", str(item.item_id), "--tag-id", str(tag.tag_id)])
@@ -355,7 +394,7 @@ def test_item_list_with_category_id() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category(name="C")
-    item = svc.create_item(external_id="x")
+    item = svc.create_item(name="x", external_id="x")
     svc.place_item_in_category(item.item_id, cat.category_id)
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "list", "--category-id", str(cat.category_id)])
@@ -551,29 +590,30 @@ def test_category_list_empty_footer_is_zero() -> None:
 def test_category_list_header_before_records() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    svc.create_category(name="Rock")
+    cat = svc.create_category(name="Rock")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "list"])
     assert result.exit_code == 0
     header_pos = result.output.find("--- Categories ---")
-    rock_pos = result.output.find("Rock")
+    # Category.__str__ now returns "(uuid)" format; search for the UUID
+    uuid_pos = result.output.find(str(cat.category_id))
     assert header_pos != -1
-    assert rock_pos != -1
-    assert header_pos < rock_pos
+    assert uuid_pos != -1
+    assert header_pos < uuid_pos
 
 
 def test_category_list_footer_after_records() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    svc.create_category(name="Rock")
+    cat = svc.create_category(name="Rock")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["category", "list"])
     assert result.exit_code == 0
-    rock_pos = result.output.find("Rock")
+    uuid_pos = result.output.find(str(cat.category_id))
     footer_pos = result.output.find("--- Total: 1 ---")
-    assert rock_pos != -1
+    assert uuid_pos != -1
     assert footer_pos != -1
-    assert rock_pos < footer_pos
+    assert uuid_pos < footer_pos
 
 
 def test_category_list_filtered_footer_reflects_filter_count() -> None:
@@ -603,7 +643,7 @@ def test_category_list_no_footer_on_error() -> None:
 def test_item_list_has_header() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    svc.create_item(external_id="x")
+    svc.create_item(name="x", external_id="x")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "list"])
     assert result.exit_code == 0
@@ -613,8 +653,8 @@ def test_item_list_has_header() -> None:
 def test_item_list_has_footer_with_count() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
-    svc.create_item(external_id="x")
-    svc.create_item(external_id="y")
+    svc.create_item(name="x", external_id="x")
+    svc.create_item(name="y", external_id="y")
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "list"])
     assert result.exit_code == 0
@@ -633,8 +673,8 @@ def test_item_list_filtered_footer_reflects_filter_count() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category(name="C")
-    item_in = svc.create_item(external_id="in")
-    svc.create_item(external_id="out")
+    item_in = svc.create_item(name="in", external_id="in")
+    svc.create_item(name="out", external_id="out")
     svc.place_item_in_category(item_in.item_id, cat.category_id)
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["item", "list", "--category-id", str(cat.category_id)])
@@ -760,6 +800,19 @@ def test_build_result_config_file_exists_true(tmp_path: Path, monkeypatch: pytes
 # ---------------------------------------------------------------------------
 
 
+def test_version_command_prints_version() -> None:
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+    import taxomesh  # noqa: PLC0415
+
+    assert taxomesh.__version__ in result.output
+
+
+# ---------------------------------------------------------------------------
+# T005 [US2]: graph CLI command tests — failing until T006 implements graph_cmd
+# ---------------------------------------------------------------------------
+
+
 def test_graph_empty_taxonomy_exits_zero() -> None:
     repo = InMemoryRepository()
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
@@ -799,7 +852,7 @@ def test_graph_shows_item_external_id() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category("Animals")
-    item = svc.create_item(external_id="lion")
+    item = svc.create_item(name="lion", external_id="lion")
     svc.place_item_in_category(item.item_id, cat.category_id)
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["graph"])
@@ -811,7 +864,7 @@ def test_graph_shows_item_item_id() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category("Animals")
-    item = svc.create_item(external_id="lion")
+    item = svc.create_item(name="lion", external_id="lion")
     svc.place_item_in_category(item.item_id, cat.category_id)
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["graph"])
@@ -823,7 +876,7 @@ def test_graph_shows_item_enabled_true() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category("Animals")
-    item = svc.create_item(external_id="lion")
+    item = svc.create_item(name="lion", external_id="lion")
     svc.place_item_in_category(item.item_id, cat.category_id)
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
         result = runner.invoke(app, ["graph"])
@@ -836,7 +889,7 @@ def test_graph_shows_item_enabled_false() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category("Animals")
-    item = svc.create_item(external_id="lion")
+    item = svc.create_item(name="lion", external_id="lion")
     svc.update_item(item.item_id, enabled=False)
     svc.place_item_in_category(item.item_id, cat.category_id)
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
@@ -874,7 +927,7 @@ def test_graph_no_tag_data_in_output() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
     cat = svc.create_category("Animals")
-    item = svc.create_item(external_id="lion")
+    item = svc.create_item(name="lion", external_id="lion")
     svc.place_item_in_category(item.item_id, cat.category_id)
     tag = svc.create_tag(name="unique-tag-xyzzy")
     svc.assign_tag(tag.tag_id, item.item_id)
@@ -912,7 +965,7 @@ def test_graph_performance_sc005() -> None:
 
     # Create 200 items, distribute across leaf categories
     for k in range(200):
-        item = svc.create_item(external_id=f"item-{k}")
+        item = svc.create_item(name=f"item-{k}", external_id=f"item-{k}")
         target_cat = all_cats[k % len(all_cats)]
         svc.place_item_in_category(item.item_id, target_cat.category_id, sort_index=k)
 

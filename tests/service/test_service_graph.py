@@ -66,8 +66,8 @@ def test_get_graph_items_ordered_by_sort_index() -> None:
     """Items within a category node are ordered by sort_index ascending."""
     svc = TaxomeshService(repository=InMemoryRepository())
     cat = svc.create_category("Animals")
-    item_b = svc.create_item(external_id="lion")
-    item_a = svc.create_item(external_id="zebra")
+    item_b = svc.create_item(name="lion", external_id="lion")
+    item_a = svc.create_item(name="zebra", external_id="zebra")
 
     # Place with reversed sort_index so order is non-trivial
     svc.place_item_in_category(item_b.item_id, cat.category_id, sort_index=10)
@@ -85,7 +85,7 @@ def test_get_graph_item_in_multiple_categories_appears_in_each() -> None:
     svc = TaxomeshService(repository=InMemoryRepository())
     cat_a = svc.create_category("A")
     cat_b = svc.create_category("B")
-    item = svc.create_item(external_id="shared")
+    item = svc.create_item(name="shared", external_id="shared")
 
     svc.place_item_in_category(item.item_id, cat_a.category_id)
     svc.place_item_in_category(item.item_id, cat_b.category_id)
@@ -170,7 +170,7 @@ def test_get_graph_no_tag_data_in_graph() -> None:
     """TaxomeshGraph contains no tag objects, regardless of tags in taxonomy (SC-002)."""
     svc = TaxomeshService(repository=InMemoryRepository())
     cat = svc.create_category("Animals")
-    item = svc.create_item(external_id="lion")
+    item = svc.create_item(name="lion", external_id="lion")
     svc.place_item_in_category(item.item_id, cat.category_id)
     tag = svc.create_tag(name="mammal")
     svc.assign_tag(tag.tag_id, item.item_id)

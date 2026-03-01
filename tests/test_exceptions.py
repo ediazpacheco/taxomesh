@@ -12,6 +12,7 @@ import pytest
 from taxomesh import (
     TaxomeshCategoryNotFoundError,
     TaxomeshCyclicDependencyError,
+    TaxomeshDuplicateSlugError,
     TaxomeshError,
     TaxomeshItemNotFoundError,
     TaxomeshNotFoundError,
@@ -67,6 +68,7 @@ def test_not_found_error_hierarchy() -> None:
 def test_validation_error_hierarchy() -> None:
     assert issubclass(TaxomeshValidationError, TaxomeshError)
     assert issubclass(TaxomeshCyclicDependencyError, TaxomeshValidationError)
+    assert issubclass(TaxomeshDuplicateSlugError, TaxomeshValidationError)
 
 
 def test_repository_error_hierarchy() -> None:
@@ -79,3 +81,42 @@ def test_not_found_subclasses_are_mutually_exclusive() -> None:
     assert not issubclass(TaxomeshCategoryNotFoundError, TaxomeshItemNotFoundError)
     assert not issubclass(TaxomeshItemNotFoundError, TaxomeshTagNotFoundError)
     assert not issubclass(TaxomeshTagNotFoundError, TaxomeshCategoryNotFoundError)
+
+
+# ------------------------------------------------------------------
+# TaxomeshDuplicateSlugError
+# ------------------------------------------------------------------
+
+
+def test_duplicate_slug_error_is_subclass_of_validation_error() -> None:
+    assert issubclass(TaxomeshDuplicateSlugError, TaxomeshValidationError)
+
+
+def test_duplicate_slug_error_is_subclass_of_taxomesh_error() -> None:
+    assert issubclass(TaxomeshDuplicateSlugError, TaxomeshError)
+
+
+def test_duplicate_slug_error_is_not_a_not_found_error() -> None:
+    assert not issubclass(TaxomeshDuplicateSlugError, TaxomeshNotFoundError)
+
+
+def test_duplicate_slug_error_catchable_as_validation_error() -> None:
+    with pytest.raises(TaxomeshValidationError):
+        raise TaxomeshDuplicateSlugError("Slug 'books' is already in use")
+
+
+def test_duplicate_slug_error_catchable_as_taxomesh_error() -> None:
+    with pytest.raises(TaxomeshError):
+        raise TaxomeshDuplicateSlugError("Slug 'books' is already in use")
+
+
+def test_duplicate_slug_error_message_preserved() -> None:
+    exc = TaxomeshDuplicateSlugError("Slug 'electronics' is already in use")
+    assert "electronics" in str(exc)
+
+
+def test_duplicate_slug_error_exported_from_package() -> None:
+    """TaxomeshDuplicateSlugError must be importable from the top-level taxomesh package."""
+    from taxomesh import TaxomeshDuplicateSlugError as _TaxomeshDuplicateSlugError  # noqa: PLC0415
+
+    assert _TaxomeshDuplicateSlugError is TaxomeshDuplicateSlugError

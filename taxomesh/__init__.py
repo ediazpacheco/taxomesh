@@ -9,6 +9,7 @@ from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
     TaxomeshConfigError,
     TaxomeshCyclicDependencyError,
+    TaxomeshDuplicateSlugError,
     TaxomeshError,
     TaxomeshItemNotFoundError,
     TaxomeshNotFoundError,
@@ -29,6 +30,7 @@ __all__ = [
     "TaxomeshTagNotFoundError",
     "TaxomeshValidationError",
     "TaxomeshCyclicDependencyError",
+    "TaxomeshDuplicateSlugError",
     "TaxomeshRepositoryError",
     "TaxomeshConfigError",
 ]

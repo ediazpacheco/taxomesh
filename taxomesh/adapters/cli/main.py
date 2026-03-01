@@ -15,6 +15,7 @@ import typer
 from rich.console import Console
 from rich.tree import Tree
 
+import taxomesh
 from taxomesh.adapters.cli.config import BuildResult, _resolve_effective_config, build, dump_config
 from taxomesh.domain.graph import CategoryNode
 from taxomesh.domain.types import ExternalId
@@ -135,6 +136,7 @@ def category_add(
     ctx: typer.Context,
     name: str = typer.Option(..., "--name", help="Category name"),
     description: str = typer.Option("", "--description", help="Category description"),
+    slug: str = typer.Option("", "--slug", help="Optional slug (unique when non-empty)"),
     parent_id: UUID | None = typer.Option(None, "--parent-id", help="Parent category UUID"),
     sort_index: int = typer.Option(0, "--sort-index", help="Sort index within parent"),
 ) -> None:
@@ -143,7 +145,7 @@ def category_add(
     _print_verbose(result, _verbose(ctx))
     svc = result.service
     try:
-        cat = svc.create_category(name=name, description=description)
+        cat = svc.create_category(name=name, description=description, slug=slug)
         typer.echo(cat)
         if parent_id is not None:
             link = svc.add_category_parent(cat.category_id, parent_id, sort_index=sort_index)
@@ -178,19 +180,20 @@ def category_update(
     category_id: UUID = typer.Argument(..., help="Category UUID to update"),
     name: str | None = typer.Option(None, "--name", help="New name"),
     description: str | None = typer.Option(None, "--description", help="New description"),
+    slug: str | None = typer.Option(None, "--slug", help="New slug (empty string to clear)"),
     parent_id: UUID | None = typer.Option(None, "--parent-id", help="Parent category UUID to add"),
     sort_index: int = typer.Option(0, "--sort-index", help="Sort index within parent"),
 ) -> None:
-    """Update a category's name, description, or add a parent."""
-    if name is None and description is None and parent_id is None:
-        typer.echo("Error: at least one of --name, --description, --parent-id must be provided.", err=True)
+    """Update a category's name, description, slug, or add a parent."""
+    if name is None and description is None and slug is None and parent_id is None:
+        typer.echo("Error: at least one of --name, --description, --slug, --parent-id must be provided.", err=True)
         raise typer.Exit(code=1)
     result = build(_config_path(ctx))
     _print_verbose(result, _verbose(ctx))
     svc = result.service
     try:
-        if name is not None or description is not None:
-            updated = svc.update_category(category_id, name=name, description=description)
+        if name is not None or description is not None or slug is not None:
+            updated = svc.update_category(category_id, name=name, description=description, slug=slug)
             typer.echo(updated)
         if parent_id is not None:
             link = svc.add_category_parent(category_id, parent_id, sort_index=sort_index)
@@ -230,7 +233,9 @@ def item_list(
 @item_app.command("add")
 def item_add(
     ctx: typer.Context,
+    name: str = typer.Option("", "--name", help="Human-readable item name"),
     external_id: str = typer.Option(..., "--external-id", help="External identifier (UUID, int, or string)"),
+    slug: str = typer.Option("", "--slug", help="Optional slug (unique when non-empty)"),
     category_id: UUID | None = typer.Option(None, "--category-id", help="Place item in this category"),
     sort_index: int = typer.Option(0, "--sort-index", help="Sort index within category"),
     tag_id: UUID | None = typer.Option(None, "--tag-id", help="Assign this tag to the item"),
@@ -241,7 +246,7 @@ def item_add(
     svc = result.service
     try:
         parsed_id = _parse_external_id(external_id)
-        item = svc.create_item(external_id=parsed_id)
+        item = svc.create_item(name=name, external_id=parsed_id, slug=slug)
         typer.echo(item)
         if category_id is not None:
             link = svc.place_item_in_category(item.item_id, category_id, sort_index=sort_index)
@@ -279,20 +284,26 @@ def item_update(
     item_id: UUID = typer.Argument(..., help="Item UUID to update"),
     enable: bool = typer.Option(False, "--enable/--no-enable", help="Enable the item"),
     disable: bool = typer.Option(False, "--disable/--no-disable", help="Disable the item"),
+    slug: str | None = typer.Option(None, "--slug", help="New slug (empty string to clear)"),
+    name: str | None = typer.Option(None, "--name", help="New name"),
     category_id: UUID | None = typer.Option(None, "--category-id", help="Place item in this category"),
     sort_index: int = typer.Option(0, "--sort-index", help="Sort index within category"),
     tag_id: UUID | None = typer.Option(None, "--tag-id", help="Assign this tag to the item"),
 ) -> None:
-    """Update an item's enabled state, category placement, or tag assignment."""
-    if not enable and not disable and category_id is None and tag_id is None:
-        typer.echo("Error: at least one of --enable, --disable, --category-id, --tag-id must be provided.", err=True)
+    """Update an item's enabled state, slug, name, category placement, or tag assignment."""
+    if not enable and not disable and slug is None and name is None and category_id is None and tag_id is None:
+        typer.echo(
+            "Error: at least one of --enable, --disable, --slug, --name, --category-id, --tag-id must be provided.",
+            err=True,
+        )
         raise typer.Exit(code=1)
     result = build(_config_path(ctx))
     _print_verbose(result, _verbose(ctx))
     svc = result.service
     try:
-        if enable or disable:
-            updated = svc.update_item(item_id, enabled=bool(enable))
+        if enable or disable or slug is not None or name is not None:
+            enabled_val: bool | None = bool(enable) if (enable or disable) else None
+            updated = svc.update_item(item_id, enabled=enabled_val, slug=slug, name=name)
             typer.echo(updated)
         if category_id is not None:
             link = svc.place_item_in_category(item_id, category_id, sort_index=sort_index)
@@ -424,6 +435,17 @@ def tag_update(
 
 
 # ---------------------------------------------------------------------------
+# Version command
+# ---------------------------------------------------------------------------
+
+
+@app.command("version")
+def version_cmd() -> None:
+    """Print the taxomesh package version and exit."""
+    typer.echo(taxomesh.__version__)
+
+
+# ---------------------------------------------------------------------------
 # Graph command
 # ---------------------------------------------------------------------------
 
@@ -442,22 +464,12 @@ def _add_graph_node(tree_node: Tree, category_node: CategoryNode) -> None:
     cat = category_node.category
     cat_icon = ENABLED_ICON if cat.enabled else DISABLED_ICON
     cat_icon_style = "green" if cat.enabled else "red"
-    cat_label = (
-        f"[bold cyan]{cat.name}[/bold cyan]"
-        f"  [dim]{cat.category_id}[/dim]"
-        f"  [{cat_icon_style}]{cat_icon}[/{cat_icon_style}]"
-    )
-    if cat.external_id:
-        cat_label += f"  [yellow]{cat.external_id}[/yellow]"
+    cat_label = f"[bold cyan]{cat}[/bold cyan]  [{cat_icon_style}]{cat_icon}[/{cat_icon_style}]"
     branch = tree_node.add(cat_label)
     for item in category_node.items:
         item_icon = ENABLED_ICON if item.enabled else DISABLED_ICON
         item_icon_style = "green" if item.enabled else "red"
-        label = (
-            f"[yellow]{item.external_id}[/yellow]"
-            f"  [dim]{item.item_id}[/dim]"
-            f"  [{item_icon_style}]{item_icon}[/{item_icon_style}]"
-        )
+        label = f"[yellow]{item}[/yellow]  [{item_icon_style}]{item_icon}[/{item_icon_style}]"
         branch.add(label)
     for child in category_node.children:
         _add_graph_node(branch, child)

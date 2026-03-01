@@ -11,6 +11,7 @@ from taxomesh.domain.constants import (
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EXTERNAL_ID_STR_LENGTH,
+    MAX_SLUG_LENGTH,
     ROOT_CATEGORY_NAME,
 )
 from taxomesh.domain.models.base import ModelBase
@@ -24,6 +25,7 @@ class Category(ModelBase):
     description: Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)] = DEFAULT_DESCRIPTION
     enabled: bool = True
     external_id: Annotated[str, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = DEFAULT_CATEGORY_EXTERNAL_ID
+    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("description", mode="before")
@@ -42,3 +44,7 @@ class Category(ModelBase):
     def _coerce_external_id(cls, v: object) -> str:
         """Coerce any external_id value to str."""
         return str(v)
+
+    def __str__(self) -> str:
+        slug_part = f"s: {self.slug} - " if self.slug else ""
+        return f"📂 {self.name} ({slug_part}id: {self.category_id})"

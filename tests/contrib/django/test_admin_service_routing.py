@@ -922,3 +922,116 @@ class TestItemCategoryAssignmentMixin:
         from taxomesh.contrib.django.admin import ItemCategoryAssignmentMixin  # noqa: PLC0415
 
         assert ItemCategoryAssignmentMixin.taxomesh_external_id_attr == "pk"
+
+
+# ---------------------------------------------------------------------------
+# T038 — Slug field in admin list_display and save_model routing
+# ---------------------------------------------------------------------------
+
+
+class TestCategoryAdminSlug:
+    """Slug column in CategoryModelAdmin list_display and save_model routing."""
+
+    def test_slug_in_category_list_display(self) -> None:
+        """'slug' must appear in CategoryModelAdmin.list_display."""
+        site = AdminSite()
+        admin_obj = CategoryModelAdmin(CategoryModel, site)
+        assert "slug" in admin_obj.list_display
+
+    def test_save_model_create_passes_slug_to_service(self) -> None:
+        """save_model create calls service.create_category with slug=obj.slug."""
+        site = AdminSite()
+        admin_obj = CategoryModelAdmin(CategoryModel, site)
+        request = _make_mock_request()
+
+        mock_obj = MagicMock(spec=CategoryModel)
+        mock_obj.name = "TestCat"
+        mock_obj.description = ""
+        mock_obj.enabled = True
+        mock_obj.external_id = ""
+        mock_obj.slug = "test-cat"
+        mock_obj._state = MagicMock()
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            admin_obj.save_model(request, mock_obj, MagicMock(), False)
+            _call_kwargs = mock_svc.create_category.call_args.kwargs
+            assert _call_kwargs.get("slug") == "test-cat"
+
+    def test_save_model_update_passes_slug_to_service(self) -> None:
+        """save_model update calls service.update_category with slug=obj.slug."""
+        from taxomesh.contrib.django.admin import CategoryModelAdmin as _CatAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = _CatAdmin(CategoryModel, site)
+        request = _make_mock_request()
+
+        mock_obj = MagicMock(spec=CategoryModel)
+        mock_obj.category_id = uuid4()
+        mock_obj.name = "UpdatedCat"
+        mock_obj.description = ""
+        mock_obj.enabled = True
+        mock_obj.external_id = ""
+        mock_obj.slug = "updated-cat"
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            admin_obj.save_model(request, mock_obj, MagicMock(), True)
+            _call_kwargs = mock_svc.update_category.call_args.kwargs
+            assert _call_kwargs.get("slug") == "updated-cat"
+
+
+class TestItemAdminSlug:
+    """Slug column in ItemModelAdmin list_display and save_model routing."""
+
+    def test_slug_in_item_list_display(self) -> None:
+        """'slug' must appear in ItemModelAdmin.list_display."""
+        from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = ItemModelAdmin(ItemModel, site)
+        assert "slug" in admin_obj.list_display
+
+    def test_save_model_create_passes_slug_to_service(self) -> None:
+        """save_model create calls service.create_item with slug=obj.slug."""
+        from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = ItemModelAdmin(ItemModel, site)
+        request = _make_mock_request()
+
+        mock_obj = MagicMock(spec=ItemModel)
+        mock_obj.external_id = "sku-001"
+        mock_obj.enabled = True
+        mock_obj.slug = "my-item"
+        mock_obj._state = MagicMock()
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            admin_obj.save_model(request, mock_obj, MagicMock(), False)
+            _call_kwargs = mock_svc.create_item.call_args.kwargs
+            assert _call_kwargs.get("slug") == "my-item"
+
+    def test_save_model_update_passes_slug_to_service(self) -> None:
+        """save_model update calls service.update_item with slug=obj.slug."""
+        from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = ItemModelAdmin(ItemModel, site)
+        request = _make_mock_request()
+
+        mock_obj = MagicMock(spec=ItemModel)
+        mock_obj.item_id = uuid4()
+        mock_obj.external_id = "sku-001"
+        mock_obj.enabled = True
+        mock_obj.slug = "updated-slug"
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            admin_obj.save_model(request, mock_obj, MagicMock(), True)
+            _call_kwargs = mock_svc.update_item.call_args.kwargs
+            assert _call_kwargs.get("slug") == "updated-slug"
