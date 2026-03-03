@@ -451,7 +451,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
     list_display = ("category_id", "name", "slug", "enabled", "external_id")
     search_fields = ("name", "slug")
     list_filter = ("enabled", HasSlugFilter)
-    fields = ("name", "slug", "description", "enabled", "external_id")
+    fields = ("name", "slug", "description", "enabled", "external_id", "metadata")
     inlines = [CategoryParentLinkInline]
 
     def get_queryset(self, request: HttpRequest) -> object:  # type: ignore[override]
@@ -524,6 +524,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
                     name=obj.name,
                     description=obj.description,
                     slug=obj.slug,
+                    metadata=obj.metadata,
                 )
                 # Sync obj so Django can use it as a FK target for inline saves.
                 # Without this, Django 4.0+ raises ValueError ("unsaved related object")
@@ -536,6 +537,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
                     name=obj.name,
                     description=obj.description,
                     slug=obj.slug,
+                    metadata=obj.metadata,
                 )
         except TaxomeshValidationError as exc:
             self.message_user(request, str(exc), level=messages.ERROR)
@@ -584,7 +586,7 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
     list_display = ("name", "external_id", "slug", "enabled")
     search_fields = ("name", "external_id", "slug")
     list_filter = ("enabled", HasSlugFilter)
-    fields = ("name", "external_id", "slug", "enabled")
+    fields = ("name", "external_id", "slug", "enabled", "metadata")
     inlines = [ItemParentLinkInline, ItemTagLinkInline]
 
     def save_model(
@@ -607,12 +609,23 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
         svc = self._make_service()
         try:
             if not change:
-                domain_item = svc.create_item(name=obj.name, external_id=obj.external_id, slug=obj.slug)
+                domain_item = svc.create_item(
+                    name=obj.name,
+                    external_id=obj.external_id,
+                    slug=obj.slug,
+                    metadata=obj.metadata,
+                )
                 # Sync obj so Django can use it as a FK target for inline saves.
                 obj.item_id = domain_item.item_id
                 obj._state.adding = False  # type: ignore[union-attr]
             else:
-                svc.update_item(item_id=obj.item_id, enabled=obj.enabled, slug=obj.slug, name=obj.name)
+                svc.update_item(
+                    item_id=obj.item_id,
+                    enabled=obj.enabled,
+                    slug=obj.slug,
+                    name=obj.name,
+                    metadata=obj.metadata,
+                )
         except TaxomeshValidationError as exc:
             self.message_user(request, str(exc), level=messages.ERROR)
 
