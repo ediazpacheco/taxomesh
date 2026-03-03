@@ -60,8 +60,8 @@ print([node.category.name for node in svc.get_graph().roots])
 
 ## Core concepts
 
-- **Item**: external entity reference with internal `item_id` and normalized string `external_id`
-- **Category**: taxonomy node with optional `description`, `metadata`, `external_id`, and `enabled`
+- **Item**: external entity reference with internal `item_id`, normalized string `external_id`, optional `name`, and optional unique `slug`
+- **Category**: taxonomy node with optional `name`, `description`, `metadata`, `external_id`, `enabled`, and optional unique `slug`
 - **Tag**: free-form item label
 - **CategoryParentLink**: relation from category to parent category with `sort_index`
 - **ItemParentLink**: relation from item to category with `sort_index`
@@ -157,12 +157,15 @@ from taxomesh import TaxomeshService
 svc = TaxomeshService()
 
 root = svc.create_category(name="Root Topic")
-child = svc.create_category(name="Child Topic")
+child = svc.create_category(name="Child Topic", slug="child-topic")
 svc.add_category_parent(child.category_id, root.category_id, sort_index=10)
 
 children = svc.list_categories(parent_id=root.category_id)
 updated = svc.update_category(child.category_id, description="Updated")
 svc.delete_category(updated.category_id)
+
+# Look up by slug
+cat = svc.get_category_by_slug("child-topic")  # raises TaxomeshCategoryNotFoundError if missing
 ```
 
 ### Items
@@ -170,12 +173,15 @@ svc.delete_category(updated.category_id)
 ```python
 from uuid import uuid4
 
-item_a = svc.create_item(external_id=123)
-item_b = svc.create_item(external_id=uuid4())
-item_c = svc.create_item(external_id="article-abc")
+item_a = svc.create_item(name="Article", external_id=123, slug="article-123")
+item_b = svc.create_item(name="Track", external_id=uuid4())
+item_c = svc.create_item(name="Post", external_id="article-abc")
 
 svc.update_item(item_a.item_id, enabled=False)
 all_items = svc.list_items()
+
+# Look up by slug
+item = svc.get_item_by_slug("article-123")  # raises TaxomeshItemNotFoundError if missing
 ```
 
 ### Tags
@@ -194,6 +200,18 @@ graph = svc.get_graph()
 for node in graph.roots:
     print(node.category.name)
 ```
+
+### Slug lookup
+
+```python
+from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshItemNotFoundError
+
+cat = svc.get_category_by_slug("child-topic")   # returns Category or raises TaxomeshCategoryNotFoundError
+item = svc.get_item_by_slug("article-123")       # returns Item or raises TaxomeshItemNotFoundError
+```
+
+Slugs are optional URL-friendly identifiers. They must be unique within their namespace
+(categories or items). Both methods raise a typed not-found exception — they never return `None`.
 
 ### External ID lookup helpers
 
@@ -330,6 +348,7 @@ All library exceptions inherit from `TaxomeshError`.
   - `TaxomeshTagNotFoundError`
 - `TaxomeshValidationError`
   - `TaxomeshCyclicDependencyError`
+  - `TaxomeshDuplicateSlugError`
 - `TaxomeshRepositoryError`
 - `TaxomeshConfigError`
 - `TaxomeshRootCategoryError`
