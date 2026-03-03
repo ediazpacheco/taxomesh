@@ -134,3 +134,8 @@ def test_list_items_filtered_by_category(service: TaxomeshService) -> None:
 def test_list_items_category_not_found_raises(service: TaxomeshService) -> None:
     with pytest.raises(TaxomeshCategoryNotFoundError):
         service.list_items(category_id=uuid4())
+
+
+def test_create_item_without_external_id(service: TaxomeshService) -> None:
+    item = service.create_item(name="no-id-item")
+    assert item.external_id == ""

@@ -227,6 +227,8 @@ Do NOT update README during implement — only after
 - Django ORM — `CategoryModel.metadata` and `ItemModel.metadata` are `JSONField(blank=True, default=dict)` (019-admin-metadata-fields)
 - Python 3.11 + Pydantic v2 (domain models), stdlib only for this feature (020-slug-lookup)
 - All adapters already implement slug lookups; no storage change needed (020-slug-lookup)
+- Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (ORM + admin), Typer ≥ 0.12 (CLI) (021-optional-external-id)
+- Django ORM (`ItemModel`) — migration required; JSON/YAML repositories — no change (021-optional-external-id)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

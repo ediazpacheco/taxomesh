@@ -20,6 +20,7 @@ from django.db import models
 from taxomesh.domain.constants import (
     DEFAULT_CATEGORY_EXTERNAL_ID,
     DEFAULT_DESCRIPTION,
+    DEFAULT_ITEM_EXTERNAL_ID,
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EXTERNAL_ID_STR_LENGTH,
@@ -88,7 +89,7 @@ class ItemModel(models.Model):
 
     item_id = models.UUIDField(primary_key=True, default=uuid4)
     name = models.CharField(max_length=MAX_ITEM_NAME_LENGTH, blank=True, default="")
-    external_id = models.CharField(max_length=MAX_EXTERNAL_ID_STR_LENGTH)
+    external_id = models.CharField(max_length=MAX_EXTERNAL_ID_STR_LENGTH, blank=True, default=DEFAULT_ITEM_EXTERNAL_ID)
     slug = models.CharField(max_length=MAX_SLUG_LENGTH, blank=True, default="", db_index=True)
     enabled = models.BooleanField(default=True)
     metadata = models.JSONField(blank=True, default=dict)

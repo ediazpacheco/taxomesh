@@ -234,7 +234,7 @@ def item_list(
 def item_add(
     ctx: typer.Context,
     name: str = typer.Option("", "--name", help="Human-readable item name"),
-    external_id: str = typer.Option(..., "--external-id", help="External identifier (UUID, int, or string)"),
+    external_id: str = typer.Option("", "--external-id", help="External identifier (UUID, int, or string); optional"),
     slug: str = typer.Option("", "--slug", help="Optional slug (unique when non-empty)"),
     category_id: UUID | None = typer.Option(None, "--category-id", help="Place item in this category"),
     sort_index: int = typer.Option(0, "--sort-index", help="Sort index within category"),

@@ -60,7 +60,7 @@ print([node.category.name for node in svc.get_graph().roots])
 
 ## Core concepts
 
-- **Item**: external entity reference with internal `item_id`, normalized string `external_id`, optional `name`, and optional unique `slug`
+- **Item**: the core catalogued object, identified by an internal `item_id`. The optional `external_id` field is an escape hatch: use it to store a reference to an entity that lives outside taxomesh (e.g. a primary key from another system) when the built-in fields (`name`, `slug`, `enabled`, `metadata`) are not enough to represent your data. It is not required — items can exist without any external reference.
 - **Category**: taxonomy node with optional `name`, `description`, `metadata`, `external_id`, `enabled`, and optional unique `slug`
 - **Tag**: free-form item label
 - **CategoryParentLink**: relation from category to parent category with `sort_index`

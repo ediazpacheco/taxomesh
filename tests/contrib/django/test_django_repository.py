@@ -562,3 +562,12 @@ def test_get_category_by_slug_found() -> None:
 def test_get_category_by_slug_not_found() -> None:
     repo = make_repo()
     assert repo.get_category_by_slug("no-such-slug") is None
+
+
+def test_item_model_save_without_external_id() -> None:
+    repo = make_repo()
+    item = make_item(external_id="")
+    repo.save_item(item)
+    result = repo.get_item(item.item_id)
+    assert result is not None
+    assert result.external_id == ""
