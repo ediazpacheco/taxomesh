@@ -136,6 +136,18 @@ def test_update_category_not_found_raises(service: TaxomeshService) -> None:
         service.update_category(uuid4(), name="Ghost")
 
 
+def test_update_category_metadata_replaces_value(service: TaxomeshService) -> None:
+    cat = service.create_category(name="Meta", metadata={"old": True})
+    updated = service.update_category(cat.category_id, metadata={"new": 42})
+    assert updated.metadata == {"new": 42}
+
+
+def test_update_category_metadata_none_leaves_existing_unchanged(service: TaxomeshService) -> None:
+    cat = service.create_category(name="Preserve", metadata={"keep": "me"})
+    updated = service.update_category(cat.category_id, name="Preserve Updated")
+    assert updated.metadata == {"keep": "me"}
+
+
 def test_list_categories_filtered_by_parent(service: TaxomeshService) -> None:
     parent = service.create_category(name="P")
     c1 = service.create_category(name="C1")

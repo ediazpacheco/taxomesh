@@ -268,14 +268,16 @@ class TaxomeshService:
         name: str | None = None,
         description: str | None = None,
         slug: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Category:
-        """Update a category's name, description, and/or slug.
+        """Update a category's name, description, slug, and/or metadata.
 
         Args:
             category_id: The library-assigned UUID of the category to update.
             name: New name; unchanged if None.
             description: New description; unchanged if None.
             slug: New slug; unchanged if None. Pass "" to clear the slug.
+            metadata: New metadata dict; unchanged if None.
 
         Returns:
             The updated Category.
@@ -297,6 +299,8 @@ class TaxomeshService:
             category.description = description
         if slug is not None:
             category.slug = slug
+        if metadata is not None:
+            category.metadata = metadata
         self._repo.save_category(category)
         clear_all_caches()
         return category
@@ -402,14 +406,16 @@ class TaxomeshService:
         enabled: bool | None = None,
         slug: str | None = None,
         name: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> Item:
-        """Update an item's enabled state, slug, and/or name.
+        """Update an item's enabled state, slug, name, and/or metadata.
 
         Args:
             item_id: The library-assigned UUID of the item to update.
             enabled: New enabled state; unchanged if None.
             slug: New slug; unchanged if None. Pass "" to clear the slug.
             name: New name; unchanged if None.
+            metadata: New metadata dict; unchanged if None.
 
         Returns:
             The updated Item.
@@ -429,6 +435,8 @@ class TaxomeshService:
             item.slug = slug
         if name is not None:
             item.name = name
+        if metadata is not None:
+            item.metadata = metadata
         self._repo.save_item(item)
         clear_all_caches()
         return item

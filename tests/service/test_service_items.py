@@ -78,6 +78,18 @@ def test_update_item_not_found_raises(service: TaxomeshService) -> None:
         service.update_item(uuid4(), enabled=True)
 
 
+def test_update_item_metadata_replaces_value(service: TaxomeshService) -> None:
+    item = service.create_item(name="meta-item", external_id="meta-item", metadata={"old": True})
+    updated = service.update_item(item.item_id, metadata={"new": 42})
+    assert updated.metadata == {"new": 42}
+
+
+def test_update_item_metadata_none_leaves_existing_unchanged(service: TaxomeshService) -> None:
+    item = service.create_item(name="preserve-item", external_id="preserve-item", metadata={"keep": "me"})
+    updated = service.update_item(item.item_id, enabled=False)
+    assert updated.metadata == {"keep": "me"}
+
+
 def test_place_item_in_category_returns_link(service: TaxomeshService) -> None:
     item = service.create_item(name="x", external_id="x")
     cat = service.create_category(name="C")

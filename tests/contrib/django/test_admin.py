@@ -308,3 +308,144 @@ class TestSlugAdminConfig:
         names = list(qs.values_list("name", flat=True))  # type: ignore[union-attr]
         assert "No Slug" in names
         assert "With Slug" not in names
+
+
+# ---------------------------------------------------------------------------
+# Metadata field visibility and save routing — Category
+# ---------------------------------------------------------------------------
+
+
+class TestCategoryMetadataAdminConfig:
+    """Verify metadata is exposed in admin fields and routed through save_model."""
+
+    def test_category_admin_fields_includes_metadata(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
+
+        admin_obj = CategoryModelAdmin(CategoryModel, AdminSite())
+        assert "metadata" in admin_obj.fields
+
+    def test_category_admin_save_model_passes_metadata_on_update(self) -> None:
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = CategoryModelAdmin(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        mock_obj = MagicMock(spec=CategoryModel)
+        mock_obj.category_id = __import__("uuid").uuid4()
+        mock_obj.name = "Updated"
+        mock_obj.description = "desc"
+        mock_obj.slug = ""
+        mock_obj.metadata = {"x": 1}
+
+        with patch("taxomesh.contrib.django.admin.TaxomeshService") as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            admin_obj.save_model(request, mock_obj, MagicMock(), True)
+            call_kwargs = mock_svc.update_category.call_args.kwargs
+            assert call_kwargs.get("metadata") == {"x": 1}
+
+    def test_category_admin_save_model_passes_metadata_on_create(self) -> None:
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = CategoryModelAdmin(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        mock_obj = MagicMock(spec=CategoryModel)
+        mock_obj.name = "New"
+        mock_obj.description = ""
+        mock_obj.slug = ""
+        mock_obj.metadata = {"new": True}
+        mock_obj._state = MagicMock()
+
+        with patch("taxomesh.contrib.django.admin.TaxomeshService") as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.create_category.return_value = MagicMock(category_id=__import__("uuid").uuid4())
+            admin_obj.save_model(request, mock_obj, MagicMock(), False)
+            call_kwargs = mock_svc.create_category.call_args.kwargs
+            assert call_kwargs.get("metadata") == {"new": True}
+
+
+# ---------------------------------------------------------------------------
+# Metadata field visibility and save routing — Item
+# ---------------------------------------------------------------------------
+
+
+class TestItemMetadataAdminConfig:
+    """Verify metadata is exposed in admin fields and routed through save_model."""
+
+    def test_item_admin_fields_includes_metadata(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
+
+        admin_obj = ItemModelAdmin(ItemModel, AdminSite())
+        assert "metadata" in admin_obj.fields
+
+    def test_item_admin_save_model_passes_metadata_on_update(self) -> None:
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = ItemModelAdmin(ItemModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        mock_obj = MagicMock(spec=ItemModel)
+        mock_obj.item_id = __import__("uuid").uuid4()
+        mock_obj.name = "Updated Item"
+        mock_obj.external_id = "ext-1"
+        mock_obj.enabled = True
+        mock_obj.slug = ""
+        mock_obj.metadata = {"x": 1}
+
+        with patch("taxomesh.contrib.django.admin.TaxomeshService") as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            admin_obj.save_model(request, mock_obj, MagicMock(), True)
+            call_kwargs = mock_svc.update_item.call_args.kwargs
+            assert call_kwargs.get("metadata") == {"x": 1}
+
+    def test_item_admin_save_model_passes_metadata_on_create(self) -> None:
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = ItemModelAdmin(ItemModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        mock_obj = MagicMock(spec=ItemModel)
+        mock_obj.name = "New Item"
+        mock_obj.external_id = "ext-new"
+        mock_obj.slug = ""
+        mock_obj.metadata = {"new": True}
+        mock_obj._state = MagicMock()
+
+        with patch("taxomesh.contrib.django.admin.TaxomeshService") as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.create_item.return_value = MagicMock(item_id=__import__("uuid").uuid4())
+            admin_obj.save_model(request, mock_obj, MagicMock(), False)
+            call_kwargs = mock_svc.create_item.call_args.kwargs
+            assert call_kwargs.get("metadata") == {"new": True}

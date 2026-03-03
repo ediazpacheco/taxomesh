@@ -223,6 +223,8 @@ Do NOT update README during implement — only after
 - Django ORM (optional backend) — no new storage changes (015-django-cli-admin)
 - Python 3.11 + Django ≥ 4.2 (admin framework), Pydantic v2 (domain models), Typer ≥ 0.12 (016-admin-service-layer)
 - DjangoRepository — Django ORM (PostgreSQL/SQLite compatible) (016-admin-service-layer)
+- Python 3.11 + Django ≥ 4.2 (admin), taxomesh service layer (019-admin-metadata-fields)
+- Django ORM — `CategoryModel.metadata` and `ItemModel.metadata` are `JSONField(blank=True, default=dict)` (019-admin-metadata-fields)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
