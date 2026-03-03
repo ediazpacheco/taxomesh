@@ -3,7 +3,7 @@
 import pytest
 
 from taxomesh.application.service import TaxomeshService
-from taxomesh.exceptions import TaxomeshDuplicateSlugError
+from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshDuplicateSlugError, TaxomeshItemNotFoundError
 
 
 class TestCreateCategoryWithSlug:
@@ -65,6 +65,38 @@ class TestUpdateCategoryWithSlug:
         cat = service.create_category(name="Books", slug="books")
         updated = service.update_category(category_id=cat.category_id, slug="")
         assert updated.slug == ""
+
+
+class TestGetCategoryBySlug:
+    def test_get_category_by_slug_returns_category(self, service: TaxomeshService) -> None:
+        cat = service.create_category(name="Books", slug="books")
+        result = service.get_category_by_slug("books")
+        assert result.category_id == cat.category_id
+        assert result.slug == "books"
+
+    def test_get_category_by_slug_not_found_raises(self, service: TaxomeshService) -> None:
+        with pytest.raises(TaxomeshCategoryNotFoundError):
+            service.get_category_by_slug("does-not-exist")
+
+    def test_get_category_by_slug_empty_slug_raises(self, service: TaxomeshService) -> None:
+        with pytest.raises(TaxomeshCategoryNotFoundError):
+            service.get_category_by_slug("")
+
+
+class TestGetItemBySlug:
+    def test_get_item_by_slug_returns_item(self, service: TaxomeshService) -> None:
+        item = service.create_item(name="Widget", external_id="w-001", slug="widget")
+        result = service.get_item_by_slug("widget")
+        assert result.item_id == item.item_id
+        assert result.slug == "widget"
+
+    def test_get_item_by_slug_not_found_raises(self, service: TaxomeshService) -> None:
+        with pytest.raises(TaxomeshItemNotFoundError):
+            service.get_item_by_slug("does-not-exist")
+
+    def test_get_item_by_slug_empty_slug_raises(self, service: TaxomeshService) -> None:
+        with pytest.raises(TaxomeshItemNotFoundError):
+            service.get_item_by_slug("")
 
 
 class TestUpdateItemWithSlug:

@@ -262,6 +262,24 @@ class TaxomeshService:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
         clear_all_caches()
 
+    @memoize(DEFAULT_CACHE_TTL)
+    def get_category_by_slug(self, slug: str) -> Category:
+        """Retrieve a category by its slug.
+
+        Args:
+            slug: The URL-friendly identifier of the category.
+
+        Returns:
+            The matching Category.
+
+        Raises:
+            TaxomeshCategoryNotFoundError: If no category with the given slug exists.
+        """
+        result = self._repo.get_category_by_slug(slug)
+        if result is None or result.category_id == self._root_id:
+            raise TaxomeshCategoryNotFoundError(f"Category not found for slug: {slug!r}")
+        return result
+
     def update_category(
         self,
         category_id: UUID,
@@ -399,6 +417,24 @@ class TaxomeshService:
         if not found:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
         clear_all_caches()
+
+    @memoize(DEFAULT_CACHE_TTL)
+    def get_item_by_slug(self, slug: str) -> Item:
+        """Retrieve an item by its slug.
+
+        Args:
+            slug: The URL-friendly identifier of the item.
+
+        Returns:
+            The matching Item.
+
+        Raises:
+            TaxomeshItemNotFoundError: If no item with the given slug exists.
+        """
+        result = self._repo.get_item_by_slug(slug)
+        if result is None:
+            raise TaxomeshItemNotFoundError(f"Item not found for slug: {slug!r}")
+        return result
 
     def update_item(
         self,
