@@ -26,6 +26,10 @@ DEFAULT_DESCRIPTION: Final[str] = ""
 # Default value for Category.external_id — empty string means "no external ID".
 DEFAULT_CATEGORY_EXTERNAL_ID: Final[str] = ""
 
+# Default value for Item.external_id — empty string means "no external reference".
+# Items that do not yet have (or do not need) a link to an external entity use this sentinel.
+DEFAULT_ITEM_EXTERNAL_ID: Final[str] = ""
+
 # Reserved name for the internal root category node.  Categories with this
 # name must never be exposed to end users or administrators.
 ROOT_CATEGORY_NAME: Final[str] = "__root__"

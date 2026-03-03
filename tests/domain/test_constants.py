@@ -6,12 +6,17 @@ import pytest
 from pydantic import ValidationError
 
 from taxomesh.domain.constants import (
+    DEFAULT_ITEM_EXTERNAL_ID,
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EXTERNAL_ID_STR_LENGTH,
     MAX_TAG_NAME_LENGTH,
 )
 from taxomesh.domain.models import Category, Tag
+
+
+def test_default_item_external_id_is_empty_string() -> None:
+    assert DEFAULT_ITEM_EXTERNAL_ID == ""
 
 
 def test_max_category_name_length_is_256() -> None:

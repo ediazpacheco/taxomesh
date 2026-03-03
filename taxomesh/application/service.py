@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Final
 from uuid import UUID, uuid4
 
-from taxomesh.domain.constants import ROOT_CATEGORY_NAME
+from taxomesh.domain.constants import DEFAULT_ITEM_EXTERNAL_ID, ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
 from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
@@ -330,7 +330,7 @@ class TaxomeshService:
     def create_item(
         self,
         name: str,
-        external_id: ExternalId,
+        external_id: ExternalId = DEFAULT_ITEM_EXTERNAL_ID,
         metadata: dict[str, Any] | None = None,
         slug: str = "",
     ) -> Item:
@@ -338,8 +338,9 @@ class TaxomeshService:
 
         Args:
             name: Human-readable item name; max 256 characters.
-            external_id: Caller-provided identifier. May be a UUID, a string
-                (max 256 chars), or an int.
+            external_id: Optional caller-provided identifier linking this item to an external
+                entity. May be a UUID, a string (max 256 chars), or an int. Defaults to ""
+                (no external reference).
             metadata: Optional arbitrary key-value pairs; defaults to {}.
             slug: Optional URL-friendly identifier; must be unique when non-empty. Defaults to "".
 

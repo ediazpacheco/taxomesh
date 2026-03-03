@@ -449,3 +449,23 @@ class TestItemMetadataAdminConfig:
             admin_obj.save_model(request, mock_obj, MagicMock(), False)
             call_kwargs = mock_svc.create_item.call_args.kwargs
             assert call_kwargs.get("metadata") == {"new": True}
+
+
+class TestItemExternalIdOptional:
+    """Tests that external_id is not required when creating an Item via the admin form."""
+
+    def test_admin_create_item_blank_external_id(self) -> None:
+        """ItemModel form must accept a blank external_id (the reported bug)."""
+        from django.forms import ModelForm  # noqa: PLC0415
+
+        from taxomesh.contrib.django.models import ItemModel  # noqa: PLC0415
+
+        class _ItemForm(ModelForm):  # type: ignore[type-arg]
+            class Meta:
+                model = ItemModel
+                fields = ["name", "external_id", "slug", "enabled", "metadata"]
+
+        form = _ItemForm(
+            data={"name": "Item Without External ID", "external_id": "", "slug": "", "enabled": True, "metadata": "{}"}
+        )
+        assert form.is_valid(), f"Form should be valid with blank external_id but got errors: {form.errors}"

@@ -76,6 +76,14 @@ class TestItem:
         a.metadata["key"] = "value"
         assert b.metadata == {}
 
+    def test_external_id_defaults_empty_string(self) -> None:
+        item = Item(name="test")
+        assert item.external_id == ""
+
+    def test_external_id_none_coerces_to_empty_string(self) -> None:
+        item = Item(name="test", external_id=None)  # type: ignore[arg-type]
+        assert item.external_id == ""
+
 
 class TestCategory:
     def test_construction(self) -> None:

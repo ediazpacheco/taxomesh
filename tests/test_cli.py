@@ -281,6 +281,14 @@ def test_item_add_category_not_found() -> None:
     assert result.exit_code == 1
 
 
+def test_item_add_without_external_id() -> None:
+    repo = InMemoryRepository()
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["item", "add", "--name", "no-id-item"])
+    assert result.exit_code == 0
+    assert "no-id-item" in result.output
+
+
 def test_item_delete() -> None:
     repo = InMemoryRepository()
     svc = _svc_with_repo(repo)
