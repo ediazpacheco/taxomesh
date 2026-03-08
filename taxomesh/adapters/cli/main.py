@@ -511,7 +511,7 @@ def _add_graph_node(
 def graph_cmd(
     ctx: typer.Context,
     show_relations: bool = typer.Option(
-        False, "--show-relations/--no-show-relations", help="Show outgoing item relations"
+        True, "--show-relations/--no-show-relations", help="Show outgoing item relations"
     ),
     max_depth: int = typer.Option(GRAPH_DEFAULT_MAX_DEPTH, "--max-depth", help="Max depth to display; 0 = unlimited"),
 ) -> None:

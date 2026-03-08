@@ -189,3 +189,77 @@ def test_django_repo_type_importable_and_equals_django() -> None:
     from taxomesh.adapters.repositories.django_repository import DJANGO_REPO_TYPE  # noqa: PLC0415
 
     assert DJANGO_REPO_TYPE == "django"
+
+
+# ---------------------------------------------------------------------------
+# T002 — get_debug_info() on JsonRepository and YAMLRepository
+# ---------------------------------------------------------------------------
+
+
+def test_json_repository_get_debug_info(tmp_path: Path) -> None:
+    """JsonRepository.get_debug_info() returns a dict with a 'path' key."""
+    from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_path / "t.json")
+    info = repo.get_debug_info()
+    assert isinstance(info, dict)
+    assert "path" in info
+    assert str(tmp_path / "t.json") in info["path"]
+
+
+def test_yaml_repository_get_debug_info(tmp_path: Path) -> None:
+    """YAMLRepository.get_debug_info() returns a dict with a 'path' key."""
+    from taxomesh.adapters.repositories.yaml_repository import YAMLRepository  # noqa: PLC0415
+
+    repo = YAMLRepository(tmp_path / "t.yaml")
+    info = repo.get_debug_info()
+    assert isinstance(info, dict)
+    assert "path" in info
+    assert str(tmp_path / "t.yaml") in info["path"]
+
+
+# ---------------------------------------------------------------------------
+# T032-T033 — TaxomeshService.get_debug()
+# ---------------------------------------------------------------------------
+
+
+def test_get_debug_returns_required_keys(tmp_path: Path) -> None:
+    """TaxomeshService.get_debug() returns a dict with all required keys."""
+    from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_path / "t.json")
+    svc = TaxomeshService(repository=repo)
+    info = svc.get_debug()
+    assert "version" in info
+    assert "config_name" in info
+    assert "repository_type" in info
+    assert "working_path" in info
+    assert "repository_info" in info
+
+
+def test_get_debug_repository_type_matches_class(tmp_path: Path) -> None:
+    """get_debug()['repository_type'] matches the class name of the active repo."""
+    from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_path / "t.json")
+    svc = TaxomeshService(repository=repo)
+    info = svc.get_debug()
+    assert info["repository_type"] == "JsonRepository"
+    assert info["working_path"] is not None
+
+
+def test_get_debug_django_repo_has_none_working_path(db: object) -> None:
+    """get_debug() with DjangoRepository returns None for working_path."""
+    svc = TaxomeshService(repository=DjangoRepository())
+    info = svc.get_debug()
+    assert info["repository_type"] == "DjangoRepository"
+    assert info["working_path"] is None
+
+
+def test_get_debug_config_name_none_when_no_config(tmp_path: Path) -> None:
+    """get_debug()['config_name'] is None when no TOML config was loaded."""
+    from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_path / "t.json")
+    svc = TaxomeshService(repository=repo)
+    assert svc.get_debug()["config_name"] is None

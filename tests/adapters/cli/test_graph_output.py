@@ -148,9 +148,9 @@ class TestShowRelations:
         return result.output
 
     def test_graph_no_show_relations_omits_relation_lines(self) -> None:
-        """Default graph output must not contain relation type → target lines."""
+        """--no-show-relations flag must suppress relation type → target lines."""
         svc, _item_a, _item_b = self._make_service_with_relation()
-        output = self._render_graph_cmd([], svc)
+        output = self._render_graph_cmd(["--no-show-relations"], svc)
         assert "covers" not in output
         assert "→" not in output
 
@@ -178,6 +178,13 @@ class TestShowRelations:
         assert "Alpha" in output_without_flag
         assert "Alpha" in output_with_flag
         assert "→" not in output_with_flag
+
+    def test_graph_shows_relations_by_default(self) -> None:
+        """With no --show-relations flag, relations are shown by default (T028)."""
+        svc, _item_a, _item_b = self._make_service_with_relation()
+        output = self._render_graph_cmd([], svc)
+        assert "covers" in output
+        assert "Beta" in output
 
 
 class TestMaxDepth:

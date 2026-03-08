@@ -236,6 +236,8 @@ Do NOT update README during implement — only after
 - Python 3.11 + Typer ≥ 0.12, Rich ≥ 13.0 (CLI); Django ≥ 4.2 (admin); Pydantic v2 (domain) (024-graph-enhancements)
 - DjangoRepository (admin), any configured repository (CLI) (024-graph-enhancements)
 - DjangoRepository (admin); any configured repo (CLI) (025-graph-admin-ux)
+- Python 3.11 + Pydantic v2 (domain), Typer ≥ 0.12 (CLI), Django ≥ 4.2 (admin), `importlib.metadata` (stdlib — version lookup) (026-admin-service-debug)
+- JSON file (`JsonRepository`), YAML file (`YamlRepository`), Django ORM (`DjangoRepository`) (026-admin-service-debug)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

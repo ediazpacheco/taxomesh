@@ -6,7 +6,7 @@ repository. Explicit inheritance is NOT required; mypy verifies compliance
 structurally at type-check time.
 """
 
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemRelationLink, Tag
@@ -277,6 +277,14 @@ class TaxomeshRepositoryBase(Protocol):
             A non-empty, human-readable description of the repository's
             configuration (e.g. the storage file path, a sanitized connection
             string, or a named data source identifier).
+        """
+        ...
+
+    def get_debug_info(self) -> dict[str, Any]:
+        """Return adapter-specific diagnostic information.
+
+        Returns:
+            A flat dict with adapter-specific diagnostic keys. Must never raise.
         """
         ...
 

@@ -573,3 +573,11 @@ class YAMLRepository:
             Never raises; never returns an empty string.
         """
         return str(self._path)
+
+    def get_debug_info(self) -> dict[str, Any]:
+        """Return diagnostic info for this YAML repository.
+
+        Returns:
+            Dict with key ``path`` containing the storage file path as a string.
+        """
+        return {"path": str(self._path)}
