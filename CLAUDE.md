@@ -233,6 +233,9 @@ Do NOT update README during implement — only after
 - N/A — no storage changes (022-unified-str-admin-links)
 - Python 3.11 + Pydantic v2, Typer ≥ 0.12, Rich ≥ 13.0, Django ≥ 4.2 (optional contrib) (023-item-relations)
 - JSON file (`JsonRepository`), YAML file (`YAMLRepository`), Django ORM (`DjangoRepository`) (023-item-relations)
+- Python 3.11 + Typer ≥ 0.12, Rich ≥ 13.0 (CLI); Django ≥ 4.2 (admin); Pydantic v2 (domain) (024-graph-enhancements)
+- DjangoRepository (admin), any configured repository (CLI) (024-graph-enhancements)
+- DjangoRepository (admin); any configured repo (CLI) (025-graph-admin-ux)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

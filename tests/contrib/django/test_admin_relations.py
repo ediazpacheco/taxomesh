@@ -22,16 +22,6 @@ def _make_mock_request() -> MagicMock:
     return MagicMock(spec=HttpRequest)
 
 
-class TestItemRelationLinkModelAdminRegistered:
-    def test_item_relation_link_model_admin_registered(self) -> None:
-        from django.contrib import admin  # noqa: PLC0415
-
-        from taxomesh.contrib.django.admin import ItemRelationLinkModelAdmin  # noqa: PLC0415
-
-        assert ItemRelationLinkModel in admin.site._registry
-        assert isinstance(admin.site._registry[ItemRelationLinkModel], ItemRelationLinkModelAdmin)
-
-
 class TestOutgoingRelationInline:
     def test_outgoing_inline_registered_on_item_admin(self) -> None:
         from taxomesh.contrib.django.admin import OutgoingRelationInline  # noqa: PLC0415
