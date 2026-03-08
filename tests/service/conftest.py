@@ -1,12 +1,21 @@
 """Shared pytest fixtures for the service test suite."""
 
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import pytest
 
 from taxomesh.application.service import TaxomeshService
-from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemTagLink, Tag
+from taxomesh.domain.models import (
+    Category,
+    CategoryParentLink,
+    Item,
+    ItemParentLink,
+    ItemRelationLink,
+    ItemTagLink,
+    Tag,
+)
 
 
 class InMemoryRepository:
@@ -24,6 +33,7 @@ class InMemoryRepository:
         self._links: list[ItemTagLink] = []
         self._category_parent_links: list[CategoryParentLink] = []
         self._item_parent_links: list[ItemParentLink] = []
+        self._item_relation_links: list[ItemRelationLink] = []
 
     # --- Category ---
 
@@ -61,10 +71,13 @@ class InMemoryRepository:
         return list(self._items.values())
 
     def delete_item(self, item_id: UUID) -> bool:
-        """Delete item; return True if it existed."""
+        """Delete item; return True if it existed. Cascades relation links."""
         if item_id not in self._items:
             return False
         del self._items[item_id]
+        self._item_relation_links = [
+            lnk for lnk in self._item_relation_links if item_id not in {lnk.source_item_id, lnk.target_item_id}
+        ]
         return True
 
     # --- Tag ---
@@ -167,6 +180,55 @@ class InMemoryRepository:
     def get_category_by_slug(self, slug: str) -> Category | None:
         """Return the category with the given slug, or None."""
         return next((c for c in self._categories.values() if c.slug == slug), None)
+
+    # --- Item relation links ---
+
+    def save_item_relation_link(self, link: ItemRelationLink) -> None:
+        """Upsert a directed item-to-item relation."""
+        for i, existing in enumerate(self._item_relation_links):
+            if (
+                existing.source_item_id == link.source_item_id
+                and existing.target_item_id == link.target_item_id
+                and existing.relation_type == link.relation_type
+            ):
+                self._item_relation_links[i] = link
+                return
+        self._item_relation_links.append(link)
+
+    def list_item_relation_links(
+        self,
+        item_id: UUID,
+        *,
+        relation_type: str | None = None,
+        direction: Literal["outgoing", "incoming"] = "outgoing",
+    ) -> list[ItemRelationLink]:
+        """Return item relation links for the given item."""
+        if direction == "outgoing":
+            result = [lnk for lnk in self._item_relation_links if lnk.source_item_id == item_id]
+        else:
+            result = [lnk for lnk in self._item_relation_links if lnk.target_item_id == item_id]
+        if relation_type is not None:
+            result = [lnk for lnk in result if lnk.relation_type == relation_type]
+        return result
+
+    def delete_item_relation_link(
+        self,
+        source_item_id: UUID,
+        target_item_id: UUID,
+        relation_type: str,
+    ) -> bool:
+        """Delete the specific directed relation; return True if found."""
+        before = len(self._item_relation_links)
+        self._item_relation_links = [
+            lnk
+            for lnk in self._item_relation_links
+            if not (
+                lnk.source_item_id == source_item_id
+                and lnk.target_item_id == target_item_id
+                and lnk.relation_type == relation_type
+            )
+        ]
+        return len(self._item_relation_links) < before
 
     # --- Configuration introspection ---
 

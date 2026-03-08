@@ -8,13 +8,13 @@ contains no storage logic itself.
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 from uuid import UUID, uuid4
 
 from taxomesh.domain.constants import DEFAULT_ITEM_EXTERNAL_ID, ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
 from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
-from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
+from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemRelationLink, Tag
 from taxomesh.domain.types import ExternalId
 from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
@@ -22,6 +22,7 @@ from taxomesh.exceptions import (
     TaxomeshCyclicDependencyError,
     TaxomeshDuplicateSlugError,
     TaxomeshItemNotFoundError,
+    TaxomeshRelationError,
     TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
 )
@@ -775,6 +776,121 @@ class TaxomeshService:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {parent_id}")
         self._repo.delete_category_parent_link(category_id, parent_id)
         clear_all_caches()
+
+    # ------------------------------------------------------------------
+    # Item relations
+    # ------------------------------------------------------------------
+
+    def relate_items(
+        self,
+        source_item_id: UUID,
+        target_item_id: UUID,
+        relation_type: str,
+        sort_index: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> ItemRelationLink:
+        """Create or update a directed typed relation between two items.
+
+        Upsert semantics: if a relation with the same
+        ``(source_item_id, target_item_id, relation_type)`` triple already
+        exists its ``sort_index`` and ``metadata`` are updated in-place.
+
+        Args:
+            source_item_id: UUID of the source item.
+            target_item_id: UUID of the target item.
+            relation_type: Human-readable relation label (e.g. ``"covers"``).
+                Case is normalised to lowercase.
+            sort_index: Sort position; defaults to 0.
+            metadata: Optional arbitrary key-value pairs; defaults to ``{}``.
+
+        Returns:
+            The created or updated ItemRelationLink.
+
+        Raises:
+            TaxomeshItemNotFoundError: If either item does not exist.
+            TaxomeshRelationError: If ``source_item_id == target_item_id``
+                or ``relation_type`` is empty / whitespace-only.
+        """
+        self.get_item(source_item_id)
+        self.get_item(target_item_id)
+        link = ItemRelationLink(
+            source_item_id=source_item_id,
+            target_item_id=target_item_id,
+            relation_type=relation_type,
+            sort_index=sort_index,
+            metadata=metadata if metadata is not None else {},
+        )
+        self._repo.save_item_relation_link(link)
+        return link
+
+    def list_item_relations(
+        self,
+        item_id: UUID,
+        *,
+        relation_type: str | None = None,
+        direction: Literal["outgoing", "incoming"] = "outgoing",
+    ) -> list[ItemRelationLink]:
+        """Return relation links for the given item.
+
+        Args:
+            item_id: The UUID of the item to query.
+            relation_type: Optional filter; case-insensitive. When provided
+                only links whose normalised type matches are returned.
+            direction: ``"outgoing"`` (default) returns links where this item
+                is the source; ``"incoming"`` returns links where it is the
+                target.
+
+        Returns:
+            List of matching ItemRelationLink objects; empty list if none match.
+        """
+        normalised_type = relation_type.strip().lower() if relation_type is not None else None
+        return self._repo.list_item_relation_links(item_id, relation_type=normalised_type, direction=direction)
+
+    def list_related_items(
+        self,
+        item_id: UUID,
+        *,
+        relation_type: str | None = None,
+        direction: Literal["outgoing", "incoming"] = "outgoing",
+    ) -> list[Item]:
+        """Return the items reachable via relations from/to the given item.
+
+        Args:
+            item_id: The UUID of the item to query.
+            relation_type: Optional filter; case-insensitive.
+            direction: ``"outgoing"`` (default) returns targets; ``"incoming"``
+                returns sources.
+
+        Returns:
+            List of related Item objects; empty list if none match.
+        """
+        links = self.list_item_relations(item_id, relation_type=relation_type, direction=direction)
+        if direction == "outgoing":
+            return [self.get_item(lnk.target_item_id) for lnk in links]
+        return [self.get_item(lnk.source_item_id) for lnk in links]
+
+    def remove_item_relation(
+        self,
+        source_item_id: UUID,
+        target_item_id: UUID,
+        relation_type: str,
+    ) -> None:
+        """Remove a specific directed relation between two items.
+
+        Args:
+            source_item_id: UUID of the source item.
+            target_item_id: UUID of the target item.
+            relation_type: Relation label to remove (case-insensitive).
+
+        Raises:
+            TaxomeshRelationError: If the specified relation does not exist.
+        """
+        normalised = relation_type.strip().lower()
+        found = self._repo.delete_item_relation_link(source_item_id, target_item_id, normalised)
+        if not found:
+            raise TaxomeshRelationError(
+                f"Relation '{normalised}' from {source_item_id} to {target_item_id} does not exist"
+            )
 
     def remove_item_from_category(self, item_id: UUID, category_id: UUID) -> None:
         """Remove an item's placement from a category. No-op if the placement does not exist.

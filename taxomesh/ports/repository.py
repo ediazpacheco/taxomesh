@@ -6,10 +6,10 @@ repository. Explicit inheritance is NOT required; mypy verifies compliance
 structurally at type-check time.
 """
 
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
-from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
+from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemRelationLink, Tag
 
 
 class TaxomeshRepositoryBase(Protocol):
@@ -301,5 +301,59 @@ class TaxomeshRepositoryBase(Protocol):
 
         Returns:
             True if the placement was found and deleted; False if it did not exist.
+        """
+        ...
+
+    # --- Item relation links ---
+
+    def save_item_relation_link(self, link: ItemRelationLink) -> None:
+        """Upsert a directed item-to-item relation.
+
+        If a link with the same ``(source_item_id, target_item_id, relation_type)``
+        triple already exists, its ``sort_index`` and ``metadata`` are updated in-place.
+        No duplicate is created.
+
+        Args:
+            link: The ItemRelationLink to persist.
+        """
+        ...
+
+    def list_item_relation_links(
+        self,
+        item_id: UUID,
+        *,
+        relation_type: str | None = None,
+        direction: Literal["outgoing", "incoming"] = "outgoing",
+    ) -> list[ItemRelationLink]:
+        """Return item relation links for the given item.
+
+        Args:
+            item_id: The UUID of the item to query.
+            relation_type: Optional filter; if provided only links with this
+                exact (already-normalised) type are returned.
+            direction: ``"outgoing"`` returns links where ``source_item_id``
+                equals ``item_id``; ``"incoming"`` returns links where
+                ``target_item_id`` equals ``item_id``.
+
+        Returns:
+            List of matching ItemRelationLink objects; empty list if none match.
+        """
+        ...
+
+    def delete_item_relation_link(
+        self,
+        source_item_id: UUID,
+        target_item_id: UUID,
+        relation_type: str,
+    ) -> bool:
+        """Delete the specific directed relation identified by the triple.
+
+        Args:
+            source_item_id: UUID of the source item.
+            target_item_id: UUID of the target item.
+            relation_type: Exact (already-normalised, lowercase) relation type string.
+
+        Returns:
+            True if the relation was found and deleted; False if it did not exist.
         """
         ...

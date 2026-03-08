@@ -12,7 +12,7 @@ Usage::
     svc = TaxomeshService(repository=DjangoRepository())
 """
 
-from typing import Any, Final
+from typing import Any, Final, Literal
 from uuid import UUID
 
 from taxomesh.domain.constants import ROOT_CATEGORY_NAME
@@ -21,6 +21,7 @@ from taxomesh.domain.models import (
     CategoryParentLink,
     Item,
     ItemParentLink,
+    ItemRelationLink,
     Tag,
 )
 
@@ -64,6 +65,7 @@ class DjangoRepository:
                 CategoryParentLinkModel,
                 ItemModel,
                 ItemParentLinkModel,
+                ItemRelationLinkModel,
                 ItemTagLinkModel,
                 TagModel,
             )
@@ -97,6 +99,7 @@ class DjangoRepository:
         self._CategoryParentLinkModel = CategoryParentLinkModel
         self._ItemParentLinkModel = ItemParentLinkModel
         self._ItemTagLinkModel = ItemTagLinkModel
+        self._ItemRelationLinkModel = ItemRelationLinkModel
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -152,6 +155,17 @@ class DjangoRepository:
             item_id=row.item_id,  # type: ignore[attr-defined]
             category_id=row.category_id,  # type: ignore[attr-defined]
             sort_index=row.sort_index,  # type: ignore[attr-defined]
+        )
+
+    def _row_to_item_relation_link(self, row: object) -> ItemRelationLink:
+        """Convert an ORM ItemRelationLinkModel row to a domain ItemRelationLink."""
+        # row is typed as object because Django ORM classes are only available at runtime (deferred import).
+        return ItemRelationLink(
+            source_item_id=row.source_item_id,  # type: ignore[attr-defined]
+            target_item_id=row.target_item_id,  # type: ignore[attr-defined]
+            relation_type=row.relation_type,  # type: ignore[attr-defined]
+            sort_index=row.sort_index,  # type: ignore[attr-defined]
+            metadata=row.metadata,  # type: ignore[attr-defined]
         )
 
     # ------------------------------------------------------------------
@@ -655,6 +669,103 @@ class DjangoRepository:
         """
         row = self._CategoryModel.objects.using(self._using).filter(slug=slug).first()
         return self._row_to_category(row) if row is not None else None
+
+    # ------------------------------------------------------------------
+    # Item relation links
+    # ------------------------------------------------------------------
+
+    def save_item_relation_link(self, link: ItemRelationLink) -> None:
+        """Upsert a directed item-to-item relation.
+
+        Args:
+            link: The ItemRelationLink to persist.
+
+        Raises:
+            TaxomeshRepositoryError: On database error.
+        """
+        from django.db import DatabaseError, transaction  # noqa: PLC0415
+
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+        try:
+            with transaction.atomic(using=self._using):
+                self._ItemRelationLinkModel.objects.using(self._using).update_or_create(
+                    source_item_id=link.source_item_id,
+                    target_item_id=link.target_item_id,
+                    relation_type=link.relation_type,
+                    defaults={"sort_index": link.sort_index, "metadata": link.metadata},
+                )
+        except DatabaseError as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
+
+    def list_item_relation_links(
+        self,
+        item_id: UUID,
+        *,
+        relation_type: str | None = None,
+        direction: Literal["outgoing", "incoming"] = "outgoing",
+    ) -> list[ItemRelationLink]:
+        """Return item relation links for the given item.
+
+        Args:
+            item_id: The UUID of the item to query.
+            relation_type: Optional filter; if provided only links with this
+                exact (already-normalised) type are returned.
+            direction: ``"outgoing"`` returns links where ``source_item_id``
+                equals ``item_id``; ``"incoming"`` returns links where
+                ``target_item_id`` equals ``item_id``.
+
+        Returns:
+            List of matching ItemRelationLink objects; empty list if none match.
+        """
+        from django.db import DatabaseError  # noqa: PLC0415
+
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+        try:
+            if direction == "outgoing":
+                qs = self._ItemRelationLinkModel.objects.using(self._using).filter(source_item_id=item_id)
+            else:
+                qs = self._ItemRelationLinkModel.objects.using(self._using).filter(target_item_id=item_id)
+            if relation_type is not None:
+                qs = qs.filter(relation_type=relation_type)
+        except DatabaseError as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
+        return [self._row_to_item_relation_link(row) for row in qs]
+
+    def delete_item_relation_link(
+        self,
+        source_item_id: UUID,
+        target_item_id: UUID,
+        relation_type: str,
+    ) -> bool:
+        """Delete the specific directed relation identified by the triple.
+
+        Args:
+            source_item_id: UUID of the source item.
+            target_item_id: UUID of the target item.
+            relation_type: Exact (already-normalised, lowercase) relation type string.
+
+        Returns:
+            True if the relation was found and deleted; False if it did not exist.
+        """
+        from django.db import DatabaseError  # noqa: PLC0415
+
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+        try:
+            deleted_count, _ = (
+                self._ItemRelationLinkModel.objects.using(self._using)
+                .filter(
+                    source_item_id=source_item_id,
+                    target_item_id=target_item_id,
+                    relation_type=relation_type,
+                )
+                .delete()
+            )
+        except DatabaseError as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
+        return int(deleted_count) > 0
 
     # ------------------------------------------------------------------
     # Django-specific extras (outside protocol)

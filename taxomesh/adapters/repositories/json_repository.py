@@ -10,10 +10,18 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 from uuid import UUID
 
-from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemTagLink, Tag
+from taxomesh.domain.models import (
+    Category,
+    CategoryParentLink,
+    Item,
+    ItemParentLink,
+    ItemRelationLink,
+    ItemTagLink,
+    Tag,
+)
 from taxomesh.exceptions import TaxomeshRepositoryError
 
 DEFAULT_JSON_PATH: Final[Path] = Path("data/taxomesh.json")
@@ -57,6 +65,7 @@ class JsonRepository:
         self._links: list[ItemTagLink] = []
         self._category_parent_links: list[CategoryParentLink] = []
         self._item_parent_links: list[ItemParentLink] = []
+        self._item_relation_links: list[ItemRelationLink] = []
 
         if self._path.is_dir():
             raise TaxomeshRepositoryError(f"path is a directory, not a file: {self._path}")
@@ -90,6 +99,9 @@ class JsonRepository:
                 CategoryParentLink.model_validate(lnk) for lnk in data.get("category_parent_links", [])
             ]
             self._item_parent_links = [ItemParentLink.model_validate(lnk) for lnk in data.get("item_parent_links", [])]
+            self._item_relation_links = [
+                ItemRelationLink.model_validate(lnk) for lnk in data.get("item_relation_links", [])
+            ]
         except TaxomeshRepositoryError:
             raise
         except Exception as exc:
@@ -109,6 +121,7 @@ class JsonRepository:
             "item_tag_links": [lnk.model_dump(mode="json") for lnk in self._links],
             "category_parent_links": [lnk.model_dump(mode="json") for lnk in self._category_parent_links],
             "item_parent_links": [lnk.model_dump(mode="json") for lnk in self._item_parent_links],
+            "item_relation_links": [lnk.model_dump(mode="json") for lnk in self._item_relation_links],
         }
         payload = json.dumps(data, indent=2, ensure_ascii=False)
         dir_ = self._path.parent
@@ -206,6 +219,9 @@ class JsonRepository:
     def delete_item(self, item_id: UUID) -> bool:
         """Delete an item by its internal identifier.
 
+        Cascades: all item relation links where this item is the source or
+        target are removed alongside the item.
+
         Args:
             item_id: The library-assigned UUID of the item to delete.
 
@@ -215,6 +231,9 @@ class JsonRepository:
         if item_id not in self._items:
             return False
         del self._items[item_id]
+        self._item_relation_links = [
+            lnk for lnk in self._item_relation_links if item_id not in {lnk.source_item_id, lnk.target_item_id}
+        ]
         self._flush()
         return True
 
@@ -375,6 +394,87 @@ class JsonRepository:
             lnk for lnk in self._item_parent_links if not (lnk.item_id == item_id and lnk.category_id == category_id)
         ]
         if len(self._item_parent_links) < before:
+            self._flush()
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Item relation links
+    # ------------------------------------------------------------------
+
+    def save_item_relation_link(self, link: ItemRelationLink) -> None:
+        """Upsert a directed item-to-item relation.
+
+        Args:
+            link: The ItemRelationLink to persist.
+        """
+        for i, existing in enumerate(self._item_relation_links):
+            if (
+                existing.source_item_id == link.source_item_id
+                and existing.target_item_id == link.target_item_id
+                and existing.relation_type == link.relation_type
+            ):
+                self._item_relation_links[i] = link
+                self._flush()
+                return
+        self._item_relation_links.append(link)
+        self._flush()
+
+    def list_item_relation_links(
+        self,
+        item_id: UUID,
+        *,
+        relation_type: str | None = None,
+        direction: Literal["outgoing", "incoming"] = "outgoing",
+    ) -> list[ItemRelationLink]:
+        """Return item relation links for the given item.
+
+        Args:
+            item_id: The UUID of the item to query.
+            relation_type: Optional filter; if provided only links with this
+                exact (already-normalised) type are returned.
+            direction: ``"outgoing"`` returns links where ``source_item_id``
+                equals ``item_id``; ``"incoming"`` returns links where
+                ``target_item_id`` equals ``item_id``.
+
+        Returns:
+            List of matching ItemRelationLink objects; empty list if none match.
+        """
+        if direction == "outgoing":
+            result = [lnk for lnk in self._item_relation_links if lnk.source_item_id == item_id]
+        else:
+            result = [lnk for lnk in self._item_relation_links if lnk.target_item_id == item_id]
+        if relation_type is not None:
+            result = [lnk for lnk in result if lnk.relation_type == relation_type]
+        return result
+
+    def delete_item_relation_link(
+        self,
+        source_item_id: UUID,
+        target_item_id: UUID,
+        relation_type: str,
+    ) -> bool:
+        """Delete the specific directed relation identified by the triple.
+
+        Args:
+            source_item_id: UUID of the source item.
+            target_item_id: UUID of the target item.
+            relation_type: Exact (already-normalised, lowercase) relation type string.
+
+        Returns:
+            True if the relation was found and deleted; False if it did not exist.
+        """
+        before = len(self._item_relation_links)
+        self._item_relation_links = [
+            lnk
+            for lnk in self._item_relation_links
+            if not (
+                lnk.source_item_id == source_item_id
+                and lnk.target_item_id == target_item_id
+                and lnk.relation_type == relation_type
+            )
+        ]
+        if len(self._item_relation_links) < before:
             self._flush()
             return True
         return False

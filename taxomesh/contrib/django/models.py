@@ -27,6 +27,7 @@ from taxomesh.domain.constants import (
     MAX_ITEM_NAME_LENGTH,
     MAX_SLUG_LENGTH,
     MAX_TAG_NAME_LENGTH,
+    RELATION_TYPE_MAX_LENGTH,
 )
 
 # ---------------------------------------------------------------------------
@@ -42,6 +43,7 @@ TAG_TABLE: Final[str] = "taxomesh_tag"
 CATEGORY_PARENT_LINK_TABLE: Final[str] = "taxomesh_category_parent_link"
 ITEM_PARENT_LINK_TABLE: Final[str] = "taxomesh_item_parent_link"
 ITEM_TAG_LINK_TABLE: Final[str] = "taxomesh_item_tag_link"
+ITEM_RELATION_LINK_TABLE: Final[str] = "taxomesh_item_relation_link"
 
 DJANGO_REPO_USING_DEFAULT: Final[str] = "default"
 """Default Django database alias used by DjangoRepository."""
@@ -195,6 +197,31 @@ class ItemTagLinkModel(models.Model):
         app_label = APP_LABEL
         db_table = ITEM_TAG_LINK_TABLE
         unique_together = [("tag", "item")]
+
+
+class ItemRelationLinkModel(models.Model):
+    """ORM representation of a directed typed relation between two items."""
+
+    source_item = models.ForeignKey(
+        ItemModel,
+        on_delete=models.CASCADE,
+        related_name="outgoing_relation_links",
+        db_column="source_item_id",
+    )
+    target_item = models.ForeignKey(
+        ItemModel,
+        on_delete=models.CASCADE,
+        related_name="incoming_relation_links",
+        db_column="target_item_id",
+    )
+    relation_type = models.CharField(max_length=RELATION_TYPE_MAX_LENGTH)
+    sort_index = models.IntegerField(default=0)
+    metadata = models.JSONField(blank=True, default=dict)
+
+    class Meta:
+        app_label = APP_LABEL
+        db_table = ITEM_RELATION_LINK_TABLE
+        unique_together = [("source_item", "target_item", "relation_type")]
 
 
 class CategoryGraphProxy(CategoryModel):

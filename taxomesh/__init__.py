@@ -13,12 +13,13 @@ from taxomesh.exceptions import (
     TaxomeshError,
     TaxomeshItemNotFoundError,
     TaxomeshNotFoundError,
+    TaxomeshRelationError,
     TaxomeshRepositoryError,
     TaxomeshTagNotFoundError,
     TaxomeshValidationError,
 )
 
-__VERSION__ = "0.1.0a9"
+__VERSION__ = "0.1.0a11"
 __version__ = __VERSION__
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "TaxomeshValidationError",
     "TaxomeshCyclicDependencyError",
     "TaxomeshDuplicateSlugError",
+    "TaxomeshRelationError",
     "TaxomeshRepositoryError",
     "TaxomeshConfigError",
 ]

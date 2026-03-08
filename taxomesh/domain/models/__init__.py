@@ -9,6 +9,7 @@ from taxomesh.domain.models.category import Category
 from taxomesh.domain.models.category_parent_link import CategoryParentLink
 from taxomesh.domain.models.item import Item
 from taxomesh.domain.models.item_parent_link import ItemParentLink
+from taxomesh.domain.models.item_relation_link import ItemRelationLink
 from taxomesh.domain.models.item_tag_link import ItemTagLink
 from taxomesh.domain.models.tag import Tag
 
@@ -18,6 +19,7 @@ __all__ = [
     "CategoryParentLink",
     "Item",
     "ItemParentLink",
+    "ItemRelationLink",
     "ItemTagLink",
     "Tag",
 ]

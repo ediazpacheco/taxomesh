@@ -63,6 +63,7 @@ print([node.category.name for node in svc.get_graph().roots])
 - **Item**: the core catalogued object, identified by an internal `item_id`. The optional `external_id` field is an escape hatch: use it to store a reference to an entity that lives outside taxomesh (e.g. a primary key from another system) when the built-in fields (`name`, `slug`, `enabled`, `metadata`) are not enough to represent your data. It is not required — items can exist without any external reference.
 - **Category**: taxonomy node with optional `name`, `description`, `metadata`, `external_id`, `enabled`, and optional unique `slug`
 - **Tag**: free-form item label
+- **ItemRelationLink**: directed, typed relation between two items (e.g. `covers`, `version_of`, `performed_by`)
 - **CategoryParentLink**: relation from category to parent category with `sort_index`
 - **ItemParentLink**: relation from item to category with `sort_index`
 - **TaxomeshGraph**: read snapshot returned by `get_graph()` for tree-like traversal
@@ -193,6 +194,43 @@ svc.remove_tag(tag.tag_id, item_c.item_id)    # no-op if already removed
 svc.delete_tag(tag.tag_id)
 ```
 
+### Item relations
+
+`ItemRelationLink` models a **directed, typed relation** between two items.
+The relation type is a free-form string — taxomesh imposes no domain-specific vocabulary.
+
+```python
+# Create relations
+svc.relate_items(work.item_id, artist.item_id, "music_by")
+svc.relate_items(recording.item_id, work.item_id, "version_of", sort_index=1)
+svc.relate_items(release.item_id, recording.item_id, "contains", metadata={"disc": 1})
+
+# List outgoing relations from an item
+links = svc.list_item_relations(recording.item_id)
+# [ItemRelationLink(source=recording, target=work, relation_type="version_of"), ...]
+
+# List incoming relations (items that point TO this item)
+links = svc.list_item_relations(work.item_id, direction="incoming")
+
+# Filter by type
+links = svc.list_item_relations(recording.item_id, relation_type="version_of")
+
+# Resolve to Item objects directly
+items = svc.list_related_items(release.item_id)  # returns list[Item]
+
+# Remove a relation
+svc.remove_item_relation(recording.item_id, work.item_id, "version_of")
+```
+
+**Upsert semantics**: calling `relate_items` with the same `(source, target, relation_type)` triple
+updates `sort_index` and `metadata` rather than creating a duplicate.
+
+**Self-relations** are rejected. **Empty relation type** raises `TaxomeshValidationError`.
+
+Relations are stored in all backends (YAML, JSON, Django). Django admin exposes
+`ItemRelationLinkModelAdmin` and shows editable outgoing / read-only incoming inlines
+on the Item change page.
+
 ### Graph snapshot
 
 ```python
@@ -319,6 +357,16 @@ taxomesh tag add --name "classic"
 taxomesh item add-to-tag <item-uuid> --tag-id <tag-uuid>
 taxomesh tag list
 
+# Relations
+taxomesh item relation add <source-uuid> <target-uuid> covers
+taxomesh item relation add <source-uuid> <target-uuid> version_of --sort-index 1 --metadata key=value
+taxomesh item relation list <item-uuid>
+taxomesh item relation list <item-uuid> --direction incoming
+taxomesh item relation list <item-uuid> --type covers
+taxomesh item relation related <item-uuid>
+taxomesh item relation related <item-uuid> --direction incoming
+taxomesh item relation delete <source-uuid> <target-uuid> covers
+
 # Graph
 taxomesh graph
 ```
@@ -338,6 +386,21 @@ Verbose diagnostics:
 taxomesh --verbose category list
 ```
 
+## When to use categories vs tags vs item relations
+
+| Mechanism | Use when |
+|-----------|----------|
+| **Category** | Hierarchical classification — items belong to a taxonomy node |
+| **ItemParentLink** | Placing an item inside a category (multi-parent supported) |
+| **Tag** | Flat, free-form labels applied to items (e.g. "featured", "archived") |
+| **ItemRelationLink** | Directed, semantic relationships *between items* (e.g. one recording is a `version_of` a work; a release `contains` a recording) |
+
+Choose `ItemRelationLink` when:
+- The relationship is between two items (not item → category)
+- The relationship has a meaningful direction (source → target)
+- You need to express multiple relationship *types* between the same pair of items
+- The relationship carries additional data (`sort_index`, `metadata`)
+
 ## Error model
 
 All library exceptions inherit from `TaxomeshError`.
@@ -352,6 +415,7 @@ All library exceptions inherit from `TaxomeshError`.
 - `TaxomeshRepositoryError`
 - `TaxomeshConfigError`
 - `TaxomeshRootCategoryError`
+- `TaxomeshRelationError`
 
 ## Architecture
 
