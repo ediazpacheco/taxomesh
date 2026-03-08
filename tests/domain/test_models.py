@@ -84,6 +84,21 @@ class TestItem:
         item = Item(name="test", external_id=None)  # type: ignore[arg-type]
         assert item.external_id == ""
 
+    def test_str_no_slug_no_external_id(self) -> None:
+        uid = uuid4()
+        item = Item(item_id=uid, name="Product")
+        assert str(item) == f"🏷️ Product (id: {uid})"
+
+    def test_str_with_slug(self) -> None:
+        uid = uuid4()
+        item = Item(item_id=uid, name="Product", slug="p1")
+        assert str(item) == f"🏷️ Product (slug: p1 - id: {uid})"
+
+    def test_str_with_external_id(self) -> None:
+        uid = uuid4()
+        item = Item(item_id=uid, name="Product", external_id="EXT-1")
+        assert str(item) == f"🏷️ Product (id: {uid} - ext_id: EXT-1)"
+
 
 class TestCategory:
     def test_construction(self) -> None:
@@ -165,6 +180,26 @@ class TestCategory:
         """Category.is_root is False for any non-root name."""
         cat = Category(category_id=uuid4(), name="Electronics")
         assert cat.is_root is False
+
+    def test_str_no_slug_no_external_id(self) -> None:
+        uid = uuid4()
+        cat = Category(category_id=uid, name="Rock")
+        assert str(cat) == f"📂 Rock (id: {uid})"
+
+    def test_str_with_slug(self) -> None:
+        uid = uuid4()
+        cat = Category(category_id=uid, name="Rock", slug="rock")
+        assert str(cat) == f"📂 Rock (slug: rock - id: {uid})"
+
+    def test_str_with_slug_and_external_id(self) -> None:
+        uid = uuid4()
+        cat = Category(category_id=uid, name="Rock", slug="rock", external_id="genre-rock")
+        assert str(cat) == f"📂 Rock (slug: rock - id: {uid} - ext_id: genre-rock)"
+
+    def test_str_with_external_id_only(self) -> None:
+        uid = uuid4()
+        cat = Category(category_id=uid, name="Rock", external_id="genre-rock")
+        assert str(cat) == f"📂 Rock (id: {uid} - ext_id: genre-rock)"
 
 
 class TestTag:

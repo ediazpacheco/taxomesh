@@ -62,15 +62,15 @@ class TestCategoryEnabledIcon:
 
 
 class TestCategoryExternalId:
-    def test_category_external_id_not_shown_in_graph(self) -> None:
-        # Category.__str__ does not include external_id, so graph output should not show it
+    def test_category_external_id_shown_in_graph(self) -> None:
+        # Category.__str__ includes external_id when non-empty
         node = CategoryNode(
             category=_make_category(external_id="genre-rock"),
             items=[],
             children=[],
         )
         output = _render_tree(node)
-        assert "genre-rock" not in output
+        assert "genre-rock" in output
 
     def test_category_with_empty_external_id_omits_it(self) -> None:
         node = CategoryNode(

@@ -26,23 +26,18 @@
     margin: 2px 0;
     padding-left: calc(var(--depth, 0) * 2.6rem);
   }
-  .taxomesh-entry[data-kind="item"] .taxomesh-label::before {
-    content: "↳";
-    color: #7e8a99;
-    margin-right: 0.4rem;
-  }
   .taxomesh-entry[data-kind="item"] {
     color: #9aa6b4;
   }
   .taxomesh-entry[data-kind="category"] .taxomesh-label {
     font-weight: 700;
   }
-  .taxomesh-uuid {
-    color: #8f98a7;
-    font-size: 0.86em;
+  .taxomesh-label a {
+    text-decoration: none;
+    color: inherit;
   }
-  .taxomesh-ext {
-    color: #6f7988;
+  .taxomesh-label a:hover {
+    text-decoration: underline;
   }
 </style>
 
@@ -65,14 +60,13 @@
         {% endif %}
 
         {% if entry.kind == "category" %}
-          <span class="taxomesh-label">{{ entry.name }}</span>
-          <span class="taxomesh-uuid">{{ entry.uuid }}</span>
-          {% if entry.external_id %}
-            <span class="taxomesh-ext">[{{ entry.external_id }}]</span>
-          {% endif %}
+          <span class="taxomesh-label">
+            <a href="{% url 'admin:taxomesh_contrib_django_categorymodel_change' entry.uuid %}">{{ entry.name }}</a>
+          </span>
         {% else %}
-          <span class="taxomesh-label">{{ entry.name }}</span>
-          <span class="taxomesh-uuid">{{ entry.uuid }}</span>
+          <span class="taxomesh-label">
+            <a href="{% url 'admin:taxomesh_contrib_django_itemmodel_change' entry.uuid %}">{{ entry.name }}</a>
+          </span>
         {% endif %}
       </div>
     {% endfor %}

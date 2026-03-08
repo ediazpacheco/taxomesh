@@ -14,7 +14,7 @@ from taxomesh.domain.constants import (
     MAX_SLUG_LENGTH,
     ROOT_CATEGORY_NAME,
 )
-from taxomesh.domain.models.base import ModelBase
+from taxomesh.domain.models.base import ModelBase, _build_str_repr
 
 
 class Category(ModelBase):
@@ -46,5 +46,4 @@ class Category(ModelBase):
         return str(v)
 
     def __str__(self) -> str:
-        slug_part = f"s: {self.slug} - " if self.slug else ""
-        return f"📂 {self.name} ({slug_part}id: {self.category_id})"
+        return _build_str_repr("📂", self.name, self.category_id, self.slug, self.external_id)

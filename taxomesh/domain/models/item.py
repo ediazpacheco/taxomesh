@@ -11,7 +11,7 @@ from taxomesh.domain.constants import (
     MAX_ITEM_NAME_LENGTH,
     MAX_SLUG_LENGTH,
 )
-from taxomesh.domain.models.base import ModelBase
+from taxomesh.domain.models.base import ModelBase, _build_str_repr
 
 
 class Item(ModelBase):
@@ -33,5 +33,4 @@ class Item(ModelBase):
         return str(v)
 
     def __str__(self) -> str:
-        slug_part = f"s: {self.slug} - " if self.slug else ""
-        return f"🏷️ {self.name} ({slug_part}id: {self.item_id})"
+        return _build_str_repr("🏷️", self.name, self.item_id, self.slug, self.external_id)

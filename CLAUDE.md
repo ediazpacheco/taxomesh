@@ -229,6 +229,8 @@ Do NOT update README during implement — only after
 - All adapters already implement slug lookups; no storage change needed (020-slug-lookup)
 - Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (ORM + admin), Typer ≥ 0.12 (CLI) (021-optional-external-id)
 - Django ORM (`ItemModel`) — migration required; JSON/YAML repositories — no change (021-optional-external-id)
+- Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (admin), Rich ≥ 13.0 (CLI) (022-unified-str-admin-links)
+- N/A — no storage changes (022-unified-str-admin-links)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
