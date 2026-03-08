@@ -550,6 +550,14 @@ class JsonRepository:
         """
         return str(self._path)
 
+    def get_debug_info(self) -> dict[str, Any]:
+        """Return diagnostic info for this JSON repository.
+
+        Returns:
+            Dict with key path containing the storage file path as a string.
+        """
+        return {"path": str(self._path)}
+
     def remove_tag(self, tag_id: UUID, item_id: UUID) -> bool:
         """Remove the association between a tag and an item.
 

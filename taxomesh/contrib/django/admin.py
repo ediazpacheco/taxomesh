@@ -20,6 +20,7 @@ from taxomesh.contrib.django.models import (
     ItemRelationLinkModel,
     ItemTagLinkModel,
     TagModel,
+    TaxomeshDebugProxy,
 )
 from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
@@ -51,17 +52,20 @@ class RelationEntry(TypedDict):
 
 
 TAXOMESH_LINKED_MODEL_SETTING: Final[str] = "TAXOMESH_LINKED_MODEL"
+TAXOMESH_CATEGORY_LINKED_MODEL_SETTING: Final[str] = "TAXOMESH_CATEGORY_LINKED_MODEL"
 ADMIN_GRAPH_DEFAULT_MAX_DEPTH: Final[int] = 3
 
 
-def _resolve_linked_url(external_id: str) -> str | None:
-    """Resolve a Django admin change URL for the configured linked model instance.
+def _resolve_linked_url(external_id: str, setting_name: str = TAXOMESH_LINKED_MODEL_SETTING) -> str | None:
+    """Resolve a Django admin change URL for a configured linked model instance.
 
-    Reads settings.TAXOMESH_LINKED_MODEL, looks up the instance by external_id
-    as its primary key, and returns the admin change URL if found.
+    Reads the given Django settings key, looks up the instance by external_id as its
+    primary key, and returns the admin change URL if found.
 
     Args:
         external_id: The external_id string to use as the linked model PK.
+        setting_name: The Django settings key that holds the ``"app_label.ModelName"``
+            string. Defaults to ``TAXOMESH_LINKED_MODEL`` (item-linked model).
 
     Returns:
         The admin change URL string, or None if not resolved.
@@ -73,7 +77,7 @@ def _resolve_linked_url(external_id: str) -> str | None:
         from django.conf import settings as django_settings  # noqa: PLC0415
         from django.urls import reverse as dj_reverse  # noqa: PLC0415
 
-        linked_model_label = getattr(django_settings, TAXOMESH_LINKED_MODEL_SETTING, None)
+        linked_model_label = getattr(django_settings, setting_name, None)
         if not linked_model_label:
             return None
         linked_model = django_apps.get_model(linked_model_label)
@@ -224,6 +228,57 @@ def _reconcile_categories(obj: Any, form: Any, external_id_attr: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Shared list filters (must be defined before ItemCategoryAssignmentMixin)
+# ---------------------------------------------------------------------------
+
+
+class TaxomeshCategoryListFilter(admin.SimpleListFilter):
+    """Filter an external model admin list by assigned taxomesh category."""
+
+    title = "taxomesh category"
+    parameter_name = "taxomesh_category"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        """Return available taxomesh categories as filter choices.
+
+        Args:
+            request: The current HTTP request.
+            model_admin: The model admin instance.
+
+        Returns:
+            List of (category_id, name) pairs for all assignable categories.
+        """
+        try:
+            qs = DjangoRepository().assignable_categories_qs()
+            return [(str(cat.category_id), cat.name) for cat in qs]
+        except Exception:
+            return []
+
+    def queryset(self, request: HttpRequest, queryset: Any) -> Any:
+        """Filter the queryset to items assigned to the selected taxomesh category.
+
+        Args:
+            request: The current HTTP request.
+            queryset: The queryset to filter.
+
+        Returns:
+            Filtered queryset containing only objects linked to the selected category.
+        """
+        value = self.value()
+        if not value:
+            return queryset
+        try:
+            cat_uuid = UUID(value)
+            repo = DjangoRepository()
+            svc = TaxomeshService(repository=repo)
+            items = svc.list_items(category_id=cat_uuid)
+            external_ids = [str(item.external_id) for item in items if item.external_id]
+            return queryset.filter(pk__in=external_ids)
+        except Exception:
+            return queryset
+
+
+# ---------------------------------------------------------------------------
 # ItemCategoryAssignmentMixin
 # ---------------------------------------------------------------------------
 
@@ -239,6 +294,7 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin):
     """
 
     taxomesh_external_id_attr: str = "pk"
+    list_filter: tuple[Any, ...] = (TaxomeshCategoryListFilter,)
 
     def get_form(self, request: HttpRequest, obj: Any = None, **kwargs: Any) -> Any:
         """Inject a 'categories' ModelMultipleChoiceField into the admin form.
@@ -532,6 +588,41 @@ class HasSlugFilter(admin.SimpleListFilter):
         return queryset
 
 
+class HasLinkedObjectListFilter(admin.SimpleListFilter):
+    """Filter categories by whether their external_id field is non-empty."""
+
+    title = "linked object"
+    parameter_name = "has_linked_object"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        """Return the filter choices.
+
+        Args:
+            request: The current HTTP request.
+            model_admin: The model admin instance.
+
+        Returns:
+            List of (value, display_label) pairs.
+        """
+        return [("yes", "Has linked object"), ("no", "No linked object")]
+
+    def queryset(self, request: HttpRequest, queryset: Any) -> Any:
+        """Apply the filter to the queryset.
+
+        Args:
+            request: The current HTTP request.
+            queryset: The queryset to filter.
+
+        Returns:
+            Filtered queryset, or the original queryset if no value is selected.
+        """
+        if self.value() == "yes":
+            return queryset.exclude(external_id="")
+        if self.value() == "no":
+            return queryset.filter(external_id="")
+        return queryset
+
+
 # ---------------------------------------------------------------------------
 # CategoryModelAdmin
 # ---------------------------------------------------------------------------
@@ -542,11 +633,32 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
     """Admin view for Category records."""
 
     list_display = ("category_id", "name", "slug", "enabled", "external_id", "linked_object_url")
-    search_fields = ("name", "slug")
-    list_filter = ("enabled", HasSlugFilter)
+    search_fields = ("name", "slug", "category_id")
+    list_filter = ("enabled", HasSlugFilter, HasLinkedObjectListFilter)
     fields = ("name", "slug", "description", "enabled", "external_id", "metadata")
     readonly_fields = ("linked_object_url",)
     inlines = [CategoryParentLinkInline]
+
+    def linked_object_url(self, obj: Any) -> str:
+        """Return a link to a linked admin model for this category.
+
+        Checks TAXOMESH_CATEGORY_LINKED_MODEL first; falls back to TAXOMESH_LINKED_MODEL.
+
+        Args:
+            obj: The CategoryModel instance being rendered.
+
+        Returns:
+            An HTML anchor string with the arrow icon, or an empty string if not resolved.
+        """
+        external_id = getattr(obj, "external_id", None) or ""
+        url = _resolve_linked_url(external_id, TAXOMESH_CATEGORY_LINKED_MODEL_SETTING) or _resolve_linked_url(
+            external_id
+        )
+        if url:
+            return format_html('<a href="{}" title="View in admin">&#8599;</a>', url)
+        return ""
+
+    linked_object_url.short_description = "↗"  # type: ignore[attr-defined]
 
     def get_queryset(self, request: HttpRequest) -> object:  # type: ignore[override]
         """Return the base queryset with the internal root category excluded.
@@ -649,6 +761,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
                     description=obj.description,
                     slug=obj.slug,
                     metadata=obj.metadata,
+                    external_id=obj.external_id,
                 )
                 # Sync obj so Django can use it as a FK target for inline saves.
                 # Without this, Django 4.0+ raises ValueError ("unsaved related object")
@@ -662,6 +775,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
                     description=obj.description,
                     slug=obj.slug,
                     metadata=obj.metadata,
+                    external_id=obj.external_id,
                 )
         except TaxomeshValidationError as exc:
             self.message_user(request, str(exc), level=messages.ERROR)
@@ -800,7 +914,7 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
     """Admin view for Item records."""
 
     list_display = ("name", "external_id", "slug", "enabled", "linked_object_url")
-    search_fields = ("name", "external_id", "slug")
+    search_fields = ("name", "external_id", "slug", "item_id")
     list_filter = ("enabled", HasSlugFilter)
     fields = ("name", "external_id", "slug", "enabled", "metadata", "linked_object_url")
     readonly_fields = ("linked_object_url",)
@@ -1019,3 +1133,56 @@ class CategoryGraphProxyAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
         from django.urls import reverse  # noqa: PLC0415
 
         return HttpResponseRedirect(reverse("admin:taxomesh_contrib_django_graph"))
+
+
+# ---------------------------------------------------------------------------
+# TaxomeshDebugProxyAdmin
+# ---------------------------------------------------------------------------
+
+
+@admin.register(TaxomeshDebugProxy)
+class TaxomeshDebugProxyAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
+    """Admin page that renders taxomesh diagnostic information."""
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        """Deny add permission — debug page is read-only."""
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        """Deny change permission — debug page is read-only."""
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        """Deny delete permission — debug page is read-only."""
+        return False
+
+    def has_view_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        """Allow staff users to view the debug page."""
+        return request.user.is_staff
+
+    def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
+        """Render the taxomesh diagnostic page.
+
+        Args:
+            request: The current HTTP request.
+            extra_context: Optional extra template context.
+
+        Returns:
+            TemplateResponse rendering debug info from TaxomeshService.get_debug().
+        """
+        from django.template.response import TemplateResponse  # noqa: PLC0415
+
+        debug_info: dict[str, Any] = {}
+        try:
+            svc = TaxomeshService(repository=DjangoRepository())
+            debug_info = svc.get_debug()
+        except Exception as exc:
+            debug_info = {"error": str(exc)}
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Taxomesh Debug",
+            "debug_info": debug_info,
+            "opts": self.model._meta,
+        }
+        return TemplateResponse(request, "admin/taxomesh_contrib_django/debug.html", context)

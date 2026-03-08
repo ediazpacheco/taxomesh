@@ -523,3 +523,117 @@ class TestItemExternalIdOptional:
             data={"name": "Item Without External ID", "external_id": "", "slug": "", "enabled": True, "metadata": "{}"}
         )
         assert form.is_valid(), f"Form should be valid with blank external_id but got errors: {form.errors}"
+
+
+# ---------------------------------------------------------------------------
+# T007-T008 — Category linked_object_url using TAXOMESH_CATEGORY_LINKED_MODEL
+# ---------------------------------------------------------------------------
+
+
+class TestCategoryLinkedObjectUrl:
+    """Tests for CategoryModelAdmin.linked_object_url using the category-specific setting."""
+
+    def test_category_linked_object_url_empty_external_id(self) -> None:
+        """With empty external_id, linked_object_url returns empty string regardless of settings."""
+        from django.contrib import admin as dj_admin  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
+
+        cat_admin = CategoryModelAdmin(CategoryModel, dj_admin.site)
+        mock_obj = MagicMock()
+        mock_obj.external_id = ""
+        result = cat_admin.linked_object_url(mock_obj)
+        assert result == ""
+
+    def test_category_linked_object_url_no_setting(self, settings: object) -> None:
+        """Without TAXOMESH_CATEGORY_LINKED_MODEL, linked_object_url returns empty string."""
+        import django.conf  # noqa: PLC0415
+
+        if hasattr(django.conf.settings, "TAXOMESH_CATEGORY_LINKED_MODEL"):
+            delattr(django.conf.settings, "TAXOMESH_CATEGORY_LINKED_MODEL")
+        from django.contrib import admin as dj_admin  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
+
+        cat_admin = CategoryModelAdmin(CategoryModel, dj_admin.site)
+        mock_obj = MagicMock()
+        mock_obj.external_id = "some-ext-id"
+        result = cat_admin.linked_object_url(mock_obj)
+        assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# T018-T019 — UUID search fields
+# ---------------------------------------------------------------------------
+
+
+class TestUUIDSearchFields:
+    """Tests for UUID-based search in Category and Item admin."""
+
+    def test_category_search_by_uuid_substring(self, admin_client: object) -> None:
+        """Category admin list search by partial UUID returns matching category."""
+        from django.urls import reverse  # noqa: PLC0415
+
+        cat = CategoryModel.objects.create(name="SearchCat")
+        uuid_str = str(cat.category_id)
+        partial = uuid_str[:8]
+        url = reverse("admin:taxomesh_contrib_django_categorymodel_changelist") + f"?q={partial}"
+        response = admin_client.get(url)  # type: ignore[attr-defined]
+        assert response.status_code == 200
+        assert "SearchCat" in response.content.decode()
+
+    def test_item_search_by_uuid_substring(self, admin_client: object) -> None:
+        """Item admin list search by partial UUID returns matching item."""
+        from django.urls import reverse  # noqa: PLC0415
+
+        item = ItemModel.objects.create(name="SearchItem")
+        uuid_str = str(item.item_id)
+        partial = uuid_str[:8]
+        url = reverse("admin:taxomesh_contrib_django_itemmodel_changelist") + f"?q={partial}"
+        response = admin_client.get(url)  # type: ignore[attr-defined]
+        assert response.status_code == 200
+        assert "SearchItem" in response.content.decode()
+
+
+# ---------------------------------------------------------------------------
+# T022-T023 — Admin filters
+# ---------------------------------------------------------------------------
+
+
+class TestAdminFilters:
+    """Tests for HasLinkedObjectListFilter and TaxomeshCategoryListFilter."""
+
+    def test_has_linked_object_filter_yes(self, admin_client: object) -> None:
+        """Filter 'yes' returns only categories with non-empty external_id."""
+        from django.urls import reverse  # noqa: PLC0415
+
+        CategoryModel.objects.create(name="WithExt", external_id="ext-123")
+        CategoryModel.objects.create(name="WithoutExt", external_id="")
+        url = reverse("admin:taxomesh_contrib_django_categorymodel_changelist") + "?has_linked_object=yes"
+        response = admin_client.get(url)  # type: ignore[attr-defined]
+        content = response.content.decode()
+        assert response.status_code == 200
+        assert "WithExt" in content
+        assert "WithoutExt" not in content
+
+    def test_has_linked_object_filter_no(self, admin_client: object) -> None:
+        """Filter 'no' returns only categories with empty external_id."""
+        from django.urls import reverse  # noqa: PLC0415
+
+        CategoryModel.objects.create(name="WithExt2", external_id="ext-456")
+        CategoryModel.objects.create(name="WithoutExt2", external_id="")
+        url = reverse("admin:taxomesh_contrib_django_categorymodel_changelist") + "?has_linked_object=no"
+        response = admin_client.get(url)  # type: ignore[attr-defined]
+        content = response.content.decode()
+        assert response.status_code == 200
+        assert "WithoutExt2" in content
+        assert "WithExt2" not in content
+
+    def test_taxomesh_category_list_filter_in_mixin(self) -> None:
+        """ItemCategoryAssignmentMixin includes TaxomeshCategoryListFilter in list_filter."""
+        from taxomesh.contrib.django.admin import (  # noqa: PLC0415
+            ItemCategoryAssignmentMixin,
+            TaxomeshCategoryListFilter,
+        )
+
+        assert TaxomeshCategoryListFilter in ItemCategoryAssignmentMixin.list_filter

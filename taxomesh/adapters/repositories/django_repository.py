@@ -186,6 +186,14 @@ class DjangoRepository:
         engine: str = settings.DATABASES[self._using]["ENGINE"].split(".")[-1]
         return f"django:{engine}/{self._using}"
 
+    def get_debug_info(self) -> dict[str, Any]:
+        """Return diagnostic info for this Django repository.
+
+        Returns:
+            Dict with key database_alias containing the Django database alias.
+        """
+        return {"database_alias": self._using}
+
     # ------------------------------------------------------------------
     # Category CRUD
     # ------------------------------------------------------------------

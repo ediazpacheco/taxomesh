@@ -571,3 +571,17 @@ def test_item_model_save_without_external_id() -> None:
     result = repo.get_item(item.item_id)
     assert result is not None
     assert result.external_id == ""
+
+
+# ---------------------------------------------------------------------------
+# T002 — get_debug_info() on DjangoRepository
+# ---------------------------------------------------------------------------
+
+
+def test_django_repository_get_debug_info(db: object) -> None:
+    """DjangoRepository.get_debug_info() returns a dict with 'database_alias'."""
+    repo = DjangoRepository()
+    info = repo.get_debug_info()
+    assert isinstance(info, dict)
+    assert "database_alias" in info
+    assert info["database_alias"] == "default"

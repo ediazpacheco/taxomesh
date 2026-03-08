@@ -72,6 +72,7 @@ class TaxomeshService:
                 or specifies an unsupported repository type.
             TaxomeshRepositoryError: If the repository adapter fails to initialise.
         """
+        self._config_name: str | None = None
         if repository is None:
             resolved = Path(config_path) if config_path is not None else Path.cwd() / _DEFAULT_CONFIG_FILENAME
             if resolved.exists():
@@ -81,6 +82,7 @@ class TaxomeshService:
                     raise TaxomeshConfigError(f"Could not parse config file {resolved}: {exc}") from exc
                 except OSError as exc:
                     raise TaxomeshConfigError(f"Could not read config file {resolved}: {exc}") from exc
+                self._config_name = raw.get("taxomesh", {}).get("name")
                 self._repo: TaxomeshRepositoryBase = self._build_repo_from_config(raw, resolved)
             else:
                 from taxomesh.adapters.repositories.yaml_repository import YAMLRepository  # noqa: PLC0415
@@ -94,6 +96,29 @@ class TaxomeshService:
     def repository(self) -> TaxomeshRepositoryBase:
         """Return the active storage backend."""
         return self._repo
+
+    def get_debug(self) -> dict[str, Any]:
+        """Return diagnostic information about this taxomesh installation.
+
+        Returns:
+            Dict with keys: version, config_name, repository_type,
+            working_path, and repository_info.
+        """
+        import importlib.metadata  # noqa: PLC0415
+
+        try:
+            version: str = importlib.metadata.version("taxomesh")
+        except importlib.metadata.PackageNotFoundError:
+            version = "unknown"
+        repo_info = self._repo.get_debug_info()
+        working_path: str | None = repo_info.get("path")
+        return {
+            "version": version,
+            "config_name": self._config_name,
+            "repository_type": type(self._repo).__name__,
+            "working_path": working_path,
+            "repository_info": repo_info,
+        }
 
     @staticmethod
     def _build_repo_from_config(config: dict[str, Any], config_path: Path) -> TaxomeshRepositoryBase:
@@ -170,6 +195,7 @@ class TaxomeshService:
         description: str = "",
         metadata: dict[str, Any] | None = None,
         slug: str = "",
+        external_id: str = "",
     ) -> Category:
         """Create a new category and persist it.
 
@@ -178,6 +204,7 @@ class TaxomeshService:
             description: Optional description; max 100 000 characters. Defaults to "".
             metadata: Optional arbitrary key-value pairs; defaults to {}.
             slug: Optional URL-friendly identifier; must be unique when non-empty. Defaults to "".
+            external_id: Optional external identifier. Defaults to "".
 
         Returns:
             The newly created Category with a library-assigned UUID.
@@ -197,6 +224,7 @@ class TaxomeshService:
             description=description,
             slug=slug,
             metadata=metadata if metadata is not None else {},
+            external_id=external_id,
         )
         self._repo.save_category(category)
         self._repo.save_category_parent_link(
@@ -224,12 +252,14 @@ class TaxomeshService:
         return result
 
     @memoize(DEFAULT_CACHE_TTL)
-    def list_categories(self, *, parent_id: UUID | None = None) -> list[Category]:
-        """Return stored categories, optionally filtered by parent.
+    def list_categories(self, *, parent_id: UUID | None = None, external_id: str | None = None) -> list[Category]:
+        """Return stored categories, optionally filtered by parent and/or external_id.
 
         Args:
             parent_id: When provided, returns child categories of this parent
-                ordered by sort_index. When None, returns all categories.
+                ordered by sort_index. When None, returns all root-level categories.
+            external_id: When provided, returns only categories with this external_id.
+                When both parent_id and external_id are given, returns the intersection.
 
         Returns:
             List of categories.
@@ -237,6 +267,21 @@ class TaxomeshService:
         Raises:
             TaxomeshCategoryNotFoundError: If parent_id is provided but not found.
         """
+        if external_id is not None:
+            results = [
+                cat
+                for cat in self._repo.list_categories_by_external_id(external_id)
+                if cat.category_id != self._root_id
+            ]
+            if parent_id is not None:
+                self.get_category(parent_id)
+                child_ids = {
+                    lnk.category_id
+                    for lnk in self._repo.list_category_parent_links()
+                    if lnk.parent_category_id == parent_id
+                }
+                results = [c for c in results if c.category_id in child_ids]
+            return sorted(results, key=lambda c: c.name)
         if parent_id is None:
             parent_id = self._root_id
         else:
@@ -281,15 +326,16 @@ class TaxomeshService:
             raise TaxomeshCategoryNotFoundError(f"Category not found for slug: {slug!r}")
         return result
 
-    def update_category(
+    def update_category(  # noqa: PLR0913
         self,
         category_id: UUID,
         name: str | None = None,
         description: str | None = None,
         slug: str | None = None,
         metadata: dict[str, Any] | None = None,
+        external_id: str | None = None,
     ) -> Category:
-        """Update a category's name, description, slug, and/or metadata.
+        """Update a category's name, description, slug, external_id, and/or metadata.
 
         Args:
             category_id: The library-assigned UUID of the category to update.
@@ -297,6 +343,7 @@ class TaxomeshService:
             description: New description; unchanged if None.
             slug: New slug; unchanged if None. Pass "" to clear the slug.
             metadata: New metadata dict; unchanged if None.
+            external_id: New external_id; unchanged if None. Pass "" to clear.
 
         Returns:
             The updated Category.
@@ -320,6 +367,8 @@ class TaxomeshService:
             category.slug = slug
         if metadata is not None:
             category.metadata = metadata
+        if external_id is not None:
+            category.external_id = external_id
         self._repo.save_category(category)
         clear_all_caches()
         return category

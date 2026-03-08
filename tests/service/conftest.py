@@ -1,7 +1,7 @@
 """Shared pytest fixtures for the service test suite."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import pytest
@@ -231,6 +231,10 @@ class InMemoryRepository:
         return len(self._item_relation_links) < before
 
     # --- Configuration introspection ---
+
+    def get_debug_info(self) -> dict[str, Any]:
+        """Return a fixed description identifying this as an in-memory test repository."""
+        return {"type": "InMemoryRepository"}
 
     def get_config_summary(self) -> str:
         """Return a fixed description identifying this as an in-memory test repository."""

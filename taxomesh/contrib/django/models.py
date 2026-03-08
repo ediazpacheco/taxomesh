@@ -232,3 +232,13 @@ class CategoryGraphProxy(CategoryModel):
         verbose_name = "Graph"
         verbose_name_plural = " Graph"  # leading space forces top position in alphabetical app list
         app_label = APP_LABEL
+
+
+class TaxomeshDebugProxy(CategoryModel):
+    """Proxy model used solely to surface the Debug admin page in the TAXOMESH section."""
+
+    class Meta:
+        proxy = True
+        verbose_name = "Debug"
+        verbose_name_plural = "Debug"
+        app_label = APP_LABEL
