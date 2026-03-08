@@ -137,6 +137,57 @@ class TestGraphAdminView:
         assert response.status_code == 200
         assert b"db error" in response.content
 
+    def test_graph_view_renders_anchor_links(self, admin_client: object) -> None:
+        """Each entry label in the graph view must be wrapped in an <a> tag (SC-002)."""
+        from django.urls import reverse  # noqa: PLC0415
+
+        from taxomesh import TaxomeshService  # noqa: PLC0415
+        from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+
+        repo = DjangoRepository()
+        svc = TaxomeshService(repository=repo)
+        cat = svc.create_category(name="LinkTestCat")
+        item = svc.create_item(name="LinkTestItem")
+        svc.place_item_in_category(item.item_id, cat.category_id)
+        url = reverse("admin:taxomesh_contrib_django_graph")
+        response = admin_client.get(url)  # type: ignore[attr-defined]
+        assert b"<a href=" in response.content
+
+
+class TestFlattenGraph:
+    """Unit tests for the _flatten_graph helper (SC-003)."""
+
+    def test_entry_schema_has_no_legacy_keys(self) -> None:
+        """_flatten_graph entries must not contain slug, external_id, or indent_em keys."""
+        from taxomesh.contrib.django.admin import _flatten_graph  # noqa: PLC0415
+        from taxomesh.domain.graph import CategoryNode, TaxomeshGraph  # noqa: PLC0415
+        from taxomesh.domain.models import Category, Item  # noqa: PLC0415
+
+        cat = Category(name="TestCat", slug="test-cat", external_id="ext-1")
+        item = Item(name="TestItem", slug="test-item", external_id="EXT-1")
+        node = CategoryNode(category=cat, items=[item], children=[])
+        graph = TaxomeshGraph(roots=[node])
+        entries = _flatten_graph(graph)
+        forbidden_keys = {"slug", "external_id", "indent_em"}
+        for entry in entries:
+            assert not forbidden_keys & entry.keys(), f"Unexpected keys in entry: {entry.keys()}"
+
+    def test_entry_name_equals_str_of_domain_object(self) -> None:
+        """_flatten_graph entry 'name' must equal str(category) or str(item)."""
+        from taxomesh.contrib.django.admin import _flatten_graph  # noqa: PLC0415
+        from taxomesh.domain.graph import CategoryNode, TaxomeshGraph  # noqa: PLC0415
+        from taxomesh.domain.models import Category, Item  # noqa: PLC0415
+
+        cat = Category(name="Rock", slug="rock", external_id="genre-rock")
+        item = Item(name="Song", external_id="EXT-2")
+        node = CategoryNode(category=cat, items=[item], children=[])
+        graph = TaxomeshGraph(roots=[node])
+        entries = _flatten_graph(graph)
+        cat_entry = next(e for e in entries if e["kind"] == "category")
+        item_entry = next(e for e in entries if e["kind"] == "item")
+        assert cat_entry["name"] == str(cat)
+        assert item_entry["name"] == str(item)
+
 
 # ---------------------------------------------------------------------------
 # T020 — Proxy model: Graph link on main admin index

@@ -34,27 +34,20 @@ def _flatten_graph(graph: TaxomeshGraph) -> list[dict[str, object]]:
         entries.append(
             {
                 "depth": depth,
-                "indent_em": depth * 1.5,
                 "kind": "category",
-                "name": cat.name,
+                "name": str(cat),
                 "uuid": str(cat.category_id),
-                "slug": cat.slug or None,
                 "enabled": cat.enabled,
-                "external_id": cat.external_id if cat.external_id else None,
             }
         )
         for item in node.items:
-            item_depth = depth + 1
             entries.append(
                 {
-                    "depth": item_depth,
-                    "indent_em": item_depth * 1.5,
+                    "depth": depth + 1,
                     "kind": "item",
-                    "name": str(item.external_id),
+                    "name": str(item),
                     "uuid": str(item.item_id),
-                    "slug": item.slug or None,
                     "enabled": item.enabled,
-                    "external_id": None,
                 }
             )
         for child in node.children:

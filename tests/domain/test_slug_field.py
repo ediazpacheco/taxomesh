@@ -30,17 +30,17 @@ class TestItemStr:
     def test_str_without_slug(self) -> None:
         item = Item(name="My Item", external_id="ext-1")
         result = str(item)
-        assert result == f"🏷️ My Item (id: {item.item_id})"
+        assert result == f"🏷️ My Item (id: {item.item_id} - ext_id: ext-1)"
 
     def test_str_with_slug(self) -> None:
         item = Item(name="My Item", external_id="ext-1", slug="my-item")
         result = str(item)
-        assert result == f"🏷️ My Item (s: my-item - id: {item.item_id})"
+        assert result == f"🏷️ My Item (slug: my-item - id: {item.item_id} - ext_id: ext-1)"
 
     def test_str_slug_prefix_is_just_slug_space(self) -> None:
         item = Item(name="Item Two", external_id="ext-2", slug="slug-val")
         result = str(item)
-        assert "s: slug-val" in result
+        assert "slug: slug-val" in result
 
     def test_str_without_slug_starts_with_icon(self) -> None:
         item = Item(name="Item Three", external_id="ext-3")
@@ -54,18 +54,16 @@ class TestCategoryStr:
         assert str(cat) == f"📂 Gear (id: {cat.category_id})"
 
     def test_str_without_slug_with_external_id(self) -> None:
-        # external_id is not part of __str__; format is icon + name + id only
         cat = Category(name="Gear", external_id="gear-001")
-        assert str(cat) == f"📂 Gear (id: {cat.category_id})"
+        assert str(cat) == f"📂 Gear (id: {cat.category_id} - ext_id: gear-001)"
 
     def test_str_with_slug(self) -> None:
         cat = Category(name="Gear", slug="gear")
-        assert str(cat) == f"📂 Gear (s: gear - id: {cat.category_id})"
+        assert str(cat) == f"📂 Gear (slug: gear - id: {cat.category_id})"
 
     def test_str_with_slug_and_external_id(self) -> None:
-        # external_id is not part of __str__; format is icon + name + slug + id only
         cat = Category(name="Gear", slug="gear", external_id="gear-001")
-        assert str(cat) == f"📂 Gear (s: gear - id: {cat.category_id})"
+        assert str(cat) == f"📂 Gear (slug: gear - id: {cat.category_id} - ext_id: gear-001)"
 
 
 class TestSlugMaxLength:
