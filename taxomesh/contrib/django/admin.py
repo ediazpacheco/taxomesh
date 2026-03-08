@@ -16,6 +16,7 @@ from taxomesh.contrib.django.models import (
     CategoryParentLinkModel,
     ItemModel,
     ItemParentLinkModel,
+    ItemRelationLinkModel,
     ItemTagLinkModel,
     TagModel,
 )
@@ -568,6 +569,98 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
 
 
 # ---------------------------------------------------------------------------
+# ItemRelationLink Form (self-relation validation)
+# ---------------------------------------------------------------------------
+
+
+class ItemRelationLinkForm(forms.ModelForm):  # type: ignore[type-arg]
+    """ModelForm for ItemRelationLinkModel that rejects self-relations in clean()."""
+
+    class Meta:
+        model = ItemRelationLinkModel
+        fields = "__all__"
+
+    def clean(self) -> dict[str, Any]:
+        """Reject self-relations (source == target).
+
+        Raises:
+            forms.ValidationError: If source_item == target_item.
+        """
+        cleaned_data: dict[str, Any] = super().clean()
+        source = cleaned_data.get("source_item")
+        target = cleaned_data.get("target_item")
+        if source and target and source.item_id == target.item_id:
+            raise forms.ValidationError("An item cannot be related to itself.")
+        relation_type = cleaned_data.get("relation_type", "")
+        if not str(relation_type).strip():
+            raise forms.ValidationError("Relation type must not be empty.")
+        return cleaned_data
+
+
+# ---------------------------------------------------------------------------
+# Outgoing / Incoming relation inlines
+# ---------------------------------------------------------------------------
+
+
+class OutgoingRelationInline(TaxomeshAdminMixin, admin.TabularInline):
+    """Editable inline for outgoing item relations (source_item == current item)."""
+
+    model = ItemRelationLinkModel
+    form = ItemRelationLinkForm
+    fk_name = "source_item"
+    extra = 0
+
+    def save_model(
+        self,
+        request: HttpRequest,
+        obj: ItemRelationLinkModel,
+        form: forms.BaseModelForm,
+        change: bool,
+    ) -> None:
+        """Route relation create/update through the service layer."""
+        svc = self._make_service()
+        try:
+            svc.relate_items(
+                obj.source_item_id,
+                obj.target_item_id,
+                obj.relation_type,
+                sort_index=obj.sort_index,
+                metadata=obj.metadata,
+            )
+        except TaxomeshError as exc:
+            from django.contrib import messages  # noqa: PLC0415
+
+            self.message_user(request, str(exc), level=messages.ERROR)
+
+    def delete_model(self, request: HttpRequest, obj: ItemRelationLinkModel) -> None:
+        """Remove the relation via the service layer."""
+        svc = self._make_service()
+        try:
+            svc.remove_item_relation(obj.source_item_id, obj.target_item_id, obj.relation_type)
+        except TaxomeshError as exc:
+            from django.contrib import messages  # noqa: PLC0415
+
+            self.message_user(request, str(exc), level=messages.ERROR)
+
+
+class IncomingRelationInline(admin.TabularInline):
+    """Read-only inline for incoming item relations (target_item == current item)."""
+
+    model = ItemRelationLinkModel
+    fk_name = "target_item"
+    extra = 0
+
+    def has_add_permission(self, request: HttpRequest, obj: object = None) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: object = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: object = None) -> bool:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # ItemModelAdmin
 # ---------------------------------------------------------------------------
 
@@ -580,7 +673,7 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
     search_fields = ("name", "external_id", "slug")
     list_filter = ("enabled", HasSlugFilter)
     fields = ("name", "external_id", "slug", "enabled", "metadata")
-    inlines = [ItemParentLinkInline, ItemTagLinkInline]
+    inlines = [ItemParentLinkInline, ItemTagLinkInline, OutgoingRelationInline, IncomingRelationInline]
 
     def save_model(
         self,
@@ -653,6 +746,46 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
             except TaxomeshError as exc:
                 self.message_user(request, str(exc), level=messages.ERROR)
 
+    def save_formset(self, request: HttpRequest, form: Any, formset: Any, change: bool) -> None:
+        """Route OutgoingRelationInline saves through the service layer.
+
+        Django's default save_formset calls formset.save() directly, bypassing the
+        service layer. This override intercepts the outgoing relation inline so that
+        relate_items / remove_item_relation are called instead.
+
+        All other inline formsets fall through to the default ORM path.
+
+        Args:
+            request: The current HTTP request.
+            form: The parent ItemModel form.
+            formset: The inline formset being saved.
+            change: True if the parent object is being updated; False if created.
+        """
+        from django.contrib import messages  # noqa: PLC0415
+
+        fk_name = getattr(getattr(formset, "fk", None), "name", None)
+        if formset.model is ItemRelationLinkModel and fk_name == "source_item":
+            svc = self._make_service()
+            instances = formset.save(commit=False)
+            for obj in instances:
+                try:
+                    svc.relate_items(
+                        obj.source_item_id,
+                        obj.target_item_id,
+                        obj.relation_type,
+                        sort_index=obj.sort_index,
+                        metadata=obj.metadata or {},
+                    )
+                except TaxomeshError as exc:
+                    self.message_user(request, str(exc), level=messages.ERROR)
+            for obj in formset.deleted_objects:
+                try:
+                    svc.remove_item_relation(obj.source_item_id, obj.target_item_id, obj.relation_type)
+                except TaxomeshError as exc:
+                    self.message_user(request, str(exc), level=messages.ERROR)
+        else:
+            super().save_formset(request, form, formset, change)  # type: ignore[misc]
+
 
 # ---------------------------------------------------------------------------
 # TagModelAdmin
@@ -722,6 +855,53 @@ class TagModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-
                 svc.delete_tag(obj.tag_id)
             except TaxomeshError as exc:
                 self.message_user(request, str(exc), level=messages.ERROR)
+
+
+# ---------------------------------------------------------------------------
+# ItemRelationLinkModelAdmin
+# ---------------------------------------------------------------------------
+
+
+@admin.register(ItemRelationLinkModel)
+class ItemRelationLinkModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
+    """Admin view for ItemRelationLink records."""
+
+    list_display = ("source_item", "relation_type", "target_item", "sort_index")
+    list_filter = ("relation_type",)
+    search_fields = ("relation_type",)
+    form = ItemRelationLinkForm
+
+    def save_model(
+        self,
+        request: HttpRequest,
+        obj: ItemRelationLinkModel,
+        form: object,
+        change: bool,
+    ) -> None:
+        """Route relation create/update through the service layer."""
+        from django.contrib import messages  # noqa: PLC0415
+
+        svc = self._make_service()
+        try:
+            svc.relate_items(
+                obj.source_item_id,
+                obj.target_item_id,
+                obj.relation_type,
+                sort_index=obj.sort_index,
+                metadata=obj.metadata,
+            )
+        except TaxomeshError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+
+    def delete_model(self, request: HttpRequest, obj: ItemRelationLinkModel) -> None:
+        """Route relation deletion through the service layer."""
+        from django.contrib import messages  # noqa: PLC0415
+
+        svc = self._make_service()
+        try:
+            svc.remove_item_relation(obj.source_item_id, obj.target_item_id, obj.relation_type)
+        except TaxomeshError as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
 
 
 # ---------------------------------------------------------------------------

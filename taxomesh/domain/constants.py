@@ -42,3 +42,12 @@ MAX_SLUG_LENGTH: Final[int] = 256
 
 # Default value for slug — empty string means "no slug".
 DEFAULT_SLUG: Final[str] = ""
+
+# Maximum character length for a relation type string.
+RELATION_TYPE_MAX_LENGTH: Final[int] = 256
+
+# Direction constant for outgoing item relations (source → target).
+DIRECTION_OUTGOING: Final[str] = "outgoing"
+
+# Direction constant for incoming item relations (target ← source).
+DIRECTION_INCOMING: Final[str] = "incoming"

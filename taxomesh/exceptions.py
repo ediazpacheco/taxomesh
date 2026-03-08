@@ -35,6 +35,15 @@ class TaxomeshCyclicDependencyError(TaxomeshValidationError):
     """Raised when a cyclic dependency is detected in the category DAG."""
 
 
+class TaxomeshRelationError(TaxomeshValidationError):
+    """Raised when an item-to-item relation constraint is violated.
+
+    Examples include self-relations (source == target), empty or
+    whitespace-only relation types, and attempts to remove a relation
+    that does not exist.
+    """
+
+
 class TaxomeshDuplicateSlugError(TaxomeshValidationError):
     """Raised when a non-empty slug is already used by another entity of the same type."""
 

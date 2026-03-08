@@ -1,6 +1,6 @@
 """CLI entry point for taxomesh.
 
-Provides three sub-command groups: category, item, tag.
+Provides four sub-command groups: category, item, tag, relation.
 Configuration is read from taxomesh.toml in the current working directory,
 or from an explicit path supplied via --config.
 """
@@ -13,6 +13,7 @@ from uuid import UUID
 
 import typer
 from rich.console import Console
+from rich.table import Table
 from rich.tree import Tree
 
 import taxomesh
@@ -28,10 +29,12 @@ app = typer.Typer(no_args_is_help=True)
 category_app = typer.Typer(no_args_is_help=True)
 item_app = typer.Typer(no_args_is_help=True)
 tag_app = typer.Typer(no_args_is_help=True)
+relation_app = typer.Typer(no_args_is_help=True)
 
 app.add_typer(category_app, name="category")
 app.add_typer(item_app, name="item")
 app.add_typer(tag_app, name="tag")
+app.add_typer(relation_app, name="relation")
 
 
 def _parse_external_id(raw: str) -> ExternalId:
@@ -499,6 +502,117 @@ def graph_cmd(ctx: typer.Context) -> None:
     for root_node in graph.roots:
         _add_graph_node(tree, root_node)
     Console().print(tree)
+
+
+# ---------------------------------------------------------------------------
+# Relation commands
+# ---------------------------------------------------------------------------
+
+
+def _parse_metadata(raw: list[str]) -> dict[str, str]:
+    """Parse a list of 'KEY=VALUE' strings into a dict."""
+    result: dict[str, str] = {}
+    for entry in raw:
+        if "=" not in entry:
+            typer.echo(f"Invalid --metadata format (expected KEY=VALUE): {entry!r}", err=True)
+            raise typer.Exit(code=1)
+        key, _, value = entry.partition("=")
+        result[key] = value
+    return result
+
+
+@relation_app.command("add")
+def relation_add(
+    ctx: typer.Context,
+    source_item_id: UUID = typer.Argument(..., help="Source item UUID"),
+    target_item_id: UUID = typer.Argument(..., help="Target item UUID"),
+    relation_type: str = typer.Argument(..., help="Relation type string (e.g. 'covers')"),
+    sort_index: int = typer.Option(0, "--sort-index", help="Sort index for ordering"),
+    metadata: list[str] | None = typer.Option(None, "--metadata", help="KEY=VALUE pairs (repeatable)"),
+) -> None:
+    """Create or update a directed relation between two items."""
+    result = build(_config_path(ctx))
+    _print_verbose(result, _verbose(ctx))
+    svc = result.service
+    meta = _parse_metadata(metadata or [])
+    try:
+        link = svc.relate_items(source_item_id, target_item_id, relation_type, sort_index=sort_index, metadata=meta)
+        typer.echo(f"Relation created: {link.source_item_id} --[{link.relation_type}]--> {link.target_item_id}")
+    except TaxomeshError as exc:
+        _err(str(exc))
+    except Exception as exc:
+        _err(f"Unexpected error: {exc}")
+
+
+@relation_app.command("list")
+def relation_list(
+    ctx: typer.Context,
+    item_id: UUID = typer.Argument(..., help="Item UUID to query relations for"),
+    relation_type: str | None = typer.Option(None, "--type", help="Filter by relation type"),
+    direction: str = typer.Option("outgoing", "--direction", help="'outgoing' (default) or 'incoming'"),
+) -> None:
+    """List relations for an item."""
+    result = build(_config_path(ctx))
+    _print_verbose(result, _verbose(ctx))
+    svc = result.service
+    try:
+        links = svc.list_item_relations(item_id, relation_type=relation_type, direction=direction)  # type: ignore[arg-type]
+    except TaxomeshError as exc:
+        _err(str(exc))
+    except Exception as exc:
+        _err(f"Unexpected error: {exc}")
+    table = Table(title=f"Relations ({direction}) for {item_id}")
+    table.add_column("Source")
+    table.add_column("Type")
+    table.add_column("Target")
+    table.add_column("Sort")
+    for lnk in links:
+        table.add_row(str(lnk.source_item_id), lnk.relation_type, str(lnk.target_item_id), str(lnk.sort_index))
+    Console().print(table)
+    typer.echo(f"--- Total: {len(links)} ---")
+
+
+@relation_app.command("related")
+def relation_related(
+    ctx: typer.Context,
+    item_id: UUID = typer.Argument(..., help="Item UUID"),
+    relation_type: str | None = typer.Option(None, "--type", help="Filter by relation type"),
+    direction: str = typer.Option("outgoing", "--direction", help="'outgoing' (default) or 'incoming'"),
+) -> None:
+    """List items related to the given item."""
+    result = build(_config_path(ctx))
+    _print_verbose(result, _verbose(ctx))
+    svc = result.service
+    try:
+        items = svc.list_related_items(item_id, relation_type=relation_type, direction=direction)  # type: ignore[arg-type]
+    except TaxomeshError as exc:
+        _err(str(exc))
+    except Exception as exc:
+        _err(f"Unexpected error: {exc}")
+    typer.echo(f"--- Related items ({direction}) for {item_id} ---")
+    for item in items:
+        typer.echo(item)
+    typer.echo(f"--- Total: {len(items)} ---")
+
+
+@relation_app.command("delete")
+def relation_delete(
+    ctx: typer.Context,
+    source_item_id: UUID = typer.Argument(..., help="Source item UUID"),
+    target_item_id: UUID = typer.Argument(..., help="Target item UUID"),
+    relation_type: str = typer.Argument(..., help="Relation type string"),
+) -> None:
+    """Remove a directed relation between two items."""
+    result = build(_config_path(ctx))
+    _print_verbose(result, _verbose(ctx))
+    svc = result.service
+    try:
+        svc.remove_item_relation(source_item_id, target_item_id, relation_type)
+        typer.echo(f"Deleted relation: {source_item_id} --[{relation_type}]--> {target_item_id}")
+    except TaxomeshError as exc:
+        _err(str(exc))
+    except Exception as exc:
+        _err(f"Unexpected error: {exc}")
 
 
 if __name__ == "__main__":
