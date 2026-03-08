@@ -858,53 +858,6 @@ class TagModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-
 
 
 # ---------------------------------------------------------------------------
-# ItemRelationLinkModelAdmin
-# ---------------------------------------------------------------------------
-
-
-@admin.register(ItemRelationLinkModel)
-class ItemRelationLinkModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
-    """Admin view for ItemRelationLink records."""
-
-    list_display = ("source_item", "relation_type", "target_item", "sort_index")
-    list_filter = ("relation_type",)
-    search_fields = ("relation_type",)
-    form = ItemRelationLinkForm
-
-    def save_model(
-        self,
-        request: HttpRequest,
-        obj: ItemRelationLinkModel,
-        form: object,
-        change: bool,
-    ) -> None:
-        """Route relation create/update through the service layer."""
-        from django.contrib import messages  # noqa: PLC0415
-
-        svc = self._make_service()
-        try:
-            svc.relate_items(
-                obj.source_item_id,
-                obj.target_item_id,
-                obj.relation_type,
-                sort_index=obj.sort_index,
-                metadata=obj.metadata,
-            )
-        except TaxomeshError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
-
-    def delete_model(self, request: HttpRequest, obj: ItemRelationLinkModel) -> None:
-        """Route relation deletion through the service layer."""
-        from django.contrib import messages  # noqa: PLC0415
-
-        svc = self._make_service()
-        try:
-            svc.remove_item_relation(obj.source_item_id, obj.target_item_id, obj.relation_type)
-        except TaxomeshError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
-
-
-# ---------------------------------------------------------------------------
 # CategoryGraphProxyAdmin
 # ---------------------------------------------------------------------------
 
