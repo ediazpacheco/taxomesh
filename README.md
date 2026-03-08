@@ -112,6 +112,86 @@ After migrating, Django admin exposes taxomesh models out of the box:
   any row whose `external_id` matches a primary key in the linked model.
 - The taxomesh app_index page shows the installed taxomesh version and active backend.
 
+### FK autocomplete widgets for external admins
+
+When an external app has a `ForeignKey` to `ItemModel` or `CategoryModel`, the default
+admin dropdown shows every record as a full list. Use `TaxomeshLinkedFKMixin` to replace
+it with a compact Select2 autocomplete and a ↗ link that navigates directly to the
+selected record's admin change page.
+
+**Simple case — real FK on the model:**
+
+```python
+# your_app/admin.py
+from django.contrib import admin
+from taxomesh.contrib.django.admin import TaxomeshLinkedFKMixin
+
+from your_app.models import Article
+
+@admin.register(Article)
+class ArticleAdmin(TaxomeshLinkedFKMixin, admin.ModelAdmin):
+    pass
+```
+
+`TaxomeshLinkedFKMixin` hooks `formfield_for_foreignkey` and automatically injects
+`TaxomeshLinkedFKWidget` for any FK field whose `related_model` is `ItemModel` or
+`CategoryModel`. All other FK fields are untouched.
+
+**Advanced case — form-only fields (no DB FK on the model):**
+
+When the admin uses a custom `ModelChoiceField` instead of a real FK, you must
+apply the widget manually in `__init__`. Use `ItemParentLinkModel`'s FK fields as
+a proxy so Django's autocomplete endpoint can validate the request:
+
+```python
+# your_app/forms.py
+from django import forms
+from django.contrib import admin
+from taxomesh.contrib.django.models import CategoryModel, ItemModel, ItemParentLinkModel
+from taxomesh.contrib.django.widgets import TaxomeshLinkedFKWidget
+
+class MyAdminForm(forms.ModelForm):
+    selected_item = forms.ModelChoiceField(
+        queryset=ItemModel.objects.none(), required=False, label="Item"
+    )
+    selected_category = forms.ModelChoiceField(
+        queryset=CategoryModel.objects.none(), required=False, label="Category"
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["selected_item"].queryset = ItemModel.objects.order_by("name")
+        self.fields["selected_category"].queryset = CategoryModel.objects.order_by("name")
+
+        item_field = ItemParentLinkModel._meta.get_field("item")
+        item_widget = TaxomeshLinkedFKWidget(field=item_field, admin_site=admin.site)
+        item_widget.choices = self.fields["selected_item"].choices
+        self.fields["selected_item"].widget = item_widget
+
+        category_field = ItemParentLinkModel._meta.get_field("category")
+        category_widget = TaxomeshLinkedFKWidget(field=category_field, admin_site=admin.site)
+        category_widget.choices = self.fields["selected_category"].choices
+        self.fields["selected_category"].widget = category_widget
+```
+
+You also need to register `ItemParentLinkModel` as a hidden admin so Django's autocomplete
+view can validate the FK path. The model is hidden from the admin index via `get_model_perms`:
+
+```python
+# your_app/admin.py
+from django.contrib import admin
+from taxomesh.contrib.django.models import ItemParentLinkModel
+
+class _ItemParentLinkProxyAdmin(admin.ModelAdmin):
+    def get_model_perms(self, request):
+        return {}
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_staff
+
+admin.site.register(ItemParentLinkModel, _ItemParentLinkProxyAdmin)
+```
+
 ### Integrate with your app models
 
 Example: mirror a Django model into taxomesh by `external_id`.

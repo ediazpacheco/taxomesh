@@ -180,6 +180,61 @@ class TaxomeshAdminMixin:
 
 
 # ---------------------------------------------------------------------------
+# TaxomeshLinkedFKMixin
+# ---------------------------------------------------------------------------
+
+
+class TaxomeshLinkedFKMixin:
+    """ModelAdmin mixin that auto-applies TaxomeshLinkedFKWidget to taxomesh FK fields.
+
+    Add this mixin to any external app's ``ModelAdmin`` whose model has ForeignKey fields
+    pointing to ``ItemModel`` or ``CategoryModel``.  All such fields are automatically
+    rendered as compact Select2 autocomplete widgets with a ``↗`` navigation link to the
+    corresponding taxomesh admin change page — no per-field configuration required.
+
+    The mixin is fully agnostic of the consuming app: it detects taxomesh FK fields at
+    form-construction time by inspecting ``db_field.related_model``.
+
+    Usage::
+
+        from taxomesh.contrib.django.admin import TaxomeshLinkedFKMixin
+
+        @admin.register(Content)
+        class ContentAdmin(TaxomeshLinkedFKMixin, admin.ModelAdmin):
+            fields = ["title", "type", "item", "category", "relevance"]
+    """
+
+    def formfield_for_foreignkey(  # type: ignore[override]
+        self,
+        db_field: Any,
+        request: HttpRequest,
+        **kwargs: Any,
+    ) -> Any:
+        """Inject TaxomeshLinkedFKWidget for FK fields pointing to ItemModel or CategoryModel.
+
+        For all other FK fields the call is passed through unchanged.
+
+        Args:
+            db_field: The ForeignKey field descriptor on the model being edited.
+            request: The current HTTP request.
+            **kwargs: Forwarded to ``super().formfield_for_foreignkey()``.
+
+        Returns:
+            A form field instance; uses ``TaxomeshLinkedFKWidget`` when the FK targets
+            ``ItemModel`` or ``CategoryModel``, otherwise the default widget.
+        """
+        from taxomesh.contrib.django.widgets import TaxomeshLinkedFKWidget  # noqa: PLC0415
+
+        if getattr(db_field, "related_model", None) in (ItemModel, CategoryModel):
+            kwargs["widget"] = TaxomeshLinkedFKWidget(
+                field=db_field,
+                admin_site=self.admin_site,  # type: ignore[attr-defined]
+                using=kwargs.pop("using", None),
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
 # ItemCategoryAssignmentMixin helpers
 # ---------------------------------------------------------------------------
 
