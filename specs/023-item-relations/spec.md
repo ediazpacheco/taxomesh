@@ -89,18 +89,18 @@ Relations are durably persisted in the JSON, YAML, and Django backends. Relation
 
 ### User Story 6 — Manage Relations via CLI (Priority: P3)
 
-A user manages item relations from the command line using a `taxomesh relation` command group.
+A user manages item relations from the command line using a `taxomesh item relation` command group.
 
 **Why this priority**: CLI is a secondary surface over the service layer. Useful for scripts and quick inspection, but not blocking for library adopters.
 
-**Independent Test**: Run `taxomesh relation add`, `taxomesh relation list`, `taxomesh relation related`, and `taxomesh relation delete` in sequence. Verify each command produces correct output and modifies state as expected.
+**Independent Test**: Run `taxomesh item relation add`, `taxomesh item relation list`, `taxomesh item relation related`, and `taxomesh item relation delete` in sequence. Verify each command produces correct output and modifies state as expected.
 
 **Acceptance Scenarios**:
 
-1. **Given** two items exist, **When** `taxomesh relation add <source> <target> <type>` is run, **Then** the relation is created and a success message is displayed.
-2. **Given** relations exist, **When** `taxomesh relation list <item_id>` is run, **Then** outgoing relations are displayed in a readable table.
-3. **Given** relations exist, **When** `taxomesh relation related <item_id>` is run, **Then** related items (with relation type) are displayed.
-4. **Given** a relation exists, **When** `taxomesh relation delete <source> <target> <type>` is run, **Then** the relation is removed and confirmed in the output.
+1. **Given** two items exist, **When** `taxomesh item relation add <source> <target> <type>` is run, **Then** the relation is created and a success message is displayed.
+2. **Given** relations exist, **When** `taxomesh item relation list <item_id>` is run, **Then** outgoing relations are displayed in a readable table.
+3. **Given** relations exist, **When** `taxomesh item relation related <item_id>` is run, **Then** related items (with relation type) are displayed.
+4. **Given** a relation exists, **When** `taxomesh item relation delete <source> <target> <type>` is run, **Then** the relation is removed and confirmed in the output.
 
 ---
 
@@ -168,11 +168,11 @@ A Django admin user views and edits item relations through the admin interface. 
 
 **CLI**
 
-- **FR-018**: A top-level `taxomesh relation` command group MUST be added to the CLI.
-- **FR-019**: `taxomesh relation add <source_item_id> <target_item_id> <relation_type>` MUST create a relation, with optional `--sort-index INT` and repeatable `--metadata KEY=VALUE` flags (e.g. `--metadata source=discogs --metadata confidence=high`). Multiple `--metadata` flags are merged into a single dict.
-- **FR-020**: `taxomesh relation list <item_id>` MUST display outgoing relations in a readable table, with an optional `--type` filter and `--direction` flag.
-- **FR-021**: `taxomesh relation related <item_id>` MUST display items related to the given item, with optional `--type` and `--direction` flags.
-- **FR-022**: `taxomesh relation delete <source_item_id> <target_item_id> <relation_type>` MUST remove the relation and confirm success.
+- **FR-018**: A `taxomesh item relation` command group MUST be added as a sub-group of the `item` command, reflecting that relations exist exclusively between items.
+- **FR-019**: `taxomesh item relation add <source_item_id> <target_item_id> <relation_type>` MUST create a relation, with optional `--sort-index INT` and repeatable `--metadata KEY=VALUE` flags (e.g. `--metadata source=discogs --metadata confidence=high`). Multiple `--metadata` flags are merged into a single dict.
+- **FR-020**: `taxomesh item relation list <item_id>` MUST display outgoing relations in a readable table, with an optional `--type` filter and `--direction` flag.
+- **FR-021**: `taxomesh item relation related <item_id>` MUST display items related to the given item, with optional `--type` and `--direction` flags.
+- **FR-022**: `taxomesh item relation delete <source_item_id> <target_item_id> <relation_type>` MUST remove the relation and confirm success.
 
 **Django Admin**
 
@@ -223,4 +223,4 @@ A Django admin user views and edits item relations through the admin interface. 
 
 - Q: When `remove_item_relation` is called for a triple that does not exist, should it raise or return silently? → A: Raise `TaxomeshRelationError` (Option A). Consistent with FR-008 and the no-silent-failures principle.
 - Q: Should `relation_type` matching be case-sensitive or case-insensitive? → A: Case-insensitive; normalise to lowercase on write (Option B). `"covers"` and `"COVERS"` are the same relation.
-- Q: What format should the CLI `--metadata` flag use for `taxomesh relation add`? → A: Repeatable `KEY=VALUE` pairs (Option A), e.g. `--metadata source=discogs --metadata confidence=high`; merged into a single dict.
+- Q: What format should the CLI `--metadata` flag use for `taxomesh item relation add`? → A: Repeatable `KEY=VALUE` pairs (Option A), e.g. `--metadata source=discogs --metadata confidence=high`; merged into a single dict.

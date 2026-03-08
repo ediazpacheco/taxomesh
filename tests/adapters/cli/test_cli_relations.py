@@ -36,14 +36,16 @@ class TestRelationAdd:
     def test_relation_add_creates_relation(self) -> None:
         repo, src_id, tgt_id = _make_repo_with_two_items()
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "add", str(src_id), str(tgt_id), "covers"])
+            result = runner.invoke(app, ["item", "relation", "add", str(src_id), str(tgt_id), "covers"])
         assert result.exit_code == 0
         assert "covers" in result.output
 
     def test_relation_add_with_sort_index(self) -> None:
         repo, src_id, tgt_id = _make_repo_with_two_items()
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "add", str(src_id), str(tgt_id), "covers", "--sort-index", "5"])
+            result = runner.invoke(
+                app, ["item", "relation", "add", str(src_id), str(tgt_id), "covers", "--sort-index", "5"]
+            )
         assert result.exit_code == 0
 
     def test_relation_add_with_metadata(self) -> None:
@@ -52,6 +54,7 @@ class TestRelationAdd:
             result = runner.invoke(
                 app,
                 [
+                    "item",
                     "relation",
                     "add",
                     str(src_id),
@@ -66,19 +69,19 @@ class TestRelationAdd:
     def test_relation_add_self_relation_rejected(self) -> None:
         repo, src_id, _ = _make_repo_with_two_items()
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "add", str(src_id), str(src_id), "covers"])
+            result = runner.invoke(app, ["item", "relation", "add", str(src_id), str(src_id), "covers"])
         assert result.exit_code == 1
 
     def test_relation_add_empty_type_rejected(self) -> None:
         repo, src_id, tgt_id = _make_repo_with_two_items()
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "add", str(src_id), str(tgt_id), ""])
+            result = runner.invoke(app, ["item", "relation", "add", str(src_id), str(tgt_id), ""])
         assert result.exit_code == 1
 
     def test_relation_add_unknown_source_rejected(self) -> None:
         repo, _, tgt_id = _make_repo_with_two_items()
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "add", str(uuid4()), str(tgt_id), "covers"])
+            result = runner.invoke(app, ["item", "relation", "add", str(uuid4()), str(tgt_id), "covers"])
         assert result.exit_code == 1
 
 
@@ -88,14 +91,14 @@ class TestRelationList:
         svc = TaxomeshService(repository=repo)
         svc.relate_items(src_id, tgt_id, "covers")
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "list", str(src_id)])
+            result = runner.invoke(app, ["item", "relation", "list", str(src_id)])
         assert result.exit_code == 0
         assert "covers" in result.output
 
     def test_relation_list_empty(self) -> None:
         repo, src_id, _ = _make_repo_with_two_items()
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "list", str(src_id)])
+            result = runner.invoke(app, ["item", "relation", "list", str(src_id)])
         assert result.exit_code == 0
 
     def test_relation_list_direction_incoming(self) -> None:
@@ -103,7 +106,7 @@ class TestRelationList:
         svc = TaxomeshService(repository=repo)
         svc.relate_items(src_id, tgt_id, "covers")
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "list", str(tgt_id), "--direction", "incoming"])
+            result = runner.invoke(app, ["item", "relation", "list", str(tgt_id), "--direction", "incoming"])
         assert result.exit_code == 0
         assert "covers" in result.output
 
@@ -113,7 +116,7 @@ class TestRelationList:
         svc.relate_items(src_id, tgt_id, "covers")
         svc.relate_items(src_id, tgt_id, "samples")
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "list", str(src_id), "--type", "covers"])
+            result = runner.invoke(app, ["item", "relation", "list", str(src_id), "--type", "covers"])
         assert result.exit_code == 0
         assert "covers" in result.output
 
@@ -124,7 +127,7 @@ class TestRelationRelated:
         svc = TaxomeshService(repository=repo)
         svc.relate_items(src_id, tgt_id, "covers")
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "related", str(src_id)])
+            result = runner.invoke(app, ["item", "relation", "related", str(src_id)])
         assert result.exit_code == 0
 
     def test_relation_related_direction_incoming(self) -> None:
@@ -132,7 +135,7 @@ class TestRelationRelated:
         svc = TaxomeshService(repository=repo)
         svc.relate_items(src_id, tgt_id, "covers")
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "related", str(tgt_id), "--direction", "incoming"])
+            result = runner.invoke(app, ["item", "relation", "related", str(tgt_id), "--direction", "incoming"])
         assert result.exit_code == 0
 
 
@@ -142,11 +145,11 @@ class TestRelationDelete:
         svc = TaxomeshService(repository=repo)
         svc.relate_items(src_id, tgt_id, "covers")
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "delete", str(src_id), str(tgt_id), "covers"])
+            result = runner.invoke(app, ["item", "relation", "delete", str(src_id), str(tgt_id), "covers"])
         assert result.exit_code == 0
 
     def test_relation_delete_not_found_exits(self) -> None:
         repo, src_id, tgt_id = _make_repo_with_two_items()
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-            result = runner.invoke(app, ["relation", "delete", str(src_id), str(tgt_id), "covers"])
+            result = runner.invoke(app, ["item", "relation", "delete", str(src_id), str(tgt_id), "covers"])
         assert result.exit_code == 1

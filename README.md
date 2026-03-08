@@ -358,14 +358,14 @@ taxomesh item add-to-tag <item-uuid> --tag-id <tag-uuid>
 taxomesh tag list
 
 # Relations
-taxomesh relation add <source-uuid> <target-uuid> covers
-taxomesh relation add <source-uuid> <target-uuid> version_of --sort-index 1 --metadata key=value
-taxomesh relation list <item-uuid>
-taxomesh relation list <item-uuid> --direction incoming
-taxomesh relation list <item-uuid> --type covers
-taxomesh relation related <item-uuid>
-taxomesh relation related <item-uuid> --direction incoming
-taxomesh relation delete <source-uuid> <target-uuid> covers
+taxomesh item relation add <source-uuid> <target-uuid> covers
+taxomesh item relation add <source-uuid> <target-uuid> version_of --sort-index 1 --metadata key=value
+taxomesh item relation list <item-uuid>
+taxomesh item relation list <item-uuid> --direction incoming
+taxomesh item relation list <item-uuid> --type covers
+taxomesh item relation related <item-uuid>
+taxomesh item relation related <item-uuid> --direction incoming
+taxomesh item relation delete <source-uuid> <target-uuid> covers
 
 # Graph
 taxomesh graph

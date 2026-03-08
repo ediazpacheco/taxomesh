@@ -1,6 +1,7 @@
 """CLI entry point for taxomesh.
 
-Provides four sub-command groups: category, item, tag, relation.
+Provides three top-level sub-command groups: category, item, tag.
+The item group contains a nested 'relation' sub-group for item-to-item relations.
 Configuration is read from taxomesh.toml in the current working directory,
 or from an explicit path supplied via --config.
 """
@@ -34,7 +35,7 @@ relation_app = typer.Typer(no_args_is_help=True)
 app.add_typer(category_app, name="category")
 app.add_typer(item_app, name="item")
 app.add_typer(tag_app, name="tag")
-app.add_typer(relation_app, name="relation")
+item_app.add_typer(relation_app, name="relation")
 
 
 def _parse_external_id(raw: str) -> ExternalId:
