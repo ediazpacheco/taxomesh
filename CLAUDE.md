@@ -238,6 +238,8 @@ Do NOT update README during implement — only after
 - DjangoRepository (admin); any configured repo (CLI) (025-graph-admin-ux)
 - Python 3.11 + Pydantic v2 (domain), Typer ≥ 0.12 (CLI), Django ≥ 4.2 (admin), `importlib.metadata` (stdlib — version lookup) (026-admin-service-debug)
 - JSON file (`JsonRepository`), YAML file (`YamlRepository`), Django ORM (`DjangoRepository`) (026-admin-service-debug)
+- Python 3.11 + Django 6.0.2, `django.contrib.admin.widgets.AutocompleteSelect` (027-autocomplete-fk-widget)
+- N/A — no new models, no migrations (027-autocomplete-fk-widget)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
