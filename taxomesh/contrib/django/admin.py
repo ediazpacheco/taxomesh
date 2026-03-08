@@ -1,12 +1,13 @@
 """Django admin registrations for taxomesh ORM models."""
 
-from typing import Any
+from typing import Any, Final, TypedDict
 from uuid import UUID
 
 from django import forms
 from django.contrib import admin
 from django.http import HttpRequest, HttpResponse
 from django.urls import path
+from django.utils.html import format_html
 
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.django_repository import DjangoRepository
@@ -26,30 +27,110 @@ from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
 from taxomesh.exceptions import TaxomeshCyclicDependencyError, TaxomeshError, TaxomeshValidationError
 
 
-def _flatten_graph(graph: TaxomeshGraph) -> list[dict[str, object]]:
-    """Flatten a TaxomeshGraph into a depth-annotated list for template rendering."""
-    entries: list[dict[str, object]] = []
+class GraphEntry(TypedDict):
+    """A single flattened entry for template rendering."""
+
+    depth: int
+    kind: str
+    name: str
+    uuid: str
+    enabled: bool
+    external_id: str
+    linked_url: str | None
+    has_descendants: bool
+    depth_limited: bool
+    initially_collapsed: bool
+
+
+class RelationEntry(TypedDict):
+    """A single outgoing item relation for template rendering."""
+
+    relation_type: str
+    target_name: str
+    target_uuid: str
+
+
+TAXOMESH_LINKED_MODEL_SETTING: Final[str] = "TAXOMESH_LINKED_MODEL"
+ADMIN_GRAPH_DEFAULT_MAX_DEPTH: Final[int] = 3
+
+
+def _resolve_linked_url(external_id: str) -> str | None:
+    """Resolve a Django admin change URL for the configured linked model instance.
+
+    Reads settings.TAXOMESH_LINKED_MODEL, looks up the instance by external_id
+    as its primary key, and returns the admin change URL if found.
+
+    Args:
+        external_id: The external_id string to use as the linked model PK.
+
+    Returns:
+        The admin change URL string, or None if not resolved.
+    """
+    if not external_id:
+        return None
+    try:
+        from django.apps import apps as django_apps  # noqa: PLC0415
+        from django.conf import settings as django_settings  # noqa: PLC0415
+        from django.urls import reverse as dj_reverse  # noqa: PLC0415
+
+        linked_model_label = getattr(django_settings, TAXOMESH_LINKED_MODEL_SETTING, None)
+        if not linked_model_label:
+            return None
+        linked_model = django_apps.get_model(linked_model_label)
+        app_label = linked_model._meta.app_label
+        model_name = linked_model._meta.model_name
+        if not linked_model.objects.filter(pk=external_id).exists():
+            return None
+        return dj_reverse(f"admin:{app_label}_{model_name}_change", args=[external_id])
+    except Exception:
+        return None
+
+
+def _flatten_graph(graph: TaxomeshGraph, max_depth: int = ADMIN_GRAPH_DEFAULT_MAX_DEPTH) -> list[GraphEntry]:
+    """Flatten a TaxomeshGraph into a depth-annotated list for template rendering.
+
+    Args:
+        graph: The taxonomy graph to flatten.
+        max_depth: Maximum category depth to include (0 = unlimited). Items are included
+            only when their parent category depth + 1 <= max_depth.
+    """
+    entries: list[GraphEntry] = []
+    depth_limited = max_depth != 0
 
     def _visit(node: CategoryNode, depth: int) -> None:
         cat = node.category
+        is_depth_limited = depth_limited and depth > max_depth
+        children_depth_limited = depth_limited and depth + 1 > max_depth
+        has_real_children = bool(node.items or node.children)
+        initially_collapsed = children_depth_limited and has_real_children
         entries.append(
-            {
-                "depth": depth,
-                "kind": "category",
-                "name": str(cat),
-                "uuid": str(cat.category_id),
-                "enabled": cat.enabled,
-            }
+            GraphEntry(
+                depth=depth,
+                kind="category",
+                name=str(cat),
+                uuid=str(cat.category_id),
+                enabled=cat.enabled,
+                external_id=cat.external_id or "",
+                linked_url=None,
+                has_descendants=has_real_children,
+                depth_limited=is_depth_limited,
+                initially_collapsed=initially_collapsed,
+            )
         )
         for item in node.items:
             entries.append(
-                {
-                    "depth": depth + 1,
-                    "kind": "item",
-                    "name": str(item),
-                    "uuid": str(item.item_id),
-                    "enabled": item.enabled,
-                }
+                GraphEntry(
+                    depth=depth + 1,
+                    kind="item",
+                    name=str(item),
+                    uuid=str(item.item_id),
+                    enabled=item.enabled,
+                    external_id=item.external_id or "",
+                    linked_url=None,
+                    has_descendants=False,
+                    depth_limited=children_depth_limited,
+                    initially_collapsed=False,
+                )
             )
         for child in node.children:
             _visit(child, depth + 1)
@@ -65,7 +146,7 @@ def _flatten_graph(graph: TaxomeshGraph) -> list[dict[str, object]]:
 
 
 class TaxomeshAdminMixin:
-    """Mixin that provides a per-request TaxomeshService factory for admin classes."""
+    """Mixin that provides a per-request TaxomeshService factory and shared display helpers."""
 
     def _make_service(self) -> TaxomeshService:
         """Instantiate a TaxomeshService backed by DjangoRepository.
@@ -74,6 +155,24 @@ class TaxomeshAdminMixin:
             A fresh TaxomeshService instance per request.
         """
         return TaxomeshService(repository=DjangoRepository())
+
+    def linked_object_url(self, obj: Any) -> str:
+        """Return a ↗ icon-link to the linked admin model if TAXOMESH_LINKED_MODEL is configured.
+
+        Works with any model that has an ``external_id`` attribute (CategoryModel, ItemModel).
+
+        Args:
+            obj: The model instance being rendered.
+
+        Returns:
+            An HTML anchor string with the ↗ icon, or an empty string if not resolved.
+        """
+        url = _resolve_linked_url(getattr(obj, "external_id", None) or "")
+        if url:
+            return format_html('<a href="{}" title="View in admin">&#8599;</a>', url)
+        return ""
+
+    linked_object_url.short_description = "↗"  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -442,10 +541,11 @@ class HasSlugFilter(admin.SimpleListFilter):
 class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
     """Admin view for Category records."""
 
-    list_display = ("category_id", "name", "slug", "enabled", "external_id")
+    list_display = ("category_id", "name", "slug", "enabled", "external_id", "linked_object_url")
     search_fields = ("name", "slug")
     list_filter = ("enabled", HasSlugFilter)
     fields = ("name", "slug", "description", "enabled", "external_id", "metadata")
+    readonly_fields = ("linked_object_url",)
     inlines = [CategoryParentLinkInline]
 
     def get_queryset(self, request: HttpRequest) -> object:  # type: ignore[override]
@@ -473,16 +573,45 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
         from django.template.response import TemplateResponse  # noqa: PLC0415
 
         error: str | None = None
-        entries: list[dict[str, object]] = []
+        entries: list[GraphEntry] = []
         has_entries = False
+        item_relations: dict[str, list[RelationEntry]] = {}
         try:
             repo = DjangoRepository()
             svc = TaxomeshService(repository=repo)
             graph = svc.get_graph()
             entries = _flatten_graph(graph)
             has_entries = bool(graph.roots)
+            for entry in entries:
+                if entry["kind"] != "item":
+                    continue
+                item_uuid_str = entry["uuid"]
+                try:
+                    links = svc.list_item_relations(UUID(item_uuid_str))
+                    if links:
+                        rels: list[RelationEntry] = []
+                        for link in links:
+                            try:
+                                target = svc.get_item(link.target_item_id)
+                                target_name = target.name if target is not None else str(link.target_item_id)
+                            except Exception:
+                                target_name = str(link.target_item_id)
+                            rels.append(
+                                RelationEntry(
+                                    relation_type=link.relation_type,
+                                    target_name=target_name,
+                                    target_uuid=str(link.target_item_id),
+                                )
+                            )
+                        item_relations[item_uuid_str] = rels
+                except Exception:
+                    pass
         except TaxomeshError as exc:
             error = str(exc)
+
+        # Resolve linked_url for each entry with a non-empty external_id
+        for entry in entries:
+            entry["linked_url"] = _resolve_linked_url(entry.get("external_id", "") or "")
 
         context = {
             **self.admin_site.each_context(request),
@@ -490,6 +619,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
             "entries": entries,
             "has_entries": has_entries,
             "error": error,
+            "item_relations": item_relations,
             "opts": self.model._meta,
         }
         return TemplateResponse(request, "admin/taxomesh_contrib_django/graph.html", context)
@@ -669,10 +799,11 @@ class IncomingRelationInline(admin.TabularInline):
 class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
     """Admin view for Item records."""
 
-    list_display = ("name", "external_id", "slug", "enabled")
+    list_display = ("name", "external_id", "slug", "enabled", "linked_object_url")
     search_fields = ("name", "external_id", "slug")
     list_filter = ("enabled", HasSlugFilter)
-    fields = ("name", "external_id", "slug", "enabled", "metadata")
+    fields = ("name", "external_id", "slug", "enabled", "metadata", "linked_object_url")
+    readonly_fields = ("linked_object_url",)
     inlines = [ItemParentLinkInline, ItemTagLinkInline, OutgoingRelationInline, IncomingRelationInline]
 
     def save_model(

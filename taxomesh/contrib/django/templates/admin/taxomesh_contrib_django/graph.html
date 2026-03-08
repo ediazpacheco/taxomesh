@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load i18n %}
+{% load i18n taxomesh_tags %}
 
 {% block title %}Taxonomy Graph{% endblock %}
 
@@ -26,6 +26,9 @@
     margin: 2px 0;
     padding-left: calc(var(--depth, 0) * 2.6rem);
   }
+  [data-collapsed-by] {
+    display: none;
+  }
   .taxomesh-entry[data-kind="item"] {
     color: #9aa6b4;
   }
@@ -39,6 +42,28 @@
   .taxomesh-label a:hover {
     text-decoration: underline;
   }
+  .taxomesh-toggle {
+    background: none;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.75em;
+    line-height: 1;
+    padding: 0 3px;
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
+  .taxomesh-toggle:hover {
+    opacity: 1;
+  }
+  .taxomesh-relations {
+    display: none;
+    padding-left: calc((var(--item-depth, 0) + 1) * 2.6rem);
+    color: #7a8a9a;
+    font-size: 0.9em;
+    margin: 1px 0;
+  }
 </style>
 
 {% if error %}
@@ -51,6 +76,9 @@
       <div
         class="taxomesh-entry"
         data-kind="{{ entry.kind }}"
+        data-idx="{{ forloop.counter0 }}"
+        data-depth="{{ entry.depth }}"
+        {% if entry.depth_limited %}data-depth-limited="1"{% endif %}
         style="--depth: {{ entry.depth }};"
       >
         {% if entry.enabled %}
@@ -59,17 +87,104 @@
           <span style="color: #dc3545;" title="disabled">&#10007;</span>
         {% endif %}
 
+        {% if entry.has_descendants %}
+          {% if entry.initially_collapsed %}
+            <button class="taxomesh-toggle" data-idx="{{ forloop.counter0 }}">[+]</button>
+          {% else %}
+            <button class="taxomesh-toggle" data-idx="{{ forloop.counter0 }}">[-]</button>
+          {% endif %}
+        {% endif %}
+
         {% if entry.kind == "category" %}
           <span class="taxomesh-label">
             <a href="{% url 'admin:taxomesh_contrib_django_categorymodel_change' entry.uuid %}">{{ entry.name }}</a>
           </span>
         {% else %}
+          {% with entry_rels=item_relations|get_item:entry.uuid %}
+            {% if entry_rels %}
+              <button class="taxomesh-toggle taxomesh-rel-toggle" data-item-uuid="{{ entry.uuid }}">[+]</button>
+            {% endif %}
+          {% endwith %}
           <span class="taxomesh-label">
             <a href="{% url 'admin:taxomesh_contrib_django_itemmodel_change' entry.uuid %}">{{ entry.name }}</a>
           </span>
         {% endif %}
+
+        {% if entry.linked_url %}
+          <a href="{{ entry.linked_url }}" title="View in admin" style="text-decoration:none; font-size:0.85em;">&#8599;</a>
+        {% endif %}
       </div>
+
+      {% if entry.kind == "item" %}
+        {% with entry_rels=item_relations|get_item:entry.uuid %}
+          {% if entry_rels %}
+            <div
+              class="taxomesh-relations"
+              data-item-uuid="{{ entry.uuid }}"
+              style="--item-depth: {{ entry.depth }};"
+            >
+              {% for rel in entry_rels %}
+                <div>[{{ rel.relation_type }}] &#8594; {{ rel.target_name }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+      {% endif %}
     {% endfor %}
   </div>
 {% endif %}
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- Expand/collapse logic ----
+  var entries = Array.from(document.querySelectorAll(".taxomesh-entry[data-idx]"));
+  var depths = entries.map(function (el) { return parseInt(el.dataset.depth, 10); });
+
+  // Initialise depth-limited entries as collapsed under their nearest ancestor.
+  entries.forEach(function (entry, i) {
+    if (!entry.dataset.depthLimited) return;
+    var entryDepth = depths[i];
+    for (var j = i - 1; j >= 0; j--) {
+      if (depths[j] < entryDepth) {
+        entry.dataset.collapsedBy = j;
+        break;
+      }
+    }
+  });
+
+  document.querySelectorAll(".taxomesh-toggle:not(.taxomesh-rel-toggle)").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var parentIdx = parseInt(btn.dataset.idx, 10);
+      var parentDepth = depths[parentIdx];
+      var collapsed = btn.textContent.trim() === "[-]";
+      btn.textContent = collapsed ? "[+]" : "[-]";
+
+      for (var i = parentIdx + 1; i < entries.length; i++) {
+        if (depths[i] <= parentDepth) break;
+        if (collapsed) {
+          entries[i].dataset.collapsedBy = parentIdx;
+        } else {
+          if (String(entries[i].dataset.collapsedBy) === String(parentIdx)) {
+            delete entries[i].dataset.collapsedBy;
+          }
+        }
+      }
+    });
+  });
+
+  // ---- Per-item relations toggle ----
+  document.querySelectorAll(".taxomesh-rel-toggle").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var itemUuid = btn.dataset.itemUuid;
+      var relBlock = document.querySelector(".taxomesh-relations[data-item-uuid=\"" + itemUuid + "\"]");
+      if (!relBlock) return;
+      var isHidden = relBlock.style.display === "none" || relBlock.style.display === "";
+      relBlock.style.display = isHidden ? "block" : "none";
+      btn.textContent = isHidden ? "[-]" : "[+]";
+    });
+  });
+}());
+</script>
 {% endblock %}

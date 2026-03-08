@@ -14,17 +14,22 @@ from uuid import UUID
 
 import typer
 from rich.console import Console
+from rich.markup import escape as _markup_escape
 from rich.table import Table
 from rich.tree import Tree
 
 import taxomesh
 from taxomesh.adapters.cli.config import BuildResult, _resolve_effective_config, build, dump_config
 from taxomesh.domain.graph import CategoryNode
+from taxomesh.domain.models import Item
+from taxomesh.domain.models.item_relation_link import ItemRelationLink
 from taxomesh.domain.types import ExternalId
 from taxomesh.exceptions import TaxomeshConfigError, TaxomeshError
 
 ENABLED_ICON: Final[str] = "✓"
 DISABLED_ICON: Final[str] = "✗"
+MAX_DEPTH_UNLIMITED: Final[int] = 0
+GRAPH_DEFAULT_MAX_DEPTH: Final[int] = 3
 
 app = typer.Typer(no_args_is_help=True)
 category_app = typer.Typer(no_args_is_help=True)
@@ -454,33 +459,62 @@ def version_cmd() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _add_graph_node(tree_node: Tree, category_node: CategoryNode) -> None:
+def _add_graph_node(
+    tree_node: Tree,
+    category_node: CategoryNode,
+    relations: dict[UUID, list[ItemRelationLink]] | None = None,
+    item_lookup: dict[UUID, Item] | None = None,
+    current_depth: int = 0,
+    max_depth: int = MAX_DEPTH_UNLIMITED,
+) -> None:
     """Recursively populate a Rich Tree node from a CategoryNode.
 
     Adds a styled branch for the category (bold cyan name) and a leaf for
     each item showing ``external_id``, ``item_id``, and ``enabled`` status.
-    Recurses into child categories.
+    When ``relations`` and ``item_lookup`` are provided, renders outgoing relations
+    as dim leaves below each item.
+    Recurses into child categories up to ``max_depth`` levels (0 = unlimited).
 
     Args:
         tree_node: The Rich Tree node to attach category and item branches to.
         category_node: The CategoryNode supplying category and item data.
+        relations: Optional mapping of item_id → outgoing ItemRelationLink list.
+        item_lookup: Optional mapping of item_id → Item for target name resolution.
+        current_depth: The depth of this category node (0 = root).
+        max_depth: Maximum depth to render; 0 means unlimited (``MAX_DEPTH_UNLIMITED``).
     """
     cat = category_node.category
     cat_icon = ENABLED_ICON if cat.enabled else DISABLED_ICON
     cat_icon_style = "green" if cat.enabled else "red"
     cat_label = f"[bold cyan]{cat}[/bold cyan]  [{cat_icon_style}]{cat_icon}[/{cat_icon_style}]"
     branch = tree_node.add(cat_label)
-    for item in category_node.items:
-        item_icon = ENABLED_ICON if item.enabled else DISABLED_ICON
-        item_icon_style = "green" if item.enabled else "red"
-        label = f"[yellow]{item}[/yellow]  [{item_icon_style}]{item_icon}[/{item_icon_style}]"
-        branch.add(label)
-    for child in category_node.children:
-        _add_graph_node(branch, child)
+    depth_limited = max_depth != MAX_DEPTH_UNLIMITED
+    can_expand = not (depth_limited and current_depth + 1 > max_depth)
+    if can_expand:
+        for item in category_node.items:
+            item_icon = ENABLED_ICON if item.enabled else DISABLED_ICON
+            item_icon_style = "green" if item.enabled else "red"
+            label = f"[yellow]{item}[/yellow]  [{item_icon_style}]{item_icon}[/{item_icon_style}]"
+            item_branch = branch.add(label)
+            if relations is not None and item_lookup is not None:
+                for link in relations.get(item.item_id, []):
+                    target = item_lookup.get(link.target_item_id)
+                    target_name = target.name if target is not None else str(link.target_item_id)
+                    rel_label = _markup_escape(f"[{link.relation_type}]")
+                    item_branch.add(f"[dim]{rel_label} → {target_name}[/dim]")
+    if can_expand:
+        for child in category_node.children:
+            _add_graph_node(branch, child, relations, item_lookup, current_depth + 1, max_depth)
 
 
 @app.command("graph")
-def graph_cmd(ctx: typer.Context) -> None:
+def graph_cmd(
+    ctx: typer.Context,
+    show_relations: bool = typer.Option(
+        False, "--show-relations/--no-show-relations", help="Show outgoing item relations"
+    ),
+    max_depth: int = typer.Option(GRAPH_DEFAULT_MAX_DEPTH, "--max-depth", help="Max depth to display; 0 = unlimited"),
+) -> None:
     """Display the full taxonomy as a colour-coded tree.
 
     Retrieves the complete taxonomy snapshot via the service and renders it
@@ -489,6 +523,7 @@ def graph_cmd(ctx: typer.Context) -> None:
 
     Args:
         ctx: Typer context carrying verbose flag and config path.
+        show_relations: When True, render outgoing item relations as dim leaves.
     """
     result = build(_config_path(ctx))
     _print_verbose(result, _verbose(ctx))
@@ -499,9 +534,17 @@ def graph_cmd(ctx: typer.Context) -> None:
     if not graph.roots:
         typer.echo("No categories were found. Add one with: taxomesh category add --name <name>")
         return
+    relations: dict[UUID, list[ItemRelationLink]] | None = None
+    item_lookup: dict[UUID, Item] | None = None
+    if show_relations:
+        relations = {}
+        item_lookup = {}
+        for item in result.service.list_items():
+            item_lookup[item.item_id] = item
+            relations[item.item_id] = result.service.list_item_relations(item.item_id)
     tree = Tree("Taxonomy")
     for root_node in graph.roots:
-        _add_graph_node(tree, root_node)
+        _add_graph_node(tree, root_node, relations, item_lookup, max_depth=max_depth)
     Console().print(tree)
 
 

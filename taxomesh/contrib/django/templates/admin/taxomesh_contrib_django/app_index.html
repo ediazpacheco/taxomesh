@@ -1,7 +1,8 @@
 {% extends "admin/app_index.html" %}
-{% load i18n %}
+{% load i18n taxomesh_tags %}
 
 {% block content %}
+{% taxomesh_version_info as tm_info %}
 {{ block.super }}
 <div class="module">
   <table>
@@ -13,6 +14,12 @@
         </th>
         <td>{% trans 'View the full taxonomy as a tree' %}</td>
         <td></td>
+        <td></td>
+      </tr>
+      <tr>
+        <th scope="row">{% trans 'Version' %}</th>
+        <td>taxomesh {{ tm_info.version }}</td>
+        <td>{{ tm_info.backend }}</td>
         <td></td>
       </tr>
     </tbody>

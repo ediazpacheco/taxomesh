@@ -158,7 +158,10 @@ class TestFlattenGraph:
     """Unit tests for the _flatten_graph helper (SC-003)."""
 
     def test_entry_schema_has_no_legacy_keys(self) -> None:
-        """_flatten_graph entries must not contain slug, external_id, or indent_em keys."""
+        """_flatten_graph entries must not contain slug or indent_em keys.
+
+        Note: external_id is now an intentional GraphEntry field (024-graph-enhancements).
+        """
         from taxomesh.contrib.django.admin import _flatten_graph  # noqa: PLC0415
         from taxomesh.domain.graph import CategoryNode, TaxomeshGraph  # noqa: PLC0415
         from taxomesh.domain.models import Category, Item  # noqa: PLC0415
@@ -168,7 +171,7 @@ class TestFlattenGraph:
         node = CategoryNode(category=cat, items=[item], children=[])
         graph = TaxomeshGraph(roots=[node])
         entries = _flatten_graph(graph)
-        forbidden_keys = {"slug", "external_id", "indent_em"}
+        forbidden_keys = {"slug", "indent_em"}
         for entry in entries:
             assert not forbidden_keys & entry.keys(), f"Unexpected keys in entry: {entry.keys()}"
 

@@ -100,6 +100,18 @@ python manage.py migrate
 After migrating, Django admin exposes taxomesh models out of the box:
 `CategoryModel`, `ItemModel`, and `TagModel`.
 
+**Admin graph features (0.1.0a12)**:
+
+- The taxonomy graph view (`/admin/taxomesh_contrib_django/graph/`) renders the top 3 levels
+  of the taxonomy by default (configurable via `ADMIN_GRAPH_DEFAULT_MAX_DEPTH` in admin.py).
+- Item relations are always rendered but collapsed per-item; click the `[+]` button next to
+  an item to expand its outgoing relations.  The global "Show item relations" checkbox has
+  been removed.
+- When `TAXOMESH_LINKED_MODEL = "app.Model"` is set in Django settings, Item and Category
+  list views and detail pages show a ↗ icon-link to the corresponding Django admin page for
+  any row whose `external_id` matches a primary key in the linked model.
+- The taxomesh app_index page shows the installed taxomesh version and active backend.
+
 ### Integrate with your app models
 
 Example: mirror a Django model into taxomesh by `external_id`.
@@ -227,9 +239,10 @@ updates `sort_index` and `metadata` rather than creating a duplicate.
 
 **Self-relations** are rejected. **Empty relation type** raises `TaxomeshValidationError`.
 
-Relations are stored in all backends (YAML, JSON, Django). Django admin exposes
-`ItemRelationLinkModelAdmin` and shows editable outgoing / read-only incoming inlines
-on the Item change page.
+Relations are stored in all backends (YAML, JSON, Django). Django admin shows
+editable outgoing and read-only incoming relation inlines on the Item change page.
+The standalone `ItemRelationLinkModelAdmin` list has been removed in 0.1.0a12 — use the
+Item inlines instead.
 
 ### Graph snapshot
 
@@ -367,9 +380,17 @@ taxomesh item relation related <item-uuid>
 taxomesh item relation related <item-uuid> --direction incoming
 taxomesh item relation delete <source-uuid> <target-uuid> covers
 
-# Graph
+# Graph (shows top 3 levels by default)
 taxomesh graph
+taxomesh graph --max-depth 0          # show all levels (unlimited)
+taxomesh graph --max-depth 1          # root categories only
+taxomesh graph --show-relations       # include outgoing item relations
+taxomesh graph --max-depth 5 --show-relations
 ```
+
+`--max-depth N` limits the depth of the rendered tree.  Depth 0 = root categories; items
+inside a category at depth D are at depth D+1.  Pass `--max-depth 0` to disable the limit
+(default is 3).
 
 Example output:
 
