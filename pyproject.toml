@@ -1,6 +1,6 @@
 [project]
 name = "taxomesh"
-version = "0.1.0a15"
+version = "0.1.0a16"
 description = "Flexible taxonomy management for generic items — categories, tags, and multi-parent hierarchies with pluggable storage."
 readme = "README.md"
 license = { text = "MIT" }
@@ -19,7 +19,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "fastapi>=0.110",
+    "pydantic>=2.0",
     "pyyaml>=6.0",
     "rich>=13.0",
     "typer>=0.12",
@@ -30,7 +30,6 @@ django = [
     "django>=4.2",
 ]
 dev = [
-    "fastapi>=0.110",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-django>=4.8",
@@ -67,6 +66,7 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["PLR2004"]  # magic-value comparisons are idiomatic in test assertions
 "taxomesh/adapters/cli/main.py" = ["PLR0913"]  # CLI functions intentionally have many options
+"taxomesh/application/service.py" = ["PLR0913"]  # service update methods intentionally have multiple optional fields
 "taxomesh/**/migrations/*.py" = ["E501"]  # Django generates long lines in migrations
 
 [tool.mypy]
