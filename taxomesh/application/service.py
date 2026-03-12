@@ -493,15 +493,17 @@ class TaxomeshService:
         enabled: bool | None = None,
         slug: str | None = None,
         name: str | None = None,
+        external_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Item:
-        """Update an item's enabled state, slug, name, and/or metadata.
+        """Update an item's enabled state, slug, name, external_id, and/or metadata.
 
         Args:
             item_id: The library-assigned UUID of the item to update.
             enabled: New enabled state; unchanged if None.
             slug: New slug; unchanged if None. Pass "" to clear the slug.
             name: New name; unchanged if None.
+            external_id: New external identifier; unchanged if None. Pass "" to clear it.
             metadata: New metadata dict; unchanged if None.
 
         Returns:
@@ -522,6 +524,8 @@ class TaxomeshService:
             item.slug = slug
         if name is not None:
             item.name = name
+        if external_id is not None:
+            item.external_id = external_id
         if metadata is not None:
             item.metadata = metadata
         self._repo.save_item(item)

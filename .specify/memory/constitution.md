@@ -188,7 +188,8 @@ TaxomeshError
 │   ├── TaxomeshCategoryNotFoundError
 │   └── TaxomeshTagNotFoundError
 ├── TaxomeshValidationError
-│   └── TaxomeshCyclicDependencyError
+│   ├── TaxomeshCyclicDependencyError
+│   └── TaxomeshDuplicateSlugError
 ├── TaxomeshRepositoryError
 └── TaxomeshConfigError
 ```
@@ -221,58 +222,25 @@ All code merged to `main` MUST pass:
 
 These gates run in CI (GitHub Actions) on every PR. No exceptions.
 
-### IX. Pluggable REST Views — The Library Ships FastAPI View Functions
-taxomesh provides FastAPI view functions in `taxomesh/adapters/api/`. These are
-plain async functions — not a mountable router — that consumer FastAPI applications
-call from their own route handlers.
-
-**The callable contract is mandatory and per-call:**
-Every view function that returns item data MUST accept an `item_fetcher` argument.
-`item_fetcher` is a callable `(item_id: str | int | UUID) -> dict` supplied by the
-consumer at the call site. taxomesh never knows what an item *is*; it only knows
-how items are categorized and tagged.
+### IX. Framework-Agnostic HTTP Handlers — No HTTP Framework Dependency
+taxomesh ships **no HTTP server**. Instead, `taxomesh.contrib.api` provides three
+framework-agnostic modules that consuming applications wire into any web framework
+(FastAPI, Django, Flask, etc.) with ≤10 lines of integration code per endpoint.
 
 ```python
-# taxomesh provides the view function
-async def category_items(
-    category_id: str,
-    service: TaxomeshService,
-    item_fetcher: Callable[[str | int | UUID], dict],
-) -> list[ItemResponse]: ...
-
-# Consumer wires it into their own routes
-@app.get("/v1/songs/category/{category_id}/items/")
-async def songs_by_category(category_id: str):
-    return await taxomesh_views.category_items(
-        category_id=category_id,
-        service=my_taxomesh_service,
-        item_fetcher=song_service.fetch,     # Songs
-    )
-
-@app.get("/v1/authors/category/{category_id}/items/")
-async def authors_by_category(category_id: str):
-    return await taxomesh_views.category_items(
-        category_id=category_id,
-        service=my_taxomesh_service,
-        item_fetcher=author_service.fetch,   # Authors — same view, different callable
-    )
+from taxomesh.contrib.api import schemas   # Pydantic request models
+from taxomesh.contrib.api import handlers  # Pure delegation functions → TaxomeshService
+from taxomesh.contrib.api import errors    # errors.to_tuple(exc) → (status_code, body)
 ```
 
-**Standard item response shape** (every item-listing view MUST return this structure):
+**Rules:**
+- `taxomesh.contrib.api` MUST NOT import from any HTTP framework (`fastapi`, `django`, `flask`, etc.).
+- Handler functions MUST accept `TaxomeshService` as their first positional argument and delegate exclusively to it — no business logic in handlers.
+- Handlers MUST return domain model instances directly (`Category`, `Item`, `Tag`, etc.). No serialization, no response wrapping.
+- `errors.to_tuple(exc: TaxomeshError) -> tuple[int, dict[str, Any]]` is the sole error-mapping primitive. Consuming apps wrap the result in their own HTTP response.
+- `pydantic>=2.0` is the **only** HTTP-related runtime dependency taxomesh ships. FastAPI is not required.
 
-```json
-{
-  "category_id": "<str | int | UUID>",
-  "item_id":     "<str | int | UUID>",
-  "item_data":   { ...consumer-provided dict... }
-}
-```
-
-The consumer owns: the URL, the callable, and the item data shape.
-taxomesh owns: the query logic, the category/tag graph, and the response envelope.
-
-FastAPI is a **mandatory core runtime dependency** — not an optional extra. It is the
-primary delivery mechanism for the taxomesh REST surface and ships with every install.
+**Amendment history**: Originally (pre-028-contrib-api) Principle IX mandated FastAPI as a core runtime dep and prescribed an `item_fetcher` callable contract. That design was superseded in `028-contrib-api` — FastAPI was never imported in taxomesh source and was listed only to pull in Pydantic transitively. Making Pydantic a direct dep achieves the same result without forcing a full web framework on every consumer.
 
 ### X. Named Constants — No Magic Literals
 All domain-meaningful and configuration-meaningful values MUST be defined as named
@@ -315,12 +283,11 @@ encapsulation and composition in taxomesh.
 | **ruff** | Lint + format | `pyproject.toml [tool.ruff]` |
 | **mypy** | Static type checking (strict) | `pyproject.toml [tool.mypy]` |
 | **pytest** | Unit and integration tests | `pyproject.toml [tool.pytest.ini_options]` |
-| **fastapi** | REST view functions + Pydantic v2 (core runtime dep) | `pyproject.toml [project.dependencies]` |
-| **pydantic** | Domain model definition and validation (pulled in by fastapi) | transitive via fastapi |
+| **pydantic** | Domain model definition and validation (direct runtime dep since 022-contrib-api) | `pyproject.toml [project.dependencies]` |
 | **hatchling** | Build backend | `pyproject.toml [build-system]` |
 | **uv** | Package and virtual environment manager | `uv.lock` |
 
-Runtime dependencies: `fastapi` (mandatory — pulls in `pydantic` v2 transitively).
+Runtime dependencies: `pydantic>=2.0` (direct, since 022-contrib-api; FastAPI removed in that feature).
 `pyyaml` is mandatory (promoted to required runtime dependency in 007-yaml-repository). SQLite3 is stdlib.
 
 ---
