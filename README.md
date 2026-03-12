@@ -1,25 +1,57 @@
 # taxomesh
 
-Flexible taxonomy management for generic items with:
+Reusable taxonomy engine for products, content, media, or any domain object you
+already have.
+
+`taxomesh` lets you attach categories, tags, and item relationships to existing
+entities without baking taxonomy logic into your core models or re-implementing
+the same validation, admin, and API workflows in every project.
+
+Use it when "we just need categories" stops being simple:
+
+- categories can have more than one parent
+- the same item must appear in multiple branches
+- ordering depends on the parent category
+- your real entities already live in another system or model
+- the same taxonomy rules must work from Python, CLI, Django admin, or your own API
+
+What you get:
 
 - multi-parent category DAGs
 - per-parent sort ordering
 - free-form item tags
+- typed item-to-item relations
 - pluggable storage backends (YAML, JSON, Django)
-
-`taxomesh` is **storage-agnostic by design**.
-
-Switch from a JSON file to Django-backed storage or a custom remote backend
-without touching a single line of your application code.
-
-The goal of this library is to avoid re-implementing common taxonomy workflows
-and provide a plug-and-play component for your application.
+- one service layer with optional CLI, HTTP, and Django integrations
 
 [![CI](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml/badge.svg)](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/taxomesh.svg)](https://pypi.org/project/taxomesh/)
 [![Python versions](https://img.shields.io/pypi/pyversions/taxomesh.svg)](https://pypi.org/project/taxomesh/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Pre-Alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)]()
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Status: Pre-Alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)
+
+## What Taxomesh Does
+
+At a high level, `taxomesh` is a reusable taxonomy layer.
+
+It stores and validates the structure around your entities:
+
+- categories and subcategories
+- item placement inside one or more categories
+- tags
+- typed relations between items
+- slugs, metadata, and external IDs for integration
+
+Your actual business objects can stay where they already are. In many projects,
+`taxomesh` is the missing layer between "our app already has products/articles/assets"
+and "we need a serious taxonomy on top of them."
+
+## Typical Use Cases
+
+- Ecommerce catalogs where a product appears in several navigation paths
+- Editorial or CMS systems with sections, topics, and reusable tagging
+- Media catalogs with genre, format, collection, and related-item links
+- Internal content or knowledge systems that need taxonomy without custom admin work
 
 ## Status
 
@@ -40,492 +72,92 @@ Optional Django integration:
 pip install "taxomesh[django]"
 ```
 
-## Quick start
+## Quick Start
 
-```python
-from taxomesh import TaxomeshService
+Example: your application already has a product, track, or article identified by
+an external ID, and you want to place it in a reusable taxonomy.
 
-svc = TaxomeshService()  # auto-discovers taxomesh.toml, else defaults to YAMLRepository(data/taxomesh.yaml)
-
-music = svc.create_category(name="Music")
-jazz = svc.create_category(name="Jazz")
-svc.add_category_parent(jazz.category_id, music.category_id, sort_index=1)
-
-kind_of_blue = svc.create_item(external_id=42)
-svc.place_item_in_category(kind_of_blue.item_id, jazz.category_id, sort_index=1)
-
-print(kind_of_blue.external_id)  # "42" (normalized to str)
-print([node.category.name for node in svc.get_graph().roots])
-```
-
-## Core concepts
-
-- **Item**: the core catalogued object, identified by an internal `item_id`. The optional `external_id` field is an escape hatch: use it to store a reference to an entity that lives outside taxomesh (e.g. a primary key from another system) when the built-in fields (`name`, `slug`, `enabled`, `metadata`) are not enough to represent your data. It is not required — items can exist without any external reference.
-- **Category**: taxonomy node with optional `name`, `description`, `metadata`, `external_id`, `enabled`, and optional unique `slug`
-- **Tag**: free-form item label
-- **ItemRelationLink**: directed, typed relation between two items (e.g. `covers`, `version_of`, `performed_by`)
-- **CategoryParentLink**: relation from category to parent category with `sort_index`
-- **ItemParentLink**: relation from item to category with `sort_index`
-- **TaxomeshGraph**: read snapshot returned by `get_graph()` for tree-like traversal
-- **Repository protocol**: `TaxomeshRepositoryBase` (`typing.Protocol`) defines the storage contract
-
-## Django integration
-
-Use this when taxomesh should run inside a Django project database and admin.
-
-### Enable admin-backed Django models
-
-1. Install the Django extra (if not already installed):
-
-```bash
-pip install "taxomesh[django]"
-```
-
-2. Add the contrib app:
-
-```python
-# settings.py
-INSTALLED_APPS = [
-    # ...
-    "taxomesh.contrib.django",
-]
-```
-
-3. Run migrations:
-
-```bash
-python manage.py migrate
-```
-
-After migrating, Django admin exposes taxomesh models out of the box:
-`CategoryModel`, `ItemModel`, and `TagModel`.
-
-**Admin graph features (0.1.0a12)**:
-
-- The taxonomy graph view (`/admin/taxomesh_contrib_django/graph/`) renders the top 3 levels
-  of the taxonomy by default (configurable via `ADMIN_GRAPH_DEFAULT_MAX_DEPTH` in admin.py).
-- Item relations are always rendered but collapsed per-item; click the `[+]` button next to
-  an item to expand its outgoing relations.  The global "Show item relations" checkbox has
-  been removed.
-- When `TAXOMESH_LINKED_MODEL = "app.Model"` is set in Django settings, Item and Category
-  list views and detail pages show a ↗ icon-link to the corresponding Django admin page for
-  any row whose `external_id` matches a primary key in the linked model.
-- The taxomesh app_index page shows the installed taxomesh version and active backend.
-
-### FK autocomplete widgets for external admins
-
-When an external app has a `ForeignKey` to `ItemModel` or `CategoryModel`, the default
-admin dropdown shows every record as a full list. Use `TaxomeshLinkedFKMixin` to replace
-it with a compact Select2 autocomplete and a ↗ link that navigates directly to the
-selected record's admin change page.
-
-**Simple case — real FK on the model:**
-
-```python
-# your_app/admin.py
-from django.contrib import admin
-from taxomesh.contrib.django.admin import TaxomeshLinkedFKMixin
-
-from your_app.models import Article
-
-@admin.register(Article)
-class ArticleAdmin(TaxomeshLinkedFKMixin, admin.ModelAdmin):
-    pass
-```
-
-`TaxomeshLinkedFKMixin` hooks `formfield_for_foreignkey` and automatically injects
-`TaxomeshLinkedFKWidget` for any FK field whose `related_model` is `ItemModel` or
-`CategoryModel`. All other FK fields are untouched.
-
-**Advanced case — form-only fields (no DB FK on the model):**
-
-When the admin uses a custom `ModelChoiceField` instead of a real FK, you must
-apply the widget manually in `__init__`. Use `ItemParentLinkModel`'s FK fields as
-a proxy so Django's autocomplete endpoint can validate the request:
-
-```python
-# your_app/forms.py
-from django import forms
-from django.contrib import admin
-from taxomesh.contrib.django.models import CategoryModel, ItemModel, ItemParentLinkModel
-from taxomesh.contrib.django.widgets import TaxomeshLinkedFKWidget
-
-class MyAdminForm(forms.ModelForm):
-    selected_item = forms.ModelChoiceField(
-        queryset=ItemModel.objects.none(), required=False, label="Item"
-    )
-    selected_category = forms.ModelChoiceField(
-        queryset=CategoryModel.objects.none(), required=False, label="Category"
-    )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["selected_item"].queryset = ItemModel.objects.order_by("name")
-        self.fields["selected_category"].queryset = CategoryModel.objects.order_by("name")
-
-        item_field = ItemParentLinkModel._meta.get_field("item")
-        item_widget = TaxomeshLinkedFKWidget(field=item_field, admin_site=admin.site)
-        item_widget.choices = self.fields["selected_item"].choices
-        self.fields["selected_item"].widget = item_widget
-
-        category_field = ItemParentLinkModel._meta.get_field("category")
-        category_widget = TaxomeshLinkedFKWidget(field=category_field, admin_site=admin.site)
-        category_widget.choices = self.fields["selected_category"].choices
-        self.fields["selected_category"].widget = category_widget
-```
-
-You also need to register `ItemParentLinkModel` as a hidden admin so Django's autocomplete
-view can validate the FK path. The model is hidden from the admin index via `get_model_perms`:
-
-```python
-# your_app/admin.py
-from django.contrib import admin
-from taxomesh.contrib.django.models import ItemParentLinkModel
-
-class _ItemParentLinkProxyAdmin(admin.ModelAdmin):
-    def get_model_perms(self, request):
-        return {}
-
-    def has_view_permission(self, request, obj=None):
-        return request.user.is_staff
-
-admin.site.register(ItemParentLinkModel, _ItemParentLinkProxyAdmin)
-```
-
-### Integrate with your app models
-
-Example: mirror a Django model into taxomesh by `external_id`.
-
-```python
-# content_catalog/taxomesh_bridge.py
-from taxomesh.contrib.django import get_taxomesh_service_with_django
-
-
-def ensure_item_for_external_id(external_id: str) -> None:
-    svc = get_taxomesh_service_with_django()
-    if not svc.get_items_by_external_id(external_id):
-        svc.create_item(external_id=external_id)
-
-
-def delete_items_for_external_id(external_id: str) -> None:
-    svc = get_taxomesh_service_with_django()
-    for item in svc.get_items_by_external_id(external_id):
-        svc.delete_item(item.item_id)
-```
-
-```python
-# content_catalog/models.py
-from uuid import uuid4
-from django.db import models
-
-from content_catalog.taxomesh_bridge import (
-    delete_items_for_external_id,
-    ensure_item_for_external_id,
-)
-
-
-class Content(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
-    title = models.CharField(max_length=255)
-
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        ensure_item_for_external_id(str(self.id))
-
-    def delete(self, *args, **kwargs):
-        delete_items_for_external_id(str(self.id))
-        return super().delete(*args, **kwargs)
-```
-
-If you need lower-level control, use `DjangoRepository` directly (see
-the **Repositories** section below).
-
-## Python API
-
-### Categories
+With no explicit repository configured, `TaxomeshService()` auto-discovers
+`taxomesh.toml`; otherwise it falls back to the default YAML backend.
 
 ```python
 from taxomesh import TaxomeshService
 
 svc = TaxomeshService()
 
-root = svc.create_category(name="Root Topic")
-child = svc.create_category(name="Child Topic", slug="child-topic")
-svc.add_category_parent(child.category_id, root.category_id, sort_index=10)
+music = svc.create_category(name="Music")
+jazz = svc.create_category(name="Jazz")
+formats = svc.create_category(name="Formats")
+vinyl = svc.create_category(name="Vinyl")
 
-children = svc.list_categories(parent_id=root.category_id)
-updated = svc.update_category(child.category_id, description="Updated")
-svc.delete_category(updated.category_id)
+svc.add_category_parent(jazz.category_id, music.category_id, sort_index=10)
+svc.add_category_parent(vinyl.category_id, formats.category_id, sort_index=20)
 
-# Look up by slug
-cat = svc.get_category_by_slug("child-topic")  # raises TaxomeshCategoryNotFoundError if missing
+album = svc.create_item(
+    external_id="catalog:42",
+    name="Kind of Blue",
+    slug="kind-of-blue",
+)
+
+svc.place_item_in_category(album.item_id, jazz.category_id, sort_index=1)
+svc.place_item_in_category(album.item_id, vinyl.category_id, sort_index=3)
+
+featured = svc.create_tag(name="featured")
+svc.assign_tag(featured.tag_id, album.item_id)
+
+print(album.external_id)  # "catalog:42"
+print([node.category.name for node in svc.get_graph().roots])  # ["Music", "Formats"]
 ```
 
-### Items
-
-```python
-from uuid import uuid4
-
-item_a = svc.create_item(name="Article", external_id=123, slug="article-123")
-item_b = svc.create_item(name="Track", external_id=uuid4())
-item_c = svc.create_item(name="Post", external_id="article-abc")
-
-svc.update_item(item_a.item_id, enabled=False)
-all_items = svc.list_items()
-
-# Look up by slug
-item = svc.get_item_by_slug("article-123")  # raises TaxomeshItemNotFoundError if missing
-```
-
-### Tags
-
-```python
-tag = svc.create_tag(name="featured")
-svc.assign_tag(tag.tag_id, item_c.item_id)    # idempotent
-svc.remove_tag(tag.tag_id, item_c.item_id)    # no-op if already removed
-svc.delete_tag(tag.tag_id)
-```
-
-### Item relations
-
-`ItemRelationLink` models a **directed, typed relation** between two items.
-The relation type is a free-form string — taxomesh imposes no domain-specific vocabulary.
-
-```python
-# Create relations
-svc.relate_items(work.item_id, artist.item_id, "music_by")
-svc.relate_items(recording.item_id, work.item_id, "version_of", sort_index=1)
-svc.relate_items(release.item_id, recording.item_id, "contains", metadata={"disc": 1})
-
-# List outgoing relations from an item
-links = svc.list_item_relations(recording.item_id)
-# [ItemRelationLink(source=recording, target=work, relation_type="version_of"), ...]
-
-# List incoming relations (items that point TO this item)
-links = svc.list_item_relations(work.item_id, direction="incoming")
-
-# Filter by type
-links = svc.list_item_relations(recording.item_id, relation_type="version_of")
-
-# Resolve to Item objects directly
-items = svc.list_related_items(release.item_id)  # returns list[Item]
-
-# Remove a relation
-svc.remove_item_relation(recording.item_id, work.item_id, "version_of")
-```
-
-**Upsert semantics**: calling `relate_items` with the same `(source, target, relation_type)` triple
-updates `sort_index` and `metadata` rather than creating a duplicate.
-
-**Self-relations** are rejected. **Empty relation type** raises `TaxomeshValidationError`.
-
-Relations are stored in all backends (YAML, JSON, Django). Django admin shows
-editable outgoing and read-only incoming relation inlines on the Item change page.
-The standalone `ItemRelationLinkModelAdmin` list has been removed in 0.1.0a12 — use the
-Item inlines instead.
-
-### Graph snapshot
-
-```python
-graph = svc.get_graph()
-for node in graph.roots:
-    print(node.category.name)
-```
-
-### Slug lookup
-
-```python
-from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshItemNotFoundError
-
-cat = svc.get_category_by_slug("child-topic")   # returns Category or raises TaxomeshCategoryNotFoundError
-item = svc.get_item_by_slug("article-123")       # returns Item or raises TaxomeshItemNotFoundError
-```
-
-Slugs are optional URL-friendly identifiers. They must be unique within their namespace
-(categories or items). Both methods raise a typed not-found exception — they never return `None`.
-
-### External ID lookup helpers
-
-```python
-items = svc.get_items_by_external_id("article-abc")
-categories = svc.get_categories_by_external_id("legacy-category-id")
-```
-
-These methods are useful for integrations where domain entities live outside taxomesh.
-
-## Repositories
-
-Any class implementing `TaxomeshRepositoryBase` can be used.
-`TaxomeshRepositoryBase` is defined as a `typing.Protocol`.
-No inheritance is required (structural typing / protocol-based compatibility).
-
-### YAMLRepository
-
-Default backend when no repository is configured.
-Uses atomic writes.
-
-```python
-from pathlib import Path
-from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
-
-svc = TaxomeshService(repository=YAMLRepository(Path("data/taxomesh.yaml")))
-```
-
-### JsonRepository
-
-File-backed JSON backend with atomic writes.
-
-```python
-from pathlib import Path
-from taxomesh.adapters.repositories.json_repository import JsonRepository
-
-svc = TaxomeshService(repository=JsonRepository(Path("data/taxomesh.json")))
-```
-
-### DjangoRepository
-
-ORM-backed backend for Django projects.
-If Django integration is already configured (see **Django integration** above),
-use `DjangoRepository` directly when you want explicit repository wiring:
-
-```python
-from taxomesh.adapters.repositories.django_repository import DjangoRepository
-
-svc = TaxomeshService(repository=DjangoRepository())
-```
-
-## Configuration (`taxomesh.toml`)
-
-`taxomesh.toml` is optional.
-If present, `TaxomeshService()` reads it from the current working directory.
-
-YAML:
-
-```toml
-[repository]
-type = "yaml"
-path = "data/taxomesh.yaml"
-```
-
-JSON:
-
-```toml
-[repository]
-type = "json"
-path = "data/taxomesh.json"
-```
-
-Django:
-
-```toml
-[repository]
-type = "django"
-using = "default"
-```
-
-See also: [`taxomesh.toml.example`](./taxomesh.toml.example)
-
-## CLI
-
-After installation, the `taxomesh` command is available.
-
-### Common commands
-
-```bash
-# Categories
-taxomesh category add --name "Music"
-taxomesh category list
-taxomesh category update <category-uuid> --name "World Music"
-taxomesh category delete <category-uuid>
-
-# Items
-taxomesh item add --external-id "kind-of-blue"
-taxomesh item add-to-category <item-uuid> --category-id <category-uuid>
-taxomesh item list --category-id <category-uuid>
-taxomesh item update <item-uuid> --disable
-taxomesh item delete <item-uuid>
-
-# Tags
-taxomesh tag add --name "classic"
-taxomesh item add-to-tag <item-uuid> --tag-id <tag-uuid>
-taxomesh tag list
-
-# Relations
-taxomesh item relation add <source-uuid> <target-uuid> covers
-taxomesh item relation add <source-uuid> <target-uuid> version_of --sort-index 1 --metadata key=value
-taxomesh item relation list <item-uuid>
-taxomesh item relation list <item-uuid> --direction incoming
-taxomesh item relation list <item-uuid> --type covers
-taxomesh item relation related <item-uuid>
-taxomesh item relation related <item-uuid> --direction incoming
-taxomesh item relation delete <source-uuid> <target-uuid> covers
-
-# Graph (shows top 3 levels by default)
-taxomesh graph
-taxomesh graph --max-depth 0          # show all levels (unlimited)
-taxomesh graph --max-depth 1          # root categories only
-taxomesh graph --show-relations       # include outgoing item relations
-taxomesh graph --max-depth 5 --show-relations
-```
-
-`--max-depth N` limits the depth of the rendered tree.  Depth 0 = root categories; items
-inside a category at depth D are at depth D+1.  Pass `--max-depth 0` to disable the limit
-(default is 3).
-
-Example output:
-
-```text
-Taxonomy
-└── Music  11111111-1111-1111-1111-111111111111  ✓
-    └── Jazz  22222222-2222-2222-2222-222222222222  ✓
-        └── kind-of-blue  33333333-3333-3333-3333-333333333333  ✓
-```
-
-Verbose diagnostics:
-
-```bash
-taxomesh --verbose category list
-```
-
-## When to use categories vs tags vs item relations
-
-| Mechanism | Use when |
-|-----------|----------|
-| **Category** | Hierarchical classification — items belong to a taxonomy node |
-| **ItemParentLink** | Placing an item inside a category (multi-parent supported) |
-| **Tag** | Flat, free-form labels applied to items (e.g. "featured", "archived") |
-| **ItemRelationLink** | Directed, semantic relationships *between items* (e.g. one recording is a `version_of` a work; a release `contains` a recording) |
-
-Choose `ItemRelationLink` when:
-- The relationship is between two items (not item → category)
-- The relationship has a meaningful direction (source → target)
-- You need to express multiple relationship *types* between the same pair of items
-- The relationship carries additional data (`sort_index`, `metadata`)
-
-## Error model
-
-All library exceptions inherit from `TaxomeshError`.
-
-- `TaxomeshNotFoundError`
-  - `TaxomeshCategoryNotFoundError`
-  - `TaxomeshItemNotFoundError`
-  - `TaxomeshTagNotFoundError`
-- `TaxomeshValidationError`
-  - `TaxomeshCyclicDependencyError`
-  - `TaxomeshDuplicateSlugError`
-- `TaxomeshRepositoryError`
-- `TaxomeshConfigError`
-- `TaxomeshRootCategoryError`
-- `TaxomeshRelationError`
-
-## Architecture
-
-`taxomesh` uses a ports-and-adapters (hexagonal) shape:
-
-- **Domain**: pure models and DAG validation
-- **Application**: `TaxomeshService` orchestration
-- **Ports**: repository protocol (`TaxomeshRepositoryBase`)
-- **Adapters**: YAML/JSON/Django repositories + CLI
+The item still belongs to your application. `taxomesh` manages the taxonomy layer
+around it: placement, ordering, tags, relations, slugs, and traversal.
+
+## Why This Exists
+
+Taxonomy work is usually underestimated. A simple category table becomes more complex
+once you need:
+
+- multiple parents instead of a strict tree
+- branch-specific ordering
+- items linked to existing models by external ID
+- reusable validation and errors across app code, CLI, admin, and APIs
+- storage that fits both local development and production integration
+
+`taxomesh` packages those concerns into a single component so they do not have to be
+re-solved in each codebase.
+
+## Core Concepts
+
+- **Item**: an entity in your taxonomy, usually linked to a business object through `external_id`
+- **Category**: a taxonomy node with optional `name`, `description`, `metadata`, `external_id`, `enabled`, and unique `slug`
+- **Tag**: a free-form label assigned to items
+- **ItemRelationLink**: a directed, typed relation between two items such as `covers`, `version_of`, or `performed_by`
+- **CategoryParentLink**: the link from a category to one of its parents, including `sort_index`
+- **ItemParentLink**: the link from an item to a category, including `sort_index`
+- **TaxomeshGraph**: a read snapshot returned by `get_graph()` for traversal
+- **Repository**: the storage backend used by `TaxomeshService`
+
+## Documentation
+
+| Topic | Description |
+|-------|-------------|
+| [What Taxomesh Solves](docs/what-is-taxomesh.md) | Product overview, common use cases, and why taxonomy gets complex |
+| [Python API](docs/python-api.md) | Categories, Items, Tags, Graph, slug and external-ID lookups |
+| [Django integration](docs/django-integration.md) | Django ORM + admin setup, model bridging |
+| [HTTP API integration](docs/http-api-integration.md) | Reuse request models, handlers, and error mapping in your existing web app |
+| [Repositories](docs/repositories.md) | YAML, JSON, and Django storage backends; custom backends |
+| [Configuration](docs/configuration.md) | `taxomesh.toml` reference |
+| [CLI reference](docs/cli.md) | Command-line interface for categories, items, tags, and graph |
+
+## Design
+
+`taxomesh` keeps a stable application-facing shape while letting storage and integration
+details vary:
+
+- **Service layer**: `TaxomeshService` is the main entry point for application code
+- **Domain rules**: taxonomy validation, including DAG constraints and typed errors
+- **Repositories**: YAML, JSON, Django, or a custom backend behind the same service API
+- **Optional integrations**: CLI, Django admin + ORM, and framework-agnostic HTTP helpers
 
 ## Development
 
@@ -543,4 +175,4 @@ This project follows a spec-first workflow. Please align implementation PRs with
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT.
