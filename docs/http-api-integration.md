@@ -4,14 +4,15 @@ Use this when you already have a web application and want to expose taxonomy ope
 without re-implementing request models, service delegation, and error mapping in every
 endpoint.
 
-`taxomesh` ships **no HTTP server**. Instead, it provides three framework-agnostic
+`taxomesh` ships **no HTTP server**. Instead, it provides four framework-agnostic
 modules in `taxomesh.contrib.api` that you wire into your existing application. The same
 building blocks work in FastAPI, Django, Flask, or any other Python web framework.
 
 ```python
-from taxomesh.contrib.api import schemas   # Pydantic request models
-from taxomesh.contrib.api import handlers  # Pure delegation functions → TaxomeshService
-from taxomesh.contrib.api import errors    # errors.to_tuple(exc) → (status_code, body)
+from taxomesh.contrib.api import schemas      # Pydantic request models
+from taxomesh.contrib.api import handlers     # Pure delegation functions → TaxomeshService
+from taxomesh.contrib.api import errors       # errors.to_tuple(exc) → (status_code, body)
+from taxomesh.contrib.api import serializers  # serializers.graph_to_dict(graph) → JSON-safe dict
 ```
 
 ## FastAPI example
@@ -65,7 +66,18 @@ def delete_category(category_id: str):
         raise HTTPException(status_code=status, detail=detail)
 ```
 
-The same pattern applies to items, tags, relationships, and graph — one handler function per operation.
+The same pattern applies to items, tags, and relationships — one handler function per operation.
+
+For the graph endpoint, combine `handlers.get_graph` with `serializers.graph_to_dict` to produce
+a fully JSON-serializable response:
+
+```python
+from taxomesh.contrib.api import handlers, serializers
+
+@app.get("/graph")
+def get_graph():
+    return serializers.graph_to_dict(handlers.get_graph(service))
+```
 
 ## Django example
 
@@ -85,7 +97,7 @@ service = TaxomeshService()  # initialise once (e.g. in AppConfig.ready)
 class CategoryListView(View):
     def get(self, request):
         return JsonResponse(
-            [c.model_dump() for c in handlers.list_categories(service)],
+            [c.model_dump(mode="json") for c in handlers.list_categories(service)],
             safe=False,
         )
 
@@ -93,7 +105,7 @@ class CategoryListView(View):
         body = schemas.CreateCategoryRequest.model_validate_json(request.body)
         try:
             result = handlers.create_category(service, body)
-            return JsonResponse(result.model_dump(), status=201)
+            return JsonResponse(result.model_dump(mode="json"), status=201)
         except TaxomeshError as e:
             status, detail = errors.to_tuple(e)
             return JsonResponse(detail, status=status)
@@ -103,7 +115,7 @@ class CategoryDetailView(View):
     def get(self, request, category_id: str):
         try:
             result = handlers.get_category(service, UUID(category_id))
-            return JsonResponse(result.model_dump())
+            return JsonResponse(result.model_dump(mode="json"))
         except TaxomeshError as e:
             status, detail = errors.to_tuple(e)
             return JsonResponse(detail, status=status)
@@ -112,7 +124,7 @@ class CategoryDetailView(View):
         body = schemas.UpdateCategoryRequest.model_validate_json(request.body)
         try:
             result = handlers.update_category(service, UUID(category_id), body)
-            return JsonResponse(result.model_dump())
+            return JsonResponse(result.model_dump(mode="json"))
         except TaxomeshError as e:
             status, detail = errors.to_tuple(e)
             return JsonResponse(detail, status=status)
@@ -124,6 +136,17 @@ class CategoryDetailView(View):
         except TaxomeshError as e:
             status, detail = errors.to_tuple(e)
             return JsonResponse(detail, status=status)
+```
+
+For the graph endpoint, use `serializers.graph_to_dict` — handlers return a `TaxomeshGraph` dataclass
+which is not directly JSON-serializable:
+
+```python
+from django.http import JsonResponse
+from taxomesh.contrib.api import handlers, serializers
+
+def graph_view(request):
+    return JsonResponse(serializers.graph_to_dict(handlers.get_graph(service)))
 ```
 
 ## Error mapping
