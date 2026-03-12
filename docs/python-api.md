@@ -1,6 +1,10 @@
 # Python API Reference
 
-Full reference for the `TaxomeshService` Python API — categories, items, tags, graph, and slug/external-ID lookups.
+Use this reference when you are integrating `taxomesh` directly in Python code.
+
+`TaxomeshService` is the main application-facing entry point. It lets you create and
+query taxonomy data while keeping your own business entities linked through `external_id`
+when needed.
 
 ## Categories
 

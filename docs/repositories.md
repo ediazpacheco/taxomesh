@@ -1,8 +1,15 @@
 # Storage Backends (Repositories)
 
+Choose a repository based on where you want taxonomy data to live. The service API stays
+the same either way.
+
+- `YAMLRepository`: simple local file storage, good for development and small deployments
+- `JsonRepository`: file-backed storage when JSON is a better operational fit
+- `DjangoRepository`: database-backed storage inside a Django project
+- custom repository: your own backend behind the same service layer
+
 Any class implementing `TaxomeshRepositoryBase` can be used as a storage backend.
-`TaxomeshRepositoryBase` is defined as a `typing.Protocol` — no inheritance is required
-(structural typing / protocol-based compatibility).
+`TaxomeshRepositoryBase` is defined as a `typing.Protocol`, so no inheritance is required.
 
 ## YAMLRepository
 

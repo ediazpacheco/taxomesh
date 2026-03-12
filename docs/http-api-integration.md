@@ -1,8 +1,12 @@
 # HTTP API Integration
 
-taxomesh ships **no HTTP server**. Instead, it provides three framework-agnostic modules
-in `taxomesh.contrib.api` that you wire into your existing application with ≤10 lines per
-endpoint — and the same code works in FastAPI, Django, Flask, or any other framework.
+Use this when you already have a web application and want to expose taxonomy operations
+without re-implementing request models, service delegation, and error mapping in every
+endpoint.
+
+`taxomesh` ships **no HTTP server**. Instead, it provides three framework-agnostic
+modules in `taxomesh.contrib.api` that you wire into your existing application. The same
+building blocks work in FastAPI, Django, Flask, or any other Python web framework.
 
 ```python
 from taxomesh.contrib.api import schemas   # Pydantic request models

@@ -1,24 +1,57 @@
 # taxomesh
 
-Flexible taxonomy management for generic items with:
+Reusable taxonomy engine for products, content, media, or any domain object you
+already have.
+
+`taxomesh` lets you attach categories, tags, and item relationships to existing
+entities without baking taxonomy logic into your core models or re-implementing
+the same validation, admin, and API workflows in every project.
+
+Use it when "we just need categories" stops being simple:
+
+- categories can have more than one parent
+- the same item must appear in multiple branches
+- ordering depends on the parent category
+- your real entities already live in another system or model
+- the same taxonomy rules must work from Python, CLI, Django admin, or your own API
+
+What you get:
 
 - multi-parent category DAGs
 - per-parent sort ordering
 - free-form item tags
+- typed item-to-item relations
 - pluggable storage backends (YAML, JSON, Django)
-- CLI, API, and django admin interfaces
-- pluggable with existing API
-
-`taxomesh` is **storage-agnostic by design**.
-
-The goal of this library is to avoid re-implementing common taxonomy workflows
-and provide a plug-and-play component for your application.
+- one service layer with optional CLI, HTTP, and Django integrations
 
 [![CI](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml/badge.svg)](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/taxomesh.svg)](https://pypi.org/project/taxomesh/)
 [![Python versions](https://img.shields.io/pypi/pyversions/taxomesh.svg)](https://pypi.org/project/taxomesh/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Pre-Alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)]()
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Status: Pre-Alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)
+
+## What Taxomesh Does
+
+At a high level, `taxomesh` is a reusable taxonomy layer.
+
+It stores and validates the structure around your entities:
+
+- categories and subcategories
+- item placement inside one or more categories
+- tags
+- typed relations between items
+- slugs, metadata, and external IDs for integration
+
+Your actual business objects can stay where they already are. In many projects,
+`taxomesh` is the missing layer between "our app already has products/articles/assets"
+and "we need a serious taxonomy on top of them."
+
+## Typical Use Cases
+
+- Ecommerce catalogs where a product appears in several navigation paths
+- Editorial or CMS systems with sections, topics, and reusable tagging
+- Media catalogs with genre, format, collection, and related-item links
+- Internal content or knowledge systems that need taxonomy without custom admin work
 
 ## Status
 
@@ -39,55 +72,92 @@ Optional Django integration:
 pip install "taxomesh[django]"
 ```
 
-## Quick start
+## Quick Start
+
+Example: your application already has a product, track, or article identified by
+an external ID, and you want to place it in a reusable taxonomy.
+
+With no explicit repository configured, `TaxomeshService()` auto-discovers
+`taxomesh.toml`; otherwise it falls back to the default YAML backend.
 
 ```python
 from taxomesh import TaxomeshService
 
-svc = TaxomeshService()  # auto-discovers taxomesh.toml, else defaults to YAMLRepository(data/taxomesh.yaml)
+svc = TaxomeshService()
 
 music = svc.create_category(name="Music")
 jazz = svc.create_category(name="Jazz")
-svc.add_category_parent(jazz.category_id, music.category_id, sort_index=1)
+formats = svc.create_category(name="Formats")
+vinyl = svc.create_category(name="Vinyl")
 
-kind_of_blue = svc.create_item(external_id=42)
-svc.place_item_in_category(kind_of_blue.item_id, jazz.category_id, sort_index=1)
+svc.add_category_parent(jazz.category_id, music.category_id, sort_index=10)
+svc.add_category_parent(vinyl.category_id, formats.category_id, sort_index=20)
 
-print(kind_of_blue.external_id)  # "42" (normalized to str)
-print([node.category.name for node in svc.get_graph().roots])
+album = svc.create_item(
+    external_id="catalog:42",
+    name="Kind of Blue",
+    slug="kind-of-blue",
+)
+
+svc.place_item_in_category(album.item_id, jazz.category_id, sort_index=1)
+svc.place_item_in_category(album.item_id, vinyl.category_id, sort_index=3)
+
+featured = svc.create_tag(name="featured")
+svc.assign_tag(featured.tag_id, album.item_id)
+
+print(album.external_id)  # "catalog:42"
+print([node.category.name for node in svc.get_graph().roots])  # ["Music", "Formats"]
 ```
 
-## Core concepts
+The item still belongs to your application. `taxomesh` manages the taxonomy layer
+around it: placement, ordering, tags, relations, slugs, and traversal.
 
-- **Item**: the core catalogued object, identified by an internal `item_id`. The optional `external_id` field links to an entity outside taxomesh (e.g. a primary key from another system).
-- **Category**: taxonomy node with optional `name`, `description`, `metadata`, `external_id`, `enabled`, and unique `slug`
-- **Tag**: free-form item label
-- **ItemRelationLink**: directed, typed relation between two items (e.g. `covers`, `version_of`, `performed_by`)
-- **CategoryParentLink**: relation from category to parent category with `sort_index`
-- **ItemParentLink**: relation from item to category with `sort_index`
-- **TaxomeshGraph**: read snapshot returned by `get_graph()` for tree-like traversal
-- **Repository protocol**: `TaxomeshRepositoryBase` (`typing.Protocol`) defines the storage contract
+## Why This Exists
+
+Taxonomy work is usually underestimated. A simple category table becomes more complex
+once you need:
+
+- multiple parents instead of a strict tree
+- branch-specific ordering
+- items linked to existing models by external ID
+- reusable validation and errors across app code, CLI, admin, and APIs
+- storage that fits both local development and production integration
+
+`taxomesh` packages those concerns into a single component so they do not have to be
+re-solved in each codebase.
+
+## Core Concepts
+
+- **Item**: an entity in your taxonomy, usually linked to a business object through `external_id`
+- **Category**: a taxonomy node with optional `name`, `description`, `metadata`, `external_id`, `enabled`, and unique `slug`
+- **Tag**: a free-form label assigned to items
+- **ItemRelationLink**: a directed, typed relation between two items such as `covers`, `version_of`, or `performed_by`
+- **CategoryParentLink**: the link from a category to one of its parents, including `sort_index`
+- **ItemParentLink**: the link from an item to a category, including `sort_index`
+- **TaxomeshGraph**: a read snapshot returned by `get_graph()` for traversal
+- **Repository**: the storage backend used by `TaxomeshService`
 
 ## Documentation
 
 | Topic | Description |
 |-------|-------------|
+| [What Taxomesh Solves](docs/what-is-taxomesh.md) | Product overview, common use cases, and why taxonomy gets complex |
 | [Python API](docs/python-api.md) | Categories, Items, Tags, Graph, slug and external-ID lookups |
-| [HTTP API integration](docs/http-api-integration.md) | Framework-agnostic handlers — FastAPI, Django, Flask examples and error mapping |
 | [Django integration](docs/django-integration.md) | Django ORM + admin setup, model bridging |
+| [HTTP API integration](docs/http-api-integration.md) | Reuse request models, handlers, and error mapping in your existing web app |
 | [Repositories](docs/repositories.md) | YAML, JSON, and Django storage backends; custom backends |
 | [Configuration](docs/configuration.md) | `taxomesh.toml` reference |
 | [CLI reference](docs/cli.md) | Command-line interface for categories, items, tags, and graph |
 
-## Architecture
+## Design
 
-`taxomesh` uses a ports-and-adapters (hexagonal) shape:
+`taxomesh` keeps a stable application-facing shape while letting storage and integration
+details vary:
 
-- **Domain**: pure models and DAG validation
-- **Application**: `TaxomeshService` orchestration
-- **Ports**: repository protocol (`TaxomeshRepositoryBase`)
-- **Adapters**: YAML/JSON/Django repositories + CLI
-- **Contrib**: optional extras — `contrib/django/` (Django admin + ORM), `contrib/api/` (framework-agnostic HTTP handlers)
+- **Service layer**: `TaxomeshService` is the main entry point for application code
+- **Domain rules**: taxonomy validation, including DAG constraints and typed errors
+- **Repositories**: YAML, JSON, Django, or a custom backend behind the same service API
+- **Optional integrations**: CLI, Django admin + ORM, and framework-agnostic HTTP helpers
 
 ## Development
 
@@ -105,4 +175,4 @@ This project follows a spec-first workflow. Please align implementation PRs with
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT.

@@ -1,6 +1,11 @@
 # Django Integration
 
-Use this when taxomesh should run inside a Django project database and admin.
+Use this when taxonomy data should live inside a Django project database or when you want
+taxonomy management available in Django admin.
+
+This integration is especially useful when your application models already exist and you
+want to connect them to `taxomesh` through `external_id` instead of embedding taxonomy
+logic directly in those models.
 
 ## Enable admin-backed Django models
 

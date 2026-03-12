@@ -2,6 +2,9 @@
 
 After installation, the `taxomesh` command is available.
 
+Use the CLI to inspect or modify taxonomy data without writing application code. It is
+useful for local exploration, smoke tests, demos, and operational edits.
+
 ## Common commands
 
 ```bash
