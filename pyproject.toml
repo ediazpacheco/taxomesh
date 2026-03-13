@@ -47,6 +47,13 @@ taxomesh = "taxomesh.adapters.cli.main:app"
 Homepage = "https://github.com/ediazpacheco/taxomesh"
 Repository = "https://github.com/ediazpacheco/taxomesh"
 Issues = "https://github.com/ediazpacheco/taxomesh/issues"
+"What Taxomesh Solves" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/what-is-taxomesh.md"
+"Python API" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md"
+"HTTP API integration" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md"
+"Django integration" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/django-integration.md"
+"Repositories" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/repositories.md"
+"Configuration" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/configuration.md"
+"CLI reference" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/cli.md"
 
 [build-system]
 requires = ["hatchling"]
