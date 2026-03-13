@@ -141,13 +141,13 @@ re-solved in each codebase.
 
 | Topic | Description |
 |-------|-------------|
-| [What Taxomesh Solves](docs/what-is-taxomesh.md) | Product overview, common use cases, and why taxonomy gets complex |
-| [Python API](docs/python-api.md) | Categories, Items, Tags, Graph, slug and external-ID lookups |
-| [Django integration](docs/django-integration.md) | Django ORM + admin setup, model bridging |
-| [HTTP API integration](docs/http-api-integration.md) | Reuse request models, handlers, and error mapping in your existing web app |
-| [Repositories](docs/repositories.md) | YAML, JSON, and Django storage backends; custom backends |
-| [Configuration](docs/configuration.md) | `taxomesh.toml` reference |
-| [CLI reference](docs/cli.md) | Command-line interface for categories, items, tags, and graph |
+| [What Taxomesh Solves](https://github.com/ediazpacheco/taxomesh/blob/main/docs/what-is-taxomesh.md) | Product overview, common use cases, and why taxonomy gets complex |
+| [Python API](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md) | Categories, Items, Tags, Graph, slug and external-ID lookups |
+| [Django integration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/django-integration.md) | Django ORM + admin setup, model bridging |
+| [HTTP API integration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md) | Reuse request models, handlers, and error mapping in your existing web app |
+| [Repositories](https://github.com/ediazpacheco/taxomesh/blob/main/docs/repositories.md) | YAML, JSON, and Django storage backends; custom backends |
+| [Configuration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/configuration.md) | `taxomesh.toml` reference |
+| [CLI reference](https://github.com/ediazpacheco/taxomesh/blob/main/docs/cli.md) | Command-line interface for categories, items, tags, and graph |
 
 ## Design
 
