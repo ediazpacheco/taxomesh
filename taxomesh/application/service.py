@@ -951,6 +951,167 @@ class TaxomeshService:
             )
         clear_all_caches()
 
+    def reorder_subcategories(self, parent_id: UUID, category_ids_in_order: list[UUID]) -> None:
+        """Reassign sort_index values for child categories within a parent category.
+
+        Args:
+            parent_id: The UUID of the parent category whose children are being reordered.
+            category_ids_in_order: All child category UUIDs in the desired final order.
+
+        Raises:
+            TaxomeshCategoryNotFoundError: If the parent category does not exist.
+            ValueError: If any UUID in category_ids_in_order is not a child of parent_id.
+        """
+        if self._repo.get_category(parent_id) is None:
+            raise TaxomeshCategoryNotFoundError(f"Category not found: {parent_id}")
+        existing = {
+            lnk.category_id: lnk
+            for lnk in self._repo.list_category_parent_links()
+            if lnk.parent_category_id == parent_id
+        }
+        for uid in category_ids_in_order:
+            if uid not in existing:
+                raise ValueError(f"Category {uid} is not a child of {parent_id}")
+        for sort_index, uid in enumerate(category_ids_in_order):
+            link = existing[uid]
+            link.sort_index = sort_index
+            self._repo.save_category_parent_link(link)
+        clear_all_caches()
+
+    def reparent_item(
+        self,
+        item_id: UUID,
+        old_category_id: UUID,
+        new_category_id: UUID,
+        insert_before_uuid: UUID | None,
+    ) -> ItemParentLink:
+        """Move an item from one category to another, inserting at the specified position.
+
+        Args:
+            item_id: The UUID of the item to move.
+            old_category_id: The UUID of the category to remove the item from.
+            new_category_id: The UUID of the category to add the item to.
+            insert_before_uuid: Insert the item before this sibling UUID; None appends at end.
+
+        Returns:
+            The new ItemParentLink in the destination category.
+
+        Raises:
+            TaxomeshItemNotFoundError: If the item does not exist.
+            TaxomeshCategoryNotFoundError: If old or new category does not exist.
+        """
+        self.get_item(item_id)
+        self.get_category(old_category_id)
+        self.get_category(new_category_id)
+
+        existing_siblings = sorted(
+            [
+                lnk
+                for lnk in self._repo.list_item_parent_links()
+                if lnk.category_id == new_category_id and lnk.item_id != item_id
+            ],
+            key=lambda lnk: lnk.sort_index,
+        )
+
+        if insert_before_uuid is None:
+            insert_pos = len(existing_siblings)
+        else:
+            insert_pos = next(
+                (i for i, lnk in enumerate(existing_siblings) if lnk.item_id == insert_before_uuid),
+                len(existing_siblings),
+            )
+
+        self._repo.delete_item_parent_link(item_id, old_category_id)
+
+        new_link = ItemParentLink(item_id=item_id, category_id=new_category_id, sort_index=insert_pos)
+        existing_siblings.insert(insert_pos, new_link)
+
+        for i, lnk in enumerate(existing_siblings):
+            lnk.sort_index = i
+            self._repo.save_item_parent_link(lnk)
+
+        clear_all_caches()
+        return new_link
+
+    def reparent_category(
+        self,
+        category_id: UUID,
+        old_parent_id: UUID,
+        new_parent_id: UUID,
+        insert_before_uuid: UUID | None,
+    ) -> CategoryParentLink:
+        """Move a category from one parent to another, inserting at the specified position.
+
+        Args:
+            category_id: The UUID of the category to move.
+            old_parent_id: The UUID of the current parent to remove the category from.
+            new_parent_id: The UUID of the target parent to add the category to.
+            insert_before_uuid: Insert before this sibling UUID; None appends at end.
+
+        Returns:
+            The new CategoryParentLink in the destination parent.
+
+        Raises:
+            TaxomeshCategoryNotFoundError: If any category does not exist.
+            TaxomeshCyclicDependencyError: If the move would create a DAG cycle.
+        """
+        self.get_category(category_id)
+        self.get_category(old_parent_id)
+        self.get_category(new_parent_id)
+
+        existing_siblings = sorted(
+            [
+                lnk
+                for lnk in self._repo.list_category_parent_links()
+                if lnk.parent_category_id == new_parent_id and lnk.category_id != category_id
+            ],
+            key=lambda lnk: lnk.sort_index,
+        )
+
+        if insert_before_uuid is None:
+            insert_pos = len(existing_siblings)
+        else:
+            insert_pos = next(
+                (i for i, lnk in enumerate(existing_siblings) if lnk.category_id == insert_before_uuid),
+                len(existing_siblings),
+            )
+
+        self._repo.delete_category_parent_link(category_id, old_parent_id)
+
+        # add_category_parent runs cycle detection internally
+        new_link = self.add_category_parent(category_id, new_parent_id, sort_index=insert_pos)
+        existing_siblings.insert(insert_pos, new_link)
+
+        for i, lnk in enumerate(existing_siblings):
+            lnk.sort_index = i
+            self._repo.save_category_parent_link(lnk)
+
+        clear_all_caches()
+        return new_link
+
+    def reorder_items_in_category(self, category_id: UUID, item_ids_in_order: list[UUID]) -> None:
+        """Reassign sort_index values for items within a category.
+
+        Args:
+            category_id: The UUID of the category whose items are being reordered.
+            item_ids_in_order: All item UUIDs in the desired final order.
+
+        Raises:
+            TaxomeshCategoryNotFoundError: If the category does not exist.
+            ValueError: If any UUID in item_ids_in_order is not placed in this category.
+        """
+        if self._repo.get_category(category_id) is None:
+            raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
+        existing = {lnk.item_id: lnk for lnk in self._repo.list_item_parent_links() if lnk.category_id == category_id}
+        for uid in item_ids_in_order:
+            if uid not in existing:
+                raise ValueError(f"Item {uid} is not placed in category {category_id}")
+        for sort_index, uid in enumerate(item_ids_in_order):
+            link = existing[uid]
+            link.sort_index = sort_index
+            self._repo.save_item_parent_link(link)
+        clear_all_caches()
+
     def remove_item_from_category(self, item_id: UUID, category_id: UUID) -> None:
         """Remove an item's placement from a category. No-op if the placement does not exist.
 

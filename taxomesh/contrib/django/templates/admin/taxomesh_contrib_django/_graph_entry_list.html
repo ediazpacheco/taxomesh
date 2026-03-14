@@ -1,0 +1,60 @@
+{% load taxomesh_tags %}
+{% for entry in entries %}
+  <div
+    class="taxomesh-entry"
+    data-kind="{{ entry.kind }}"
+    data-uuid="{{ entry.uuid }}"
+    data-parent-uuid="{{ entry.parent_uuid }}"
+    data-sort-index="{{ entry.sort_index }}"
+    data-depth="{{ entry.depth }}"
+    draggable="true"
+    style="--depth: {{ entry.depth }};"
+  >
+    {% if entry.enabled %}
+      <span style="color: #28a745;" title="enabled">&#10003;</span>
+    {% else %}
+      <span style="color: #dc3545;" title="disabled">&#10007;</span>
+    {% endif %}
+
+    {% if entry.has_descendants %}
+      <button class="taxomesh-toggle">[+]</button>
+    {% endif %}
+
+    {% if entry.kind == "category" %}
+      <span class="taxomesh-drag-handle" title="Drag to reorder">⠿</span>
+      <span class="taxomesh-label">
+        <a href="{% url 'admin:taxomesh_contrib_django_categorymodel_change' entry.uuid %}">{{ entry.name }}</a>
+      </span>
+    {% else %}
+      <span class="taxomesh-drag-handle" title="Drag to reorder">⠿</span>
+      {% with entry_rels=item_relations|get_item:entry.uuid %}
+        {% if entry_rels %}
+          <button class="taxomesh-toggle taxomesh-rel-toggle" data-item-uuid="{{ entry.uuid }}">[+]</button>
+        {% endif %}
+      {% endwith %}
+      <span class="taxomesh-label">
+        <a href="{% url 'admin:taxomesh_contrib_django_itemmodel_change' entry.uuid %}">{{ entry.name }}</a>
+      </span>
+    {% endif %}
+
+    {% if entry.linked_url %}
+      <a href="{{ entry.linked_url }}" title="View in admin" style="text-decoration:none; font-size:0.85em;">&#8599;</a>
+    {% endif %}
+  </div>
+
+  {% if entry.kind == "item" %}
+    {% with entry_rels=item_relations|get_item:entry.uuid %}
+      {% if entry_rels %}
+        <div
+          class="taxomesh-relations"
+          data-item-uuid="{{ entry.uuid }}"
+          style="--item-depth: {{ entry.depth }};"
+        >
+          {% for rel in entry_rels %}
+            <div>[{{ rel.relation_type }}] &#8594; {{ rel.target_name }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+  {% endif %}
+{% endfor %}
