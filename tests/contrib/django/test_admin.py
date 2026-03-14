@@ -712,3 +712,159 @@ class TestAutocompleteInlines:
         from taxomesh.contrib.django.admin import IncomingRelationInline  # noqa: PLC0415
 
         assert not getattr(IncomingRelationInline, "autocomplete_fields", [])
+
+
+# ---------------------------------------------------------------------------
+# TestJsonEditorWidget — unit tests for the JsonEditorWidget class (T001)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonEditorWidget:
+    """Unit tests for JsonEditorWidget in taxomesh/contrib/django/widgets.py."""
+
+    def test_render_contains_hidden_textarea(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        output = widget.render("metadata", {"key": "val"}, {"id": "id_metadata"})
+        assert 'name="metadata"' in output
+        assert "display:none" in output or "display: none" in output
+
+    def test_render_contains_ace_div(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        output = widget.render("metadata", {}, {"id": "id_metadata"})
+        assert 'id="ace__id_metadata"' in output
+
+    def test_render_contains_init_script(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        output = widget.render("metadata", {}, {"id": "id_metadata"})
+        assert "ace.edit(" in output
+        assert "ace.config.set" in output
+
+    def test_render_none_value_defaults_to_empty_object(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        output = widget.render("metadata", None, {"id": "id_metadata"})
+        assert "{}" in output
+
+    def test_render_dict_value_is_json_serialised(self) -> None:
+        import html  # noqa: PLC0415
+
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        output = widget.render("metadata", {"a": 1}, {"id": "id_metadata"})
+        # format_html HTML-escapes quotes; unescape to verify JSON serialisation
+        assert '"a"' in html.unescape(output)
+
+    def test_render_unique_ids_for_different_attrs(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        out1 = widget.render("metadata", {}, {"id": "id_metadata"})
+        out2 = widget.render("metadata", {}, {"id": "id_metadata2"})
+        assert "ace__id_metadata2" in out2
+        assert "ace__id_metadata2" not in out1
+
+    def test_media_declares_ace_cdn_url(self) -> None:
+        from taxomesh.contrib.django.widgets import ACE_EDITOR_CDN_URL, JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        assert ACE_EDITOR_CDN_URL in widget.media._js  # type: ignore[attr-defined]
+
+    def test_value_from_datadict_reads_textarea_name(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        result = widget.value_from_datadict({"metadata": '{"x":1}'}, {}, "metadata")
+        assert result == '{"x":1}'
+
+
+# ---------------------------------------------------------------------------
+# TestJsonEditorAdminIntegration — admin change pages render Ace editor (T004)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestJsonEditorAdminIntegration:
+    """Integration tests: Category and Item change pages must render the Ace editor."""
+
+    def test_category_change_page_renders_ace_editor(self, admin_client: object) -> None:
+        from django.urls import reverse  # noqa: PLC0415
+
+        from taxomesh.contrib.django.models import CategoryModel  # noqa: PLC0415
+
+        category = CategoryModel.objects.create(name="Test Category", metadata={"k": "v"})
+        url = reverse("admin:taxomesh_contrib_django_categorymodel_change", args=[category.pk])
+        response = admin_client.get(url)  # type: ignore[attr-defined]
+        assert response.status_code == 200
+        assert b"ace.edit(" in response.content
+        assert b"ace/mode/json" in response.content
+
+    def test_item_change_page_renders_ace_editor(self, admin_client: object) -> None:
+        from django.urls import reverse  # noqa: PLC0415
+
+        from taxomesh.contrib.django.models import ItemModel  # noqa: PLC0415
+
+        item = ItemModel.objects.create(name="Test Item", metadata={"genre": "rock"})
+        url = reverse("admin:taxomesh_contrib_django_itemmodel_change", args=[item.pk])
+        response = admin_client.get(url)  # type: ignore[attr-defined]
+        assert response.status_code == 200
+        assert b"ace.edit(" in response.content
+        assert b"ace/mode/json" in response.content
+
+    def test_category_metadata_textarea_is_hidden(self, admin_client: object) -> None:
+        from django.urls import reverse  # noqa: PLC0415
+
+        from taxomesh.contrib.django.models import CategoryModel  # noqa: PLC0415
+
+        category = CategoryModel.objects.create(name="Another Category")
+        url = reverse("admin:taxomesh_contrib_django_categorymodel_change", args=[category.pk])
+        response = admin_client.get(url)  # type: ignore[attr-defined]
+        assert response.status_code == 200
+        assert b"display:none" in response.content
+
+
+# ---------------------------------------------------------------------------
+# TestJsonEditorWidgetUS2 — failing tests for US2 validation guard (T005)
+# ---------------------------------------------------------------------------
+
+
+class TestJsonEditorWidgetUS2:
+    """Tests for US2: real-time validation worker + submit guard + blank guard."""
+
+    def test_render_uses_worker(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        output = widget.render("metadata", {}, {"id": "id_metadata"})
+        assert "useWorker" in output
+
+    def test_render_contains_submit_guard(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        output = widget.render("metadata", {}, {"id": "id_metadata"})
+        assert "getAnnotations" in output
+        assert "preventDefault" in output
+
+    def test_render_blank_guard_client_side(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
+
+        widget = JsonEditorWidget()
+        output = widget.render("metadata", {}, {"id": "id_metadata"})
+        # The change listener must normalise a blank value to "{}" client-side
+        assert 'textarea.value="{}"' in output or "textarea.value='{}'" in output
+
+    def test_clean_empty_string_returns_empty_dict(self) -> None:
+        from taxomesh.contrib.django.widgets import JsonEditorFormField  # noqa: PLC0415
+
+        # metadata is blank=True in the model, so required=False in the form
+        field = JsonEditorFormField(required=False)
+        result = field.clean("")
+        assert result == {}
