@@ -1,10 +1,12 @@
 """Django admin registrations for taxomesh ORM models."""
 
+import logging
 from typing import Any, Final, TypedDict
 from uuid import UUID
 
 from django import forms
 from django.contrib import admin
+from django.db import models
 from django.http import HttpRequest, HttpResponse
 from django.template.loader import render_to_string
 from django.urls import path
@@ -23,9 +25,12 @@ from taxomesh.contrib.django.models import (
     TagModel,
     TaxomeshDebugProxy,
 )
+from taxomesh.contrib.django.widgets import JsonEditorFormField, JsonEditorWidget
 from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
 from taxomesh.exceptions import TaxomeshCyclicDependencyError, TaxomeshError, TaxomeshValidationError
+
+logger = logging.getLogger(__name__)
 
 
 class GraphEntry(TypedDict):
@@ -89,14 +94,14 @@ def _resolve_linked_url(external_id: str, setting_name: str = TAXOMESH_LINKED_MO
 
         linked_model_label = getattr(django_settings, setting_name, None)
         if not linked_model_label:
+            logger.debug("_resolve_linked_url: setting %r is not configured", setting_name)
             return None
         linked_model = django_apps.get_model(linked_model_label)
         app_label = linked_model._meta.app_label
         model_name = linked_model._meta.model_name
-        if not linked_model.objects.filter(pk=external_id).exists():
-            return None
         return dj_reverse(f"admin:{app_label}_{model_name}_change", args=[external_id])
-    except Exception:
+    except Exception as exc:
+        logger.debug("_resolve_linked_url(%r, %r) failed: %s", external_id, setting_name, exc)
         return None
 
 
@@ -203,6 +208,33 @@ class TaxomeshAdminMixin:
         return ""
 
     linked_object_url.short_description = "↗"  # type: ignore[attr-defined]
+
+    def external_id_with_link(self, obj: Any) -> str:
+        """Render external_id with an inline ↗ link to the configured linked admin model.
+
+        Combines the raw ``external_id`` value with a navigation icon.  When
+        ``TAXOMESH_LINKED_MODEL`` is not configured or the URL cannot be resolved,
+        falls back to the plain ``external_id`` string.
+
+        Args:
+            obj: The model instance being rendered.
+
+        Returns:
+            Safe HTML string — the external_id text followed by a ↗ anchor, or
+            the plain external_id if no linked URL is available.
+        """
+        external_id = getattr(obj, "external_id", None) or ""
+        url = _resolve_linked_url(external_id)
+        if url and external_id:
+            return format_html(
+                '{} <a href="{}" title="View in admin" style="text-decoration:none">&#8599;</a>',
+                external_id,
+                url,
+            )
+        return external_id
+
+    external_id_with_link.short_description = "External id"  # type: ignore[attr-defined]
+    external_id_with_link.admin_order_field = "external_id"  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +602,8 @@ class ItemParentLinkInline(TaxomeshAdminMixin, admin.TabularInline):
     """Inline for managing ItemParentLink records on the Item admin page."""
 
     model = ItemParentLinkModel
+    verbose_name = "Parent category"
+    verbose_name_plural = "Parent categories"
     extra = 0
     autocomplete_fields = ["category"]
 
@@ -716,12 +750,13 @@ class HasLinkedObjectListFilter(admin.SimpleListFilter):
 class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
     """Admin view for Category records."""
 
-    list_display = ("category_id", "name", "slug", "enabled", "external_id", "linked_object_url")
+    list_display = ("category_id", "external_id_with_link", "name", "slug", "enabled")
     search_fields = ("name", "slug", "category_id")
     list_filter = ("enabled", HasSlugFilter, HasLinkedObjectListFilter)
-    fields = ("name", "slug", "description", "enabled", "external_id", "metadata")
+    fields = ("name", "slug", "description", "enabled", ("external_id", "linked_object_url"), "metadata")
     readonly_fields = ("linked_object_url",)
     inlines = [CategoryParentLinkInline]
+    formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
 
     def linked_object_url(self, obj: Any) -> str:
         """Return a link to a linked admin model for this category.
@@ -1145,6 +1180,8 @@ class OutgoingRelationInline(TaxomeshAdminMixin, admin.TabularInline):
     """Editable inline for outgoing item relations (source_item == current item)."""
 
     model = ItemRelationLinkModel
+    verbose_name = "Item related with"
+    verbose_name_plural = "Items related with"
     form = ItemRelationLinkForm
     fk_name = "source_item"
     extra = 0
@@ -1209,12 +1246,13 @@ class IncomingRelationInline(admin.TabularInline):
 class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
     """Admin view for Item records."""
 
-    list_display = ("name", "external_id", "slug", "enabled", "linked_object_url")
+    list_display = ("name", "external_id_with_link", "slug", "enabled")
     search_fields = ("name", "external_id", "slug", "item_id")
     list_filter = ("enabled", HasSlugFilter)
-    fields = ("name", "external_id", "slug", "enabled", "metadata", "linked_object_url")
+    fields = ("name", ("external_id", "linked_object_url"), "slug", "enabled", "metadata")
     readonly_fields = ("linked_object_url",)
     inlines = [ItemParentLinkInline, ItemTagLinkInline, OutgoingRelationInline, IncomingRelationInline]
+    formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
 
     def save_model(
         self,

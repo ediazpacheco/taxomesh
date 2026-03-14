@@ -248,6 +248,8 @@ Do NOT update README during implement — only after
 - N/A — pure read-only serialization; no writes (029-graph-serializer)
 - Python 3.11 + Django ≥ 4.2 (admin), Pydantic v2 (domain models), stdlib `json` (endpoint parsing), HTML5 Drag and Drop API (frontend — no external JS library) (030-graph-drag-drop)
 - Django ORM — `CategoryParentLinkModel.sort_index`, `ItemParentLinkModel.sort_index` (both columns already exist; no migration needed) (030-graph-drag-drop)
+- Python 3.11 (targets 3.11–3.13) + Django ≥ 4.2 (admin widget system), Ace Editor v1.43.3 (CDN — no Python dep) (031-metadata-json-editor)
+- N/A — no model changes, no migrations (031-metadata-json-editor)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
