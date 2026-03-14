@@ -244,6 +244,8 @@ Do NOT update README during implement — only after
 - N/A — no new models, no migrations (027-autocomplete-fk-widget)
 - Python 3.11 (targets 3.11–3.13) + None new — stdlib `typing` only; `Category` and `Item` already Pydantic (029-graph-serializer)
 - N/A — pure read-only serialization; no writes (029-graph-serializer)
+- Python 3.11 + Django ≥ 4.2 (admin), Pydantic v2 (domain models), stdlib `json` (endpoint parsing), HTML5 Drag and Drop API (frontend — no external JS library) (030-graph-drag-drop)
+- Django ORM — `CategoryParentLinkModel.sort_index`, `ItemParentLinkModel.sort_index` (both columns already exist; no migration needed) (030-graph-drag-drop)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
