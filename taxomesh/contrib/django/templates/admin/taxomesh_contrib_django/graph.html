@@ -26,9 +26,6 @@
     margin: 2px 0;
     padding-left: calc(var(--depth, 0) * 2.6rem);
   }
-  [data-collapsed-by] {
-    display: none;
-  }
   .taxomesh-entry[data-kind="item"] {
     color: #9aa6b4;
   }
@@ -64,6 +61,27 @@
     font-size: 0.9em;
     margin: 1px 0;
   }
+  .taxomesh-drag-handle {
+    cursor: grab;
+    color: #aaa;
+    padding: 0 2px;
+    user-select: none;
+    flex-shrink: 0;
+    font-size: 1.1em;
+    line-height: 1;
+  }
+  .taxomesh-drag-handle:active { cursor: grabbing; }
+  .taxomesh-dnd-indicator-above { box-shadow: 0 -2px 0 #0070f3; }
+  .taxomesh-dnd-indicator-below { box-shadow: 0 2px 0 #0070f3; }
+  .taxomesh-dnd-error {
+    color: #dc3545;
+    background: #fff3f3;
+    border: 1px solid #dc3545;
+    border-radius: 4px;
+    padding: 6px 12px;
+    margin-bottom: 8px;
+    display: none;
+  }
 </style>
 
 {% if error %}
@@ -71,66 +89,9 @@
 {% elif not has_entries %}
   <p>No categories found. Add one to get started.</p>
 {% else %}
+  <div id="taxomesh-dnd-error" class="taxomesh-dnd-error"></div>
   <div id="taxomesh-graph">
-    {% for entry in entries %}
-      <div
-        class="taxomesh-entry"
-        data-kind="{{ entry.kind }}"
-        data-idx="{{ forloop.counter0 }}"
-        data-depth="{{ entry.depth }}"
-        {% if entry.depth_limited %}data-depth-limited="1"{% endif %}
-        style="--depth: {{ entry.depth }};"
-      >
-        {% if entry.enabled %}
-          <span style="color: #28a745;" title="enabled">&#10003;</span>
-        {% else %}
-          <span style="color: #dc3545;" title="disabled">&#10007;</span>
-        {% endif %}
-
-        {% if entry.has_descendants %}
-          {% if entry.initially_collapsed %}
-            <button class="taxomesh-toggle" data-idx="{{ forloop.counter0 }}">[+]</button>
-          {% else %}
-            <button class="taxomesh-toggle" data-idx="{{ forloop.counter0 }}">[-]</button>
-          {% endif %}
-        {% endif %}
-
-        {% if entry.kind == "category" %}
-          <span class="taxomesh-label">
-            <a href="{% url 'admin:taxomesh_contrib_django_categorymodel_change' entry.uuid %}">{{ entry.name }}</a>
-          </span>
-        {% else %}
-          {% with entry_rels=item_relations|get_item:entry.uuid %}
-            {% if entry_rels %}
-              <button class="taxomesh-toggle taxomesh-rel-toggle" data-item-uuid="{{ entry.uuid }}">[+]</button>
-            {% endif %}
-          {% endwith %}
-          <span class="taxomesh-label">
-            <a href="{% url 'admin:taxomesh_contrib_django_itemmodel_change' entry.uuid %}">{{ entry.name }}</a>
-          </span>
-        {% endif %}
-
-        {% if entry.linked_url %}
-          <a href="{{ entry.linked_url }}" title="View in admin" style="text-decoration:none; font-size:0.85em;">&#8599;</a>
-        {% endif %}
-      </div>
-
-      {% if entry.kind == "item" %}
-        {% with entry_rels=item_relations|get_item:entry.uuid %}
-          {% if entry_rels %}
-            <div
-              class="taxomesh-relations"
-              data-item-uuid="{{ entry.uuid }}"
-              style="--item-depth: {{ entry.depth }};"
-            >
-              {% for rel in entry_rels %}
-                <div>[{{ rel.relation_type }}] &#8594; {{ rel.target_name }}</div>
-              {% endfor %}
-            </div>
-          {% endif %}
-        {% endwith %}
-      {% endif %}
-    {% endfor %}
+    {% include "admin/taxomesh_contrib_django/_graph_entry_list.html" with entries=entries item_relations=item_relations children_url=children_url %}
   </div>
 {% endif %}
 
@@ -138,53 +99,532 @@
 (function () {
   "use strict";
 
-  // ---- Expand/collapse logic ----
-  var entries = Array.from(document.querySelectorAll(".taxomesh-entry[data-idx]"));
-  var depths = entries.map(function (el) { return parseInt(el.dataset.depth, 10); });
+  var CHILDREN_URL = "{{ children_url }}";
+  var graph = document.getElementById("taxomesh-graph");
+  if (!graph) return;
 
-  // Initialise depth-limited entries as collapsed under their nearest ancestor.
-  entries.forEach(function (entry, i) {
-    if (!entry.dataset.depthLimited) return;
-    var entryDepth = depths[i];
-    for (var j = i - 1; j >= 0; j--) {
-      if (depths[j] < entryDepth) {
-        entry.dataset.collapsedBy = j;
+  // ---- Utility: insert HTML fragment after an entry ----
+  function insertAfterEntry(entry, html) {
+    var temp = document.createElement("div");
+    temp.innerHTML = html;
+    var parent = entry.parentNode;
+    var ref = entry.nextSibling;
+    // Also skip any adjacent taxomesh-relations rows belonging to this entry
+    while (ref && ref.classList && ref.classList.contains("taxomesh-relations")) {
+      ref = ref.nextSibling;
+    }
+    while (temp.firstChild) {
+      parent.insertBefore(temp.firstChild, ref);
+    }
+  }
+
+  // ---- Toggle visibility of children when already in DOM ----
+  function toggleChildren(entry, toggle) {
+    var entryDepth = parseInt(entry.dataset.depth, 10);
+    var isExpanding = toggle.textContent.trim() === "[+]";
+    toggle.textContent = isExpanding ? "[-]" : "[+]";
+
+    var next = entry.nextElementSibling;
+    while (next) {
+      if (next.classList.contains("taxomesh-entry")) {
+        var nextDepth = parseInt(next.dataset.depth, 10);
+        if (nextDepth <= entryDepth) break;
+        if (isExpanding) {
+          // Show only direct children; deeper nodes stay hidden
+          if (nextDepth === entryDepth + 1) {
+            next.style.display = "";
+          }
+        } else {
+          // Collapse: hide all descendants
+          next.style.display = "none";
+        }
+      } else if (next.classList.contains("taxomesh-relations")) {
+        if (!isExpanding) {
+          next.style.display = "none";
+        }
+        // on expand, leave relation rows as-is (hidden by default)
+      } else {
         break;
+      }
+      next = next.nextElementSibling;
+    }
+  }
+
+  // ---- Per-item relations toggle ----
+  function initRelToggles() {
+    graph.querySelectorAll(".taxomesh-rel-toggle").forEach(function (btn) {
+      if (btn.dataset.relBound) return;
+      btn.dataset.relBound = "1";
+      btn.addEventListener("click", function () {
+        var itemUuid = btn.dataset.itemUuid;
+        var relBlock = graph.querySelector(".taxomesh-relations[data-item-uuid=\"" + itemUuid + "\"]");
+        if (!relBlock) return;
+        var isHidden = relBlock.style.display === "none" || relBlock.style.display === "";
+        relBlock.style.display = isHidden ? "block" : "none";
+        btn.textContent = isHidden ? "[-]" : "[+]";
+      });
+    });
+  }
+
+  // ---- Expand/collapse: delegated on graph container ----
+  graph.addEventListener("click", function (e) {
+    var toggle = e.target.closest(".taxomesh-toggle:not(.taxomesh-rel-toggle)");
+    if (!toggle) return;
+    var entry = toggle.closest(".taxomesh-entry");
+    if (!entry) return;
+
+    var uuid = entry.dataset.uuid;
+    var depth = parseInt(entry.dataset.depth, 10);
+
+    if (toggle.dataset.loaded === "true") {
+      toggleChildren(entry, toggle);
+    } else {
+      var prevText = toggle.textContent;
+      toggle.textContent = "\u2026";
+      toggle.disabled = true;
+      fetch(CHILDREN_URL + "?parent_uuid=" + encodeURIComponent(uuid) + "&depth=" + (depth + 1))
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+          insertAfterEntry(entry, html);
+          toggle.dataset.loaded = "true";
+          toggle.textContent = "[-]";
+          toggle.disabled = false;
+          initRelToggles();
+          initHandles();
+        })
+        .catch(function () {
+          toggle.textContent = prevText;
+          toggle.disabled = false;
+        });
+    }
+  });
+
+  initRelToggles();
+}());
+
+// ---- Item drag-and-drop reorder + reparent (US1 + US3) ----
+(function () {
+  "use strict";
+
+  var REORDER_URL = "{% url 'admin:taxomesh_contrib_django_graph_reorder' %}";
+  var REPARENT_URL = "{% url 'admin:taxomesh_contrib_django_graph_reparent' %}";
+  var graph = document.getElementById("taxomesh-graph");
+  if (!graph) return;
+
+  var inFlight = false;
+  var dragged = null;
+  var savedOrder = null;
+  var savedNextSiblingOfDragged = null;
+  var overEntry = null;
+  var overPos = null;
+  var errorEl = document.getElementById("taxomesh-dnd-error");
+
+  function getCsrf() {
+    var parts = ("; " + document.cookie).split("; csrftoken=");
+    return parts.length === 2 ? parts.pop().split(";")[0] : "";
+  }
+
+  function getSiblings(parentUuid, kind) {
+    return Array.from(graph.querySelectorAll(
+      ".taxomesh-entry[data-kind='" + kind + "'][data-parent-uuid='" + CSS.escape(parentUuid) + "']"
+    ));
+  }
+
+  function setHandlesEnabled(enabled) {
+    graph.querySelectorAll(".taxomesh-drag-handle").forEach(function (h) {
+      h.style.opacity = enabled ? "" : "0.3";
+      h.style.pointerEvents = enabled ? "" : "none";
+    });
+  }
+
+  function clearIndicator() {
+    if (overEntry) {
+      overEntry.classList.remove("taxomesh-dnd-indicator-above", "taxomesh-dnd-indicator-below");
+      overEntry = null;
+      overPos = null;
+    }
+  }
+
+  function revertDOM(saved) {
+    if (!saved || saved.length < 2) return;
+    for (var k = 0; k < saved.length - 1; k++) {
+      saved[k].parentNode.insertBefore(saved[k + 1], saved[k].nextSibling);
+    }
+  }
+
+  function revertReparent(el, origParentUuid, origNextSibling) {
+    el.dataset.parentUuid = origParentUuid;
+    if (origNextSibling) {
+      el.parentNode.insertBefore(el, origNextSibling);
+    } else {
+      el.parentNode.appendChild(el);
+    }
+  }
+
+  function doReparent(nodeUuid, oldParentUuid, newParentUuid, insertBeforeUuid, el, origNextSibling) {
+    inFlight = true;
+    setHandlesEnabled(false);
+    fetch(REPARENT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrf() },
+      body: JSON.stringify({
+        kind: "item",
+        node_uuid: nodeUuid,
+        old_parent_uuid: oldParentUuid,
+        new_parent_uuid: newParentUuid,
+        insert_before_uuid: insertBeforeUuid,
+      }),
+    }).then(function (resp) {
+      return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+    }).then(function (result) {
+      if (!result.ok) {
+        revertReparent(el, oldParentUuid, origNextSibling);
+        errorEl.textContent = "Reparent failed: " + (result.data.error || "Server error");
+        errorEl.style.display = "";
+      }
+    }).catch(function (err) {
+      revertReparent(el, oldParentUuid, origNextSibling);
+      errorEl.textContent = "Reparent failed: " + (err.message || "Network error");
+      errorEl.style.display = "";
+    }).finally(function () {
+      inFlight = false;
+      setHandlesEnabled(true);
+    });
+  }
+
+  // ---- Handle visibility: hide drag handles for singleton entries ----
+  function initHandles() {
+    var scope = {};
+    graph.querySelectorAll(".taxomesh-entry").forEach(function (entry) {
+      var key = (entry.dataset.parentUuid || "") + ":" + (entry.dataset.kind || "");
+      if (!scope[key]) scope[key] = [];
+      scope[key].push(entry);
+    });
+    // Reset all handles to visible
+    graph.querySelectorAll(".taxomesh-drag-handle").forEach(function (h) {
+      h.style.display = "";
+    });
+    // Hide for singletons
+    Object.keys(scope).forEach(function (key) {
+      if (scope[key].length < 2) {
+        scope[key].forEach(function (entry) {
+          var h = entry.querySelector(".taxomesh-drag-handle");
+          if (h) h.style.display = "none";
+        });
+      }
+    });
+  }
+
+  initHandles();
+
+  // ---- Mouse guard: only allow drag from handle ----
+  var mouseOnHandle = false;
+  graph.addEventListener("mousedown", function (e) {
+    if (e.target.closest(".taxomesh-drag-handle")) { mouseOnHandle = true; }
+  });
+  document.addEventListener("mouseup", function () { mouseOnHandle = false; }, true);
+
+  // ---- Drag-and-drop: event delegation on graph container ----
+
+  graph.addEventListener("dragstart", function (e) {
+    var entry = e.target.closest(".taxomesh-entry");
+    if (!entry) { e.preventDefault(); return; }
+    if (inFlight || !mouseOnHandle) { e.preventDefault(); return; }
+    var siblings = getSiblings(entry.dataset.parentUuid, entry.dataset.kind);
+    if (siblings.length < 2) { e.preventDefault(); return; }
+
+    errorEl.style.display = "none";
+    dragged = entry;
+    savedOrder = getSiblings(entry.dataset.parentUuid, entry.dataset.kind).slice();
+    savedNextSiblingOfDragged = entry.nextSibling;
+
+    if (entry.dataset.kind === "category") {
+      catDraggedSubtree = getCategorySubtree(entry);
+      var lastInSub = catDraggedSubtree[catDraggedSubtree.length - 1];
+      savedCatOrigNextSibling = lastInSub.nextSibling;
+    }
+
+    entry.style.opacity = "0.4";
+    e.dataTransfer.effectAllowed = "move";
+  });
+
+  graph.addEventListener("dragend", function (e) {
+    var entry = e.target.closest(".taxomesh-entry");
+    if (!entry) return;
+    entry.style.opacity = "";
+    clearIndicator();
+    dragged = null;
+    catDraggedSubtree = null;
+    savedCatOrigNextSibling = null;
+  });
+
+  graph.addEventListener("dragover", function (e) {
+    var entry = e.target.closest(".taxomesh-entry");
+    if (!entry || !dragged || entry === dragged) return;
+
+    var draggedKind = dragged.dataset.kind;
+    var entryKind = entry.dataset.kind;
+
+    // Same-parent same-kind reorder
+    if (entry.dataset.parentUuid === dragged.dataset.parentUuid && entryKind === draggedKind) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      var rect = entry.getBoundingClientRect();
+      var pos = e.clientY < rect.top + rect.height / 2 ? "above" : "below";
+      if (overEntry !== entry || overPos !== pos) {
+        clearIndicator();
+        overEntry = entry;
+        overPos = pos;
+        entry.classList.add("taxomesh-dnd-indicator-" + pos);
+      }
+      return;
+    }
+
+    // Cross-parent item reparent: item dragged over a category
+    if (draggedKind === "item" && entryKind === "category" && !inFlight) {
+      if (entry.dataset.uuid === dragged.dataset.parentUuid) return;
+      e.preventDefault();
+      if (overEntry !== entry || overPos !== "below") {
+        clearIndicator();
+        overEntry = entry;
+        overPos = "below";
+        entry.classList.add("taxomesh-dnd-indicator-below");
+      }
+      return;
+    }
+
+    // Cross-parent item reparent: item dragged over item in different category
+    if (draggedKind === "item" && entryKind === "item" && !inFlight) {
+      if (entry.dataset.parentUuid === dragged.dataset.parentUuid) return;
+      e.preventDefault();
+      var rect2 = entry.getBoundingClientRect();
+      var pos2 = e.clientY < rect2.top + rect2.height / 2 ? "above" : "below";
+      if (overEntry !== entry || overPos !== pos2) {
+        clearIndicator();
+        overEntry = entry;
+        overPos = pos2;
+        entry.classList.add("taxomesh-dnd-indicator-" + pos2);
+      }
+      return;
+    }
+
+    // Cross-parent category reparent
+    if (draggedKind === "category" && entryKind === "category" && !inFlight) {
+      if (entry.dataset.parentUuid === dragged.dataset.parentUuid) return;
+      if (catDraggedSubtree && catDraggedSubtree.indexOf(entry) !== -1) return;
+      e.preventDefault();
+      var rect3 = entry.getBoundingClientRect();
+      var pos3 = e.clientY < rect3.top + rect3.height / 2 ? "above" : "below";
+      if (overEntry !== entry || overPos !== pos3) {
+        clearIndicator();
+        overEntry = entry;
+        overPos = pos3;
+        entry.classList.add("taxomesh-dnd-indicator-" + pos3);
       }
     }
   });
 
-  document.querySelectorAll(".taxomesh-toggle:not(.taxomesh-rel-toggle)").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var parentIdx = parseInt(btn.dataset.idx, 10);
-      var parentDepth = depths[parentIdx];
-      var collapsed = btn.textContent.trim() === "[-]";
-      btn.textContent = collapsed ? "[+]" : "[-]";
+  graph.addEventListener("dragleave", function (e) {
+    var entry = e.target.closest(".taxomesh-entry");
+    if (entry && overEntry === entry) clearIndicator();
+  });
 
-      for (var i = parentIdx + 1; i < entries.length; i++) {
-        if (depths[i] <= parentDepth) break;
-        if (collapsed) {
-          entries[i].dataset.collapsedBy = parentIdx;
-        } else {
-          if (String(entries[i].dataset.collapsedBy) === String(parentIdx)) {
-            delete entries[i].dataset.collapsedBy;
-          }
+  graph.addEventListener("drop", function (e) {
+    var entry = e.target.closest(".taxomesh-entry");
+    if (!entry || !dragged || entry === dragged) return;
+
+    var draggedKind = dragged.dataset.kind;
+    var entryKind = entry.dataset.kind;
+
+    // Same-parent same-kind reorder
+    if (entry.dataset.parentUuid === dragged.dataset.parentUuid && entryKind === draggedKind) {
+      e.preventDefault();
+      clearIndicator();
+
+      var parentUuid = dragged.dataset.parentUuid;
+      var kind = dragged.dataset.kind;
+      var saved = savedOrder.slice();
+      var rect = entry.getBoundingClientRect();
+
+      if (e.clientY < rect.top + rect.height / 2) {
+        entry.parentNode.insertBefore(dragged, entry);
+      } else {
+        entry.parentNode.insertBefore(dragged, entry.nextSibling);
+      }
+
+      var newUuids = getSiblings(parentUuid, kind).map(function (s) { return s.dataset.uuid; });
+      var origUuids = saved.map(function (s) { return s.dataset.uuid; });
+      if (JSON.stringify(newUuids) === JSON.stringify(origUuids)) return;
+
+      inFlight = true;
+      setHandlesEnabled(false);
+
+      fetch(REORDER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrf() },
+        body: JSON.stringify({ kind: kind, parent_uuid: parentUuid, ordered_uuids: newUuids }),
+      }).then(function (resp) {
+        return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+      }).then(function (result) {
+        if (!result.ok) {
+          revertDOM(saved);
+          errorEl.textContent = "Reorder failed: " + (result.data.error || "Server error");
+          errorEl.style.display = "";
         }
+      }).catch(function (err) {
+        revertDOM(saved);
+        errorEl.textContent = "Reorder failed: " + (err.message || "Network error");
+        errorEl.style.display = "";
+      }).finally(function () {
+        inFlight = false;
+        setHandlesEnabled(true);
+      });
+      return;
+    }
+
+    // Cross-parent item → category reparent
+    if (draggedKind === "item" && entryKind === "category" && !inFlight) {
+      if (entry.dataset.uuid === dragged.dataset.parentUuid) return;
+      e.preventDefault();
+      clearIndicator();
+      var nodeUuid = dragged.dataset.uuid;
+      var oldParentUuid = dragged.dataset.parentUuid;
+      var newParentUuid = entry.dataset.uuid;
+      var origNext = savedNextSiblingOfDragged;
+      entry.parentNode.insertBefore(dragged, entry.nextSibling);
+      dragged.dataset.parentUuid = newParentUuid;
+      doReparent(nodeUuid, oldParentUuid, newParentUuid, null, dragged, origNext);
+      return;
+    }
+
+    // Cross-parent item → item reparent
+    if (draggedKind === "item" && entryKind === "item" && !inFlight) {
+      if (entry.dataset.parentUuid === dragged.dataset.parentUuid) return;
+      e.preventDefault();
+      clearIndicator();
+      var nodeUuid2 = dragged.dataset.uuid;
+      var oldParentUuid2 = dragged.dataset.parentUuid;
+      var newParentUuid2 = entry.dataset.parentUuid;
+      var origNext2 = savedNextSiblingOfDragged;
+      var rect4 = entry.getBoundingClientRect();
+      var insertBeforeUuid;
+      var newSiblings = getSiblings(newParentUuid2, "item");
+      var entryIdx = newSiblings.findIndex(function (s) { return s === entry; });
+      if (e.clientY < rect4.top + rect4.height / 2) {
+        insertBeforeUuid = entry.dataset.uuid;
+        entry.parentNode.insertBefore(dragged, entry);
+      } else {
+        insertBeforeUuid = entryIdx + 1 < newSiblings.length ? newSiblings[entryIdx + 1].dataset.uuid : null;
+        entry.parentNode.insertBefore(dragged, entry.nextSibling);
+      }
+      dragged.dataset.parentUuid = newParentUuid2;
+      doReparent(nodeUuid2, oldParentUuid2, newParentUuid2, insertBeforeUuid, dragged, origNext2);
+      return;
+    }
+
+    // Cross-parent category reparent
+    if (draggedKind === "category" && entryKind === "category" && !inFlight) {
+      if (entry.dataset.parentUuid === dragged.dataset.parentUuid) return;
+      if (catDraggedSubtree && catDraggedSubtree.indexOf(entry) !== -1) return;
+      e.preventDefault();
+      clearIndicator();
+
+      var nodeUuid3 = dragged.dataset.uuid;
+      var oldParentUuid3 = dragged.dataset.parentUuid;
+      var newParentUuid3 = entry.dataset.parentUuid;
+      var origNextNode = savedCatOrigNextSibling;
+      var rect5 = entry.getBoundingClientRect();
+      var insertBeforeUuid3;
+
+      var newSiblings3 = getSiblings(newParentUuid3, "category").filter(function (s) {
+        return !catDraggedSubtree || catDraggedSubtree.indexOf(s) === -1;
+      });
+      var entryIdx3 = newSiblings3.indexOf(entry);
+
+      if (e.clientY < rect5.top + rect5.height / 2) {
+        insertBeforeUuid3 = entry.dataset.uuid;
+        insertSubtreeBefore(catDraggedSubtree, entry);
+      } else {
+        insertBeforeUuid3 = (entryIdx3 + 1 < newSiblings3.length) ? newSiblings3[entryIdx3 + 1].dataset.uuid : null;
+        insertSubtreeBefore(catDraggedSubtree, getFirstNodeAfterSubtree(entry));
+      }
+
+      dragged.dataset.parentUuid = newParentUuid3;
+      doReparentCategory(nodeUuid3, oldParentUuid3, newParentUuid3, insertBeforeUuid3, catDraggedSubtree, origNextNode);
+    }
+  });
+
+  // ---- Cross-parent category reparent helpers ----
+  var catDraggedSubtree = null;
+  var savedCatOrigNextSibling = null;
+
+  function getCategorySubtree(catEntry) {
+    var allEntries = Array.from(graph.querySelectorAll(".taxomesh-entry"));
+    var startIdx = allEntries.indexOf(catEntry);
+    var catDepth = parseInt(catEntry.dataset.depth, 10);
+    var result = [catEntry];
+    for (var i = startIdx + 1; i < allEntries.length; i++) {
+      if (parseInt(allEntries[i].dataset.depth, 10) <= catDepth) break;
+      result.push(allEntries[i]);
+    }
+    return result;
+  }
+
+  function insertSubtreeBefore(subtree, refNode) {
+    if (!subtree) return;
+    var parent = refNode ? refNode.parentNode : graph;
+    subtree.forEach(function (el) {
+      if (refNode) {
+        parent.insertBefore(el, refNode);
+      } else {
+        parent.appendChild(el);
       }
     });
-  });
+  }
 
-  // ---- Per-item relations toggle ----
-  document.querySelectorAll(".taxomesh-rel-toggle").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var itemUuid = btn.dataset.itemUuid;
-      var relBlock = document.querySelector(".taxomesh-relations[data-item-uuid=\"" + itemUuid + "\"]");
-      if (!relBlock) return;
-      var isHidden = relBlock.style.display === "none" || relBlock.style.display === "";
-      relBlock.style.display = isHidden ? "block" : "none";
-      btn.textContent = isHidden ? "[-]" : "[+]";
+  function getFirstNodeAfterSubtree(entry) {
+    var allEntries = Array.from(graph.querySelectorAll(".taxomesh-entry"));
+    var idx = allEntries.indexOf(entry);
+    var depth = parseInt(entry.dataset.depth, 10);
+    for (var i = idx + 1; i < allEntries.length; i++) {
+      if (parseInt(allEntries[i].dataset.depth, 10) <= depth) return allEntries[i];
+    }
+    return null;
+  }
+
+  function doReparentCategory(nodeUuid, oldParentUuid, newParentUuid, insertBeforeUuid, subtree, origNextNode) {
+    inFlight = true;
+    setHandlesEnabled(false);
+    fetch(REPARENT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrf() },
+      body: JSON.stringify({
+        kind: "category",
+        node_uuid: nodeUuid,
+        old_parent_uuid: oldParentUuid,
+        new_parent_uuid: newParentUuid,
+        insert_before_uuid: insertBeforeUuid,
+      }),
+    }).then(function (resp) {
+      return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+    }).then(function (result) {
+      if (!result.ok) {
+        insertSubtreeBefore(subtree, origNextNode);
+        if (subtree && subtree[0]) subtree[0].dataset.parentUuid = oldParentUuid;
+        var msg = result.data.error || "Server error";
+        errorEl.textContent = (msg.indexOf("ycle") !== -1 ? "Cycle detected: " : "Move failed: ") + msg;
+        errorEl.style.display = "";
+      }
+    }).catch(function (err) {
+      insertSubtreeBefore(subtree, origNextNode);
+      if (subtree && subtree[0]) subtree[0].dataset.parentUuid = oldParentUuid;
+      errorEl.textContent = "Move failed: " + (err.message || "Network error");
+      errorEl.style.display = "";
+    }).finally(function () {
+      inFlight = false;
+      setHandlesEnabled(true);
     });
-  });
+  }
 }());
 </script>
 {% endblock %}

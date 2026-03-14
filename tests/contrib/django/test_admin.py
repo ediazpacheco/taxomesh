@@ -130,7 +130,7 @@ class TestGraphAdminView:
 
         url = reverse("admin:taxomesh_contrib_django_graph")
         with patch(
-            "taxomesh.application.service.TaxomeshService.get_graph",
+            "taxomesh.adapters.repositories.django_repository.DjangoRepository.list_category_parent_links",
             side_effect=TaxomeshError("db error"),
         ):
             response = admin_client.get(url)  # type: ignore[attr-defined]
@@ -155,37 +155,55 @@ class TestGraphAdminView:
 
 
 class TestFlattenGraph:
-    """Unit tests for the _flatten_graph helper (SC-003)."""
+    """Unit tests for the _build_child_entries helper (replaces _flatten_graph)."""
 
     def test_entry_schema_has_no_legacy_keys(self) -> None:
-        """_flatten_graph entries must not contain slug or indent_em keys.
+        """_build_child_entries entries must not contain slug or indent_em keys.
 
         Note: external_id is now an intentional GraphEntry field (024-graph-enhancements).
         """
-        from taxomesh.contrib.django.admin import _flatten_graph  # noqa: PLC0415
-        from taxomesh.domain.graph import CategoryNode, TaxomeshGraph  # noqa: PLC0415
+        from uuid import uuid4  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import _build_child_entries  # noqa: PLC0415
         from taxomesh.domain.models import Category, Item  # noqa: PLC0415
 
+        parent_uuid = uuid4()
         cat = Category(name="TestCat", slug="test-cat", external_id="ext-1")
         item = Item(name="TestItem", slug="test-item", external_id="EXT-1")
-        node = CategoryNode(category=cat, items=[item], children=[])
-        graph = TaxomeshGraph(roots=[node])
-        entries = _flatten_graph(graph)
+        entries, _ = _build_child_entries(
+            child_cats=[cat],
+            items=[item],
+            depth=1,
+            parent_uuid_str=str(parent_uuid),
+            cats_with_children=set(),
+            cats_with_items=set(),
+            cat_sort_map={},
+            item_sort_map={},
+        )
         forbidden_keys = {"slug", "indent_em"}
         for entry in entries:
             assert not forbidden_keys & entry.keys(), f"Unexpected keys in entry: {entry.keys()}"
 
     def test_entry_name_equals_str_of_domain_object(self) -> None:
-        """_flatten_graph entry 'name' must equal str(category) or str(item)."""
-        from taxomesh.contrib.django.admin import _flatten_graph  # noqa: PLC0415
-        from taxomesh.domain.graph import CategoryNode, TaxomeshGraph  # noqa: PLC0415
+        """_build_child_entries entry 'name' must equal str(category) or str(item)."""
+        from uuid import uuid4  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import _build_child_entries  # noqa: PLC0415
         from taxomesh.domain.models import Category, Item  # noqa: PLC0415
 
+        parent_uuid = uuid4()
         cat = Category(name="Rock", slug="rock", external_id="genre-rock")
         item = Item(name="Song", external_id="EXT-2")
-        node = CategoryNode(category=cat, items=[item], children=[])
-        graph = TaxomeshGraph(roots=[node])
-        entries = _flatten_graph(graph)
+        entries, _ = _build_child_entries(
+            child_cats=[cat],
+            items=[item],
+            depth=1,
+            parent_uuid_str=str(parent_uuid),
+            cats_with_children=set(),
+            cats_with_items=set(),
+            cat_sort_map={},
+            item_sort_map={},
+        )
         cat_entry = next(e for e in entries if e["kind"] == "category")
         item_entry = next(e for e in entries if e["kind"] == "item")
         assert cat_entry["name"] == str(cat)
@@ -637,3 +655,60 @@ class TestAdminFilters:
         )
 
         assert TaxomeshCategoryListFilter in ItemCategoryAssignmentMixin.list_filter
+
+
+# ---------------------------------------------------------------------------
+# TestAutocompleteInlines — FK inlines use autocomplete_fields
+# ---------------------------------------------------------------------------
+
+
+class TestAutocompleteInlines:
+    """Inline FK fields must use autocomplete_fields for scalability."""
+
+    def test_category_parent_link_inline_uses_autocomplete(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryParentLinkInline  # noqa: PLC0415
+
+        assert CategoryParentLinkInline.autocomplete_fields == ["parent_category"]
+
+    def test_item_parent_link_inline_uses_autocomplete(self) -> None:
+        from taxomesh.contrib.django.admin import ItemParentLinkInline  # noqa: PLC0415
+
+        assert ItemParentLinkInline.autocomplete_fields == ["category"]
+
+    def test_item_tag_link_inline_uses_autocomplete(self) -> None:
+        from taxomesh.contrib.django.admin import ItemTagLinkInline  # noqa: PLC0415
+
+        assert ItemTagLinkInline.autocomplete_fields == ["tag"]
+
+    def test_outgoing_relation_inline_uses_autocomplete(self) -> None:
+        from taxomesh.contrib.django.admin import OutgoingRelationInline  # noqa: PLC0415
+
+        assert OutgoingRelationInline.autocomplete_fields == ["target_item"]
+
+    @pytest.mark.django_db
+    def test_root_exclusion_still_applied(self) -> None:
+        """formfield_for_foreignkey on CategoryParentLinkInline still excludes ROOT after autocomplete."""
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryParentLinkInline  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryModel, CategoryParentLinkModel  # noqa: PLC0415
+        from taxomesh.domain.constants import ROOT_CATEGORY_NAME  # noqa: PLC0415
+
+        CategoryModel.objects.create(name=ROOT_CATEGORY_NAME)
+        CategoryModel.objects.create(name="Visible")
+
+        site = AdminSite()
+        inline = CategoryParentLinkInline(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+        db_field = CategoryParentLinkModel._meta.get_field("parent_category")
+        form_field = inline.formfield_for_foreignkey(db_field, request)  # type: ignore[arg-type]
+
+        names = list(form_field.queryset.values_list("name", flat=True))  # type: ignore[union-attr]
+        assert ROOT_CATEGORY_NAME not in names
+        assert "Visible" in names
+
+    def test_incoming_relation_inline_unchanged(self) -> None:
+        from taxomesh.contrib.django.admin import IncomingRelationInline  # noqa: PLC0415
+
+        assert not getattr(IncomingRelationInline, "autocomplete_fields", [])

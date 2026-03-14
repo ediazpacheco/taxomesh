@@ -6,6 +6,7 @@ from uuid import UUID
 from django import forms
 from django.contrib import admin
 from django.http import HttpRequest, HttpResponse
+from django.template.loader import render_to_string
 from django.urls import path
 from django.utils.html import format_html
 
@@ -24,7 +25,6 @@ from taxomesh.contrib.django.models import (
 )
 from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
-from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
 from taxomesh.exceptions import TaxomeshCyclicDependencyError, TaxomeshError, TaxomeshValidationError
 
 
@@ -41,6 +41,8 @@ class GraphEntry(TypedDict):
     has_descendants: bool
     depth_limited: bool
     initially_collapsed: bool
+    sort_index: int
+    parent_uuid: str
 
 
 class RelationEntry(TypedDict):
@@ -54,6 +56,14 @@ class RelationEntry(TypedDict):
 TAXOMESH_LINKED_MODEL_SETTING: Final[str] = "TAXOMESH_LINKED_MODEL"
 TAXOMESH_CATEGORY_LINKED_MODEL_SETTING: Final[str] = "TAXOMESH_CATEGORY_LINKED_MODEL"
 ADMIN_GRAPH_DEFAULT_MAX_DEPTH: Final[int] = 3
+GRAPH_REORDER_URL_NAME: Final[str] = "taxomesh_contrib_django_graph_reorder"
+GRAPH_REPARENT_URL_NAME: Final[str] = "taxomesh_contrib_django_graph_reparent"
+GRAPH_CHILDREN_URL_NAME: Final[str] = "taxomesh_contrib_django_graph_children"
+GRAPH_REORDER_PATH: Final[str] = "graph/reorder/"
+GRAPH_REPARENT_PATH: Final[str] = "graph/reparent/"
+GRAPH_CHILDREN_PATH: Final[str] = "graph/children/"
+DRAG_KIND_ITEM: Final[str] = "item"
+DRAG_KIND_CATEGORY: Final[str] = "category"
 
 
 def _resolve_linked_url(external_id: str, setting_name: str = TAXOMESH_LINKED_MODEL_SETTING) -> str | None:
@@ -90,58 +100,74 @@ def _resolve_linked_url(external_id: str, setting_name: str = TAXOMESH_LINKED_MO
         return None
 
 
-def _flatten_graph(graph: TaxomeshGraph, max_depth: int = ADMIN_GRAPH_DEFAULT_MAX_DEPTH) -> list[GraphEntry]:
-    """Flatten a TaxomeshGraph into a depth-annotated list for template rendering.
+def _build_child_entries(  # noqa: PLR0913
+    child_cats: list[Any],
+    items: list[Any],
+    depth: int,
+    parent_uuid_str: str,
+    cats_with_children: set[UUID],
+    cats_with_items: set[UUID],
+    cat_sort_map: dict[UUID, int],
+    item_sort_map: dict[UUID, int],
+) -> tuple[list[GraphEntry], dict[str, list[RelationEntry]]]:
+    """Build GraphEntry list and item_relations for the direct children of a parent category.
 
     Args:
-        graph: The taxonomy graph to flatten.
-        max_depth: Maximum category depth to include (0 = unlimited). Items are included
-            only when their parent category depth + 1 <= max_depth.
+        child_cats: Category domain objects that are direct subcategories of the parent.
+        items: Item domain objects placed directly in the parent category.
+        depth: DOM depth to assign to all returned entries.
+        parent_uuid_str: UUID string of the parent category.
+        cats_with_children: Set of category UUIDs that have at least one child category.
+        cats_with_items: Set of category UUIDs that have at least one item.
+        cat_sort_map: Mapping of category_id → sort_index for child categories.
+        item_sort_map: Mapping of item_id → sort_index for items in the parent.
+
+    Returns:
+        Tuple of (entries list, item_relations dict keyed by item UUID string).
     """
     entries: list[GraphEntry] = []
-    depth_limited = max_depth != 0
+    item_relations: dict[str, list[RelationEntry]] = {}
 
-    def _visit(node: CategoryNode, depth: int) -> None:
-        cat = node.category
-        is_depth_limited = depth_limited and depth > max_depth
-        children_depth_limited = depth_limited and depth + 1 > max_depth
-        has_real_children = bool(node.items or node.children)
-        initially_collapsed = children_depth_limited and has_real_children
+    for idx, item in enumerate(items):
+        item_uuid_str = str(item.item_id)
         entries.append(
             GraphEntry(
                 depth=depth,
-                kind="category",
+                kind=DRAG_KIND_ITEM,
+                name=str(item),
+                uuid=item_uuid_str,
+                enabled=item.enabled,
+                external_id=item.external_id or "",
+                linked_url=None,
+                has_descendants=False,
+                depth_limited=False,
+                initially_collapsed=False,
+                sort_index=item_sort_map.get(item.item_id, idx),
+                parent_uuid=parent_uuid_str,
+            )
+        )
+
+    for idx, cat in enumerate(child_cats):
+        cat_uuid_str = str(cat.category_id)
+        has_descendants = cat.category_id in cats_with_children or cat.category_id in cats_with_items
+        entries.append(
+            GraphEntry(
+                depth=depth,
+                kind=DRAG_KIND_CATEGORY,
                 name=str(cat),
-                uuid=str(cat.category_id),
+                uuid=cat_uuid_str,
                 enabled=cat.enabled,
                 external_id=cat.external_id or "",
                 linked_url=None,
-                has_descendants=has_real_children,
-                depth_limited=is_depth_limited,
-                initially_collapsed=initially_collapsed,
+                has_descendants=has_descendants,
+                depth_limited=False,
+                initially_collapsed=True,
+                sort_index=cat_sort_map.get(cat.category_id, idx),
+                parent_uuid=parent_uuid_str,
             )
         )
-        for item in node.items:
-            entries.append(
-                GraphEntry(
-                    depth=depth + 1,
-                    kind="item",
-                    name=str(item),
-                    uuid=str(item.item_id),
-                    enabled=item.enabled,
-                    external_id=item.external_id or "",
-                    linked_url=None,
-                    has_descendants=False,
-                    depth_limited=children_depth_limited,
-                    initially_collapsed=False,
-                )
-            )
-        for child in node.children:
-            _visit(child, depth + 1)
 
-    for root in graph.roots:
-        _visit(root, 0)
-    return entries
+    return entries, item_relations
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +501,7 @@ class CategoryParentLinkInline(TaxomeshAdminMixin, admin.TabularInline):
     form = CategoryParentLinkForm
     extra = 0
     fk_name = "category"
+    autocomplete_fields = ["parent_category"]
 
     def save_model(
         self,
@@ -544,6 +571,7 @@ class ItemParentLinkInline(TaxomeshAdminMixin, admin.TabularInline):
 
     model = ItemParentLinkModel
     extra = 0
+    autocomplete_fields = ["category"]
 
     def save_model(
         self,
@@ -584,6 +612,7 @@ class ItemTagLinkInline(TaxomeshAdminMixin, admin.TabularInline):
 
     model = ItemTagLinkModel
     extra = 0
+    autocomplete_fields = ["tag"]
 
     def save_model(
         self,
@@ -724,33 +753,247 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
         return super().get_queryset(request).exclude(name=ROOT_CATEGORY_NAME)  # type: ignore[union-attr]
 
     def get_urls(self) -> list:  # type: ignore[type-arg]
-        """Add the taxonomy graph view URL to the admin URL patterns."""
+        """Add the taxonomy graph view URLs to the admin URL patterns."""
         urls = super().get_urls()
         custom = [
             path(
                 "graph/",
                 self.admin_site.admin_view(self.graph_view),
                 name="taxomesh_contrib_django_graph",
-            )
+            ),
+            path(
+                GRAPH_REORDER_PATH,
+                self.admin_site.admin_view(self.reorder_view),
+                name=GRAPH_REORDER_URL_NAME,
+            ),
+            path(
+                GRAPH_REPARENT_PATH,
+                self.admin_site.admin_view(self.reparent_view),
+                name=GRAPH_REPARENT_URL_NAME,
+            ),
+            path(
+                GRAPH_CHILDREN_PATH,
+                self.admin_site.admin_view(self.graph_children_view),
+                name=GRAPH_CHILDREN_URL_NAME,
+            ),
         ]
         return custom + urls
 
+    def reorder_view(self, request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
+        """Reorder siblings within a parent scope (items or categories)."""
+        import json  # noqa: PLC0415
+
+        from django.http import JsonResponse  # noqa: PLC0415
+
+        if request.method != "POST":
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+
+        try:
+            body = json.loads(request.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        for field in ("kind", "parent_uuid", "ordered_uuids"):
+            if field not in body:
+                return JsonResponse({"error": f"Missing field: {field}"}, status=400)
+
+        kind = body["kind"]
+        if kind not in (DRAG_KIND_ITEM, DRAG_KIND_CATEGORY):
+            return JsonResponse({"error": f"Invalid kind: {kind}"}, status=400)
+
+        try:
+            from uuid import UUID  # noqa: PLC0415
+
+            parent_uuid = UUID(body["parent_uuid"])
+            ordered_uuids = [UUID(u) for u in body["ordered_uuids"]]
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "Invalid UUID format"}, status=400)
+
+        repo = DjangoRepository()
+        svc = TaxomeshService(repository=repo)
+        try:
+            if kind == DRAG_KIND_ITEM:
+                svc.reorder_items_in_category(parent_uuid, ordered_uuids)
+            else:
+                svc.reorder_subcategories(parent_uuid, ordered_uuids)
+        except Exception as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
+        return JsonResponse({"ok": True})
+
+    def reparent_view(self, request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
+        """Move a node (item or category) from one parent to another."""
+        import json  # noqa: PLC0415
+        from uuid import UUID  # noqa: PLC0415
+
+        from django.http import JsonResponse  # noqa: PLC0415
+
+        if request.method != "POST":
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+
+        try:
+            body = json.loads(request.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+        for field in ("kind", "node_uuid", "old_parent_uuid", "new_parent_uuid", "insert_before_uuid"):
+            if field not in body:
+                return JsonResponse({"error": f"Missing field: {field}"}, status=400)
+
+        kind = body["kind"]
+        if kind not in (DRAG_KIND_ITEM, DRAG_KIND_CATEGORY):
+            return JsonResponse({"error": f"Invalid kind: {kind}"}, status=400)
+
+        try:
+            node_uuid = UUID(body["node_uuid"])
+            old_parent_uuid = UUID(body["old_parent_uuid"])
+            new_parent_uuid = UUID(body["new_parent_uuid"])
+            raw_insert = body["insert_before_uuid"]
+            insert_before_uuid: UUID | None = UUID(raw_insert) if raw_insert is not None else None
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "Invalid UUID format"}, status=400)
+
+        repo = DjangoRepository()
+        svc = TaxomeshService(repository=repo)
+
+        root_cats = [c for c in repo.list_categories() if c.name == ROOT_CATEGORY_NAME]
+        root_uuid = root_cats[0].category_id if root_cats else None
+        if root_uuid is not None and node_uuid == root_uuid:
+            return JsonResponse({"error": "Cannot reparent ROOT category"}, status=400)
+
+        try:
+            if kind == DRAG_KIND_ITEM:
+                svc.reparent_item(node_uuid, old_parent_uuid, new_parent_uuid, insert_before_uuid)
+            else:
+                svc.reparent_category(node_uuid, old_parent_uuid, new_parent_uuid, insert_before_uuid)
+        except TaxomeshCyclicDependencyError as exc:
+            return JsonResponse({"error": f"Cycle detected: {exc}"}, status=400)
+        except Exception as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
+        return JsonResponse({"ok": True})
+
     def graph_view(self, request: HttpRequest) -> HttpResponse:
-        """Render the taxonomy graph as a styled HTML tree."""
+        """Render the taxonomy graph showing only root-level categories (lazy-load children)."""
         from django.template.response import TemplateResponse  # noqa: PLC0415
+        from django.urls import reverse as dj_reverse  # noqa: PLC0415
 
         error: str | None = None
         entries: list[GraphEntry] = []
         has_entries = False
-        item_relations: dict[str, list[RelationEntry]] = {}
+
         try:
             repo = DjangoRepository()
             svc = TaxomeshService(repository=repo)
-            graph = svc.get_graph()
-            entries = _flatten_graph(graph)
-            has_entries = bool(graph.roots)
+
+            all_cats = repo.list_categories()
+            root_domain = next((c for c in all_cats if c.name == ROOT_CATEGORY_NAME), None)
+            root_uuid: UUID | None = root_domain.category_id if root_domain else None
+            root_uuid_str = str(root_uuid) if root_uuid else ""
+
+            all_cat_links = repo.list_category_parent_links()
+            all_item_links = repo.list_item_parent_links()
+            cats_with_children = {lnk.parent_category_id for lnk in all_cat_links}
+            cats_with_items = {lnk.category_id for lnk in all_item_links}
+
+            # True display roots: children of ROOT that have no non-ROOT parent.
+            # Categories with a non-ROOT parent are subcategories rendered under their parent.
+            has_non_root_parent: set[UUID] = {
+                lnk.category_id for lnk in all_cat_links if root_uuid is None or lnk.parent_category_id != root_uuid
+            }
+            root_children_links = sorted(
+                [
+                    lnk
+                    for lnk in all_cat_links
+                    if root_uuid is not None
+                    and lnk.parent_category_id == root_uuid
+                    and lnk.category_id not in has_non_root_parent
+                ],
+                key=lambda lnk: lnk.sort_index,
+            )
+            root_level_cats = [svc.get_category(lnk.category_id) for lnk in root_children_links]
+            has_entries = bool(root_level_cats)
+            root_sort_map: dict[UUID, int] = {lnk.category_id: lnk.sort_index for lnk in root_children_links}
+
+            for idx, cat in enumerate(root_level_cats):
+                has_descendants = cat.category_id in cats_with_children or cat.category_id in cats_with_items
+                entries.append(
+                    GraphEntry(
+                        depth=0,
+                        kind=DRAG_KIND_CATEGORY,
+                        name=str(cat),
+                        uuid=str(cat.category_id),
+                        enabled=cat.enabled,
+                        external_id=cat.external_id or "",
+                        linked_url=None,
+                        has_descendants=has_descendants,
+                        depth_limited=False,
+                        initially_collapsed=True,
+                        sort_index=root_sort_map.get(cat.category_id, idx),
+                        parent_uuid=root_uuid_str,
+                    )
+                )
+        except TaxomeshError as exc:
+            error = str(exc)
+
+        for entry in entries:
+            entry["linked_url"] = _resolve_linked_url(entry.get("external_id", "") or "")
+
+        children_url = dj_reverse(f"admin:{GRAPH_CHILDREN_URL_NAME}")
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Taxonomy Graph",
+            "entries": entries,
+            "has_entries": has_entries,
+            "error": error,
+            "item_relations": {},
+            "children_url": children_url,
+            "opts": self.model._meta,
+        }
+        return TemplateResponse(request, "admin/taxomesh_contrib_django/graph.html", context)
+
+    def graph_children_view(self, request: HttpRequest) -> HttpResponse:
+        """Return an HTML fragment with the direct children of a category node."""
+        from django.urls import reverse as dj_reverse  # noqa: PLC0415
+
+        try:
+            parent_uuid = UUID(request.GET["parent_uuid"])
+            depth = int(request.GET.get("depth", 1))
+        except (KeyError, ValueError):
+            return HttpResponse("Bad request: missing or invalid parent_uuid/depth", status=400)
+
+        try:
+            repo = DjangoRepository()
+            svc = TaxomeshService(repository=repo)
+
+            child_cats = svc.list_categories(parent_id=parent_uuid)
+            items = svc.list_items(category_id=parent_uuid)
+
+            all_cat_links = repo.list_category_parent_links()
+            all_item_links = repo.list_item_parent_links()
+            cats_with_children = {lnk.parent_category_id for lnk in all_cat_links}
+            cats_with_items = {lnk.category_id for lnk in all_item_links}
+
+            cat_sort_map = {
+                lnk.category_id: lnk.sort_index for lnk in all_cat_links if lnk.parent_category_id == parent_uuid
+            }
+            item_sort_map = {lnk.item_id: lnk.sort_index for lnk in all_item_links if lnk.category_id == parent_uuid}
+
+            parent_uuid_str = str(parent_uuid)
+            entries, item_relations = _build_child_entries(
+                child_cats=child_cats,
+                items=items,
+                depth=depth,
+                parent_uuid_str=parent_uuid_str,
+                cats_with_children=cats_with_children,
+                cats_with_items=cats_with_items,
+                cat_sort_map=cat_sort_map,
+                item_sort_map=item_sort_map,
+            )
+
+            # Resolve item relations
             for entry in entries:
-                if entry["kind"] != "item":
+                if entry["kind"] != DRAG_KIND_ITEM:
                     continue
                 item_uuid_str = entry["uuid"]
                 try:
@@ -773,23 +1016,20 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
                         item_relations[item_uuid_str] = rels
                 except Exception:
                     pass
-        except TaxomeshError as exc:
-            error = str(exc)
 
-        # Resolve linked_url for each entry with a non-empty external_id
+        except TaxomeshError as exc:
+            return HttpResponse(str(exc), status=500)
+
         for entry in entries:
             entry["linked_url"] = _resolve_linked_url(entry.get("external_id", "") or "")
 
-        context = {
-            **self.admin_site.each_context(request),
-            "title": "Taxonomy Graph",
-            "entries": entries,
-            "has_entries": has_entries,
-            "error": error,
-            "item_relations": item_relations,
-            "opts": self.model._meta,
-        }
-        return TemplateResponse(request, "admin/taxomesh_contrib_django/graph.html", context)
+        children_url = dj_reverse(f"admin:{GRAPH_CHILDREN_URL_NAME}")
+        html = render_to_string(
+            "admin/taxomesh_contrib_django/_graph_entry_list.html",
+            {"entries": entries, "item_relations": item_relations, "children_url": children_url},
+            request=request,
+        )
+        return HttpResponse(html, content_type="text/html")
 
     def save_model(
         self,
@@ -908,6 +1148,7 @@ class OutgoingRelationInline(TaxomeshAdminMixin, admin.TabularInline):
     form = ItemRelationLinkForm
     fk_name = "source_item"
     extra = 0
+    autocomplete_fields = ["target_item"]
 
     def save_model(
         self,
