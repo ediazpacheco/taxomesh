@@ -79,6 +79,96 @@ categories = svc.get_categories_by_external_id("legacy-category-id")
 
 These methods are useful for integrations where domain entities live outside taxomesh.
 
+## Fuzzy Search
+
+`search_items()` and `search_categories()` search by name, slug, and external ID with
+typo tolerance, accent-insensitivity, and ranked results. Powered by
+[rapidfuzz](https://github.com/maxbachmann/RapidFuzz).
+
+### search_items
+
+```python
+# Basic search — returns up to 20 items, enabled only, fuzzy on
+results = svc.search_items("piazola")           # finds "Piazzolla" via typo tolerance
+results = svc.search_items("agustin magaldi")   # finds "Agustín Magaldi" (accent-stripped)
+results = svc.search_items("d arienzo")         # finds "D'Arienzo" (punctuation-insensitive)
+
+# Limit results
+results = svc.search_items("tango", limit=5)
+
+# Include disabled items
+results = svc.search_items("tango", enabled_only=False)
+
+# Restrict to direct members of a category
+results = svc.search_items("tango", category_id=cat.category_id)
+
+# Restrict to a full category subtree (category + all descendants)
+results = svc.search_items("tango", category_id=cat.category_id, recursive=True)
+
+# Exact/prefix/substring only — no fuzzy scoring
+results = svc.search_items("tango", fuzzy=False)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | `str` | — | Search text; whitespace-only returns `[]` immediately |
+| `limit` | `int` | `20` | Maximum results; raises `ValueError` if `<= 0` |
+| `category_id` | `UUID \| None` | `None` | Restrict candidates to this category |
+| `recursive` | `bool` | `False` | When `True` and `category_id` is set, includes all descendant categories |
+| `enabled_only` | `bool` | `True` | Exclude disabled items when `True` |
+| `fuzzy` | `bool` | `True` | Include fuzzy (typo-tolerant) scoring |
+
+Returns `list[Item]`, sorted by descending match score. Ties broken alphabetically by
+normalised name. Raises `TaxomeshCategoryNotFoundError` if `category_id` does not exist.
+
+### search_categories
+
+```python
+# Basic category search
+results = svc.search_categories("orkesta tipika")   # finds "Orquesta Típica"
+results = svc.search_categories("tango romantico")  # finds "Tango Romántico"
+
+# Direct children of a specific parent only
+results = svc.search_categories("tango", parent_id=parent.category_id)
+
+# Include disabled categories
+results = svc.search_categories("tango", enabled_only=False)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | `str` | — | Search text; whitespace-only returns `[]` immediately |
+| `limit` | `int` | `20` | Maximum results; raises `ValueError` if `<= 0` |
+| `parent_id` | `UUID \| None` | `None` | Restrict candidates to direct children of this category |
+| `enabled_only` | `bool` | `True` | Exclude disabled categories when `True` |
+| `fuzzy` | `bool` | `True` | Include fuzzy (typo-tolerant) scoring |
+
+Returns `list[Category]`, sorted by descending match score. The internal root category
+is always excluded. Raises `TaxomeshCategoryNotFoundError` if `parent_id` does not exist.
+
+### Ranking and normalization
+
+Before any matching, both query and candidate fields are normalized:
+- Diacritics and accents stripped (NFD decomposition)
+- Punctuation characters (`'`, `-`, `.`, `_`, `\`) converted to spaces
+- Lowercased and whitespace collapsed
+
+Match quality tiers, from highest to lowest:
+
+| Tier | Example |
+|------|---------|
+| Exact match on name or slug | query `"gallo ciego"` → name `"Gallo Ciego"` |
+| Prefix of name | query `"tango"` → name `"Tango Style"` |
+| Prefix of slug | query `"tango"` → slug `"tango-style"` |
+| Word-prefix in name | query `"style"` → name `"Tango Style"` |
+| Substring of name | query `"ango"` → name `"Tango"` |
+| Substring of slug | query `"ango"` → slug `"el-tango"` |
+| Substring of `external_id` | query `"sku"` → `external_id="SKU-001"` |
+| Fuzzy (rapidfuzz ≥ 70/100) | query `"piazola"` → name `"Piazzolla"` |
+
+The `external_id` field is only matched when it is non-empty. Pass `fuzzy=False` to
+restrict to the deterministic tiers only (no rapidfuzz scoring).
+
 ## Error model
 
 All library exceptions inherit from `TaxomeshError`.
