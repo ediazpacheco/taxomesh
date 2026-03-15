@@ -23,6 +23,7 @@ What you get:
 - typed item-to-item relations
 - pluggable storage backends (YAML, JSON, Django)
 - one service layer with optional CLI, HTTP, and Django integrations
+- typo-tolerant fuzzy search over items and categories
 
 [![CI](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml/badge.svg)](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/taxomesh.svg)](https://pypi.org/project/taxomesh/)
@@ -133,6 +134,32 @@ Result length indicates the state of your data:
 | `0` | No match — the external ID is an orphan or was never assigned |
 | `1` | Unique match — the expected case for a well-maintained catalog |
 | `>= 2` | Duplicates exist — review and deduplicate as needed |
+
+## Fuzzy Search
+
+`search_items()` and `search_categories()` find matches by name, slug, and external ID
+with typo tolerance, accent-insensitivity, and ranked results — no extra infrastructure
+required.
+
+```python
+# Typo-tolerant: finds "Piazzolla" even with a misspelling
+results = svc.search_items("piazola")
+
+# Accent-insensitive: finds "Agustín Magaldi" without the accent
+results = svc.search_items("agustin magaldi")
+
+# Scoped to a subtree
+results = svc.search_items("tango", category_id=cat.category_id, recursive=True)
+
+# Category search, children of a specific parent only
+results = svc.search_categories("orkesta tipika", parent_id=parent.category_id)
+```
+
+Results are sorted by match quality: exact matches first, then prefix, substring, and
+fuzzy matches. Pass `fuzzy=False` to restrict to exact/prefix/substring matching only.
+Pass `enabled_only=False` to include disabled items and categories.
+
+See [Python API — Fuzzy Search](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md#fuzzy-search) for the full parameter reference.
 
 ## Why This Exists
 
