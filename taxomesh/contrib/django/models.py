@@ -158,7 +158,7 @@ class CategoryParentLinkModel(models.Model):
         db_table = CATEGORY_PARENT_LINK_TABLE
         unique_together = [("category", "parent_category")]
         indexes = [
-            models.Index(fields=["parent_category_id", "sort_index"], name="taxomesh_catlink_parent_sort_idx"),
+            models.Index(fields=["parent_category_id", "sort_index"], name="taxomesh_catlink_par_sort_idx"),
         ]
 
 
