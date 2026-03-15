@@ -77,6 +77,9 @@ class CategoryModel(models.Model):
         db_table = CATEGORY_TABLE
         verbose_name = "Category"
         verbose_name_plural = "Categories"
+        indexes = [
+            models.Index(fields=["name"], name="taxomesh_category_name_idx"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["slug"],
@@ -107,6 +110,9 @@ class ItemModel(models.Model):
         db_table = ITEM_TABLE
         verbose_name = "Item"
         verbose_name_plural = "Items"
+        indexes = [
+            models.Index(fields=["name"], name="taxomesh_item_name_idx"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["slug"],
@@ -151,6 +157,9 @@ class CategoryParentLinkModel(models.Model):
         app_label = APP_LABEL
         db_table = CATEGORY_PARENT_LINK_TABLE
         unique_together = [("category", "parent_category")]
+        indexes = [
+            models.Index(fields=["parent_category_id", "sort_index"], name="taxomesh_catlink_parent_sort_idx"),
+        ]
 
 
 class ItemParentLinkModel(models.Model):
@@ -177,6 +186,9 @@ class ItemParentLinkModel(models.Model):
         app_label = APP_LABEL
         db_table = ITEM_PARENT_LINK_TABLE
         unique_together = [("item", "category")]
+        indexes = [
+            models.Index(fields=["category_id", "sort_index"], name="taxomesh_itemlink_cat_sort_idx"),
+        ]
 
 
 class ItemTagLinkModel(models.Model):
