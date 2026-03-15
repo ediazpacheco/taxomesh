@@ -112,6 +112,28 @@ print([node.category.name for node in svc.get_graph().roots])  # ["Music", "Form
 The item still belongs to your application. `taxomesh` manages the taxonomy layer
 around it: placement, ordering, tags, relations, slugs, and traversal.
 
+### Resolving items and categories by external_id
+
+Use the dedicated lookup methods for point lookups by `external_id`:
+
+```python
+# Correct — uses the database index directly
+items = svc.get_items_by_external_id("catalog:42")       # list[Item]
+categories = svc.get_categories_by_external_id("solo")  # list[Category]
+```
+
+Do **not** use `list_items()` or `list_categories()` with a Python filter — that
+performs a full table scan and bypasses the index.
+
+The `external_id` field is **indexed** on the Django backend but **not unique**.
+Result length indicates the state of your data:
+
+| Length | Meaning |
+|--------|---------|
+| `0` | No match — the external ID is an orphan or was never assigned |
+| `1` | Unique match — the expected case for a well-maintained catalog |
+| `>= 2` | Duplicates exist — review and deduplicate as needed |
+
 ## Why This Exists
 
 Taxonomy work is usually underestimated. A simple category table becomes more complex
