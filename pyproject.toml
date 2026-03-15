@@ -23,6 +23,7 @@ dependencies = [
     "pyyaml>=6.0",
     "rich>=13.0",
     "typer>=0.12",
+    "rapidfuzz>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -96,5 +97,9 @@ omit = [
 
 [dependency-groups]
 dev = [
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.2",
     "types-pyyaml>=6.0",
 ]

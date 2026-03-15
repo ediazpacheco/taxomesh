@@ -8,9 +8,10 @@ contains no storage logic itself.
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, TypeVar
 from uuid import UUID, uuid4
 
+from taxomesh.application.search import DEFAULT_SEARCH_LIMIT, SearchEngine
 from taxomesh.domain.constants import DEFAULT_ITEM_EXTERNAL_ID, ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
 from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
@@ -28,6 +29,8 @@ from taxomesh.exceptions import (
 )
 from taxomesh.ports.repository import TaxomeshRepositoryBase
 from taxomesh.utils.memoize import clear_all_caches, memoize
+
+_T = TypeVar("_T")
 
 _DEFAULT_CONFIG_FILENAME: Final[str] = "taxomesh.toml"
 DEFAULT_CACHE_TTL: Final[int] = 5
@@ -1123,3 +1126,211 @@ class TaxomeshService:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
         self._repo.delete_item_parent_link(item_id, category_id)
         clear_all_caches()
+
+    # ------------------------------------------------------------------
+    # Search
+    # ------------------------------------------------------------------
+
+    def search_items(
+        self,
+        query: str,
+        *,
+        limit: int = DEFAULT_SEARCH_LIMIT,
+        category_id: UUID | None = None,
+        enabled_only: bool = True,
+        fuzzy: bool = True,
+        recursive: bool = False,
+    ) -> list[Item]:
+        """Search items by name, slug, and external_id using fuzzy matching.
+
+        Args:
+            query: The text to search for.
+            limit: Maximum number of results to return; must be ≥ 1.
+            category_id: When provided, restrict candidates to items placed in
+                this category. When *recursive* is also ``True`` the candidates
+                include items in all descendant categories as well.
+            enabled_only: When ``True`` (default) only enabled items are
+                considered. Pass ``False`` to include disabled items.
+            fuzzy: When ``True`` (default) rapidfuzz scores are included in
+                ranking. Pass ``False`` for exact/substring matching only.
+            recursive: Only meaningful when *category_id* is set. When ``True``
+                the search covers the full category sub-tree.
+
+        Returns:
+            Scored items in descending score order (ties broken by normalised
+            name), trimmed to *limit* entries.
+
+        Raises:
+            ValueError: If *limit* ≤ 0.
+            TaxomeshCategoryNotFoundError: If *category_id* is provided but
+                does not exist in the repository.
+        """
+        if limit <= 0:
+            raise ValueError(f"limit must be ≥ 1, got {limit}")
+        if not query.strip():
+            return []
+
+        norm_q = SearchEngine.normalize(query)
+        candidates = self._load_item_candidates(category_id=category_id, recursive=recursive)
+        if enabled_only:
+            candidates = [item for item in candidates if item.enabled]
+        return self._score_and_rank(
+            norm_q,
+            candidates,
+            get_name=lambda i: i.name,
+            get_slug=lambda i: i.slug,
+            get_ext=lambda i: i.external_id,
+            fuzzy=fuzzy,
+            limit=limit,
+        )
+
+    def search_categories(
+        self,
+        query: str,
+        *,
+        limit: int = DEFAULT_SEARCH_LIMIT,
+        parent_id: UUID | None = None,
+        enabled_only: bool = True,
+        fuzzy: bool = True,
+    ) -> list[Category]:
+        """Search categories by name, slug, and external_id using fuzzy matching.
+
+        The internal root category is always excluded from results.
+
+        Args:
+            query: The text to search for.
+            limit: Maximum number of results to return; must be ≥ 1.
+            parent_id: When provided, restrict candidates to direct children of
+                this category.
+            enabled_only: When ``True`` (default) only enabled categories are
+                considered.
+            fuzzy: When ``True`` (default) rapidfuzz scores are included.
+
+        Returns:
+            Scored categories in descending score order, trimmed to *limit*.
+
+        Raises:
+            ValueError: If *limit* ≤ 0.
+            TaxomeshCategoryNotFoundError: If *parent_id* is provided but does
+                not exist in the repository.
+        """
+        if limit <= 0:
+            raise ValueError(f"limit must be ≥ 1, got {limit}")
+        if not query.strip():
+            return []
+
+        norm_q = SearchEngine.normalize(query)
+        if parent_id is None:
+            candidates = [cat for cat in self._repo.list_categories() if cat.category_id != self._root_id]
+        else:
+            # list_categories(parent_id=X) validates existence and returns direct children
+            candidates = self.list_categories(parent_id=parent_id)
+        if enabled_only:
+            candidates = [cat for cat in candidates if cat.enabled]
+        return self._score_and_rank(
+            norm_q,
+            candidates,
+            get_name=lambda c: c.name,
+            get_slug=lambda c: c.slug,
+            get_ext=lambda c: c.external_id,
+            fuzzy=fuzzy,
+            limit=limit,
+        )
+
+    def _score_and_rank(
+        self,
+        norm_q: str,
+        candidates: list[_T],
+        *,
+        get_name: Callable[[_T], str],
+        get_slug: Callable[[_T], str],
+        get_ext: Callable[[_T], str],
+        fuzzy: bool,
+        limit: int,
+    ) -> list[_T]:
+        """Score *candidates* against *norm_q* and return the top *limit* results.
+
+        Args:
+            norm_q: Pre-normalised query string.
+            candidates: Entities to score (items or categories).
+            get_name: Accessor for the candidate's name field.
+            get_slug: Accessor for the candidate's slug field.
+            get_ext: Accessor for the candidate's external_id field.
+            fuzzy: Passed through to ``SearchEngine.score_candidate``.
+            limit: Maximum number of results to return.
+
+        Returns:
+            Entities sorted by descending score then normalised name, capped at *limit*.
+        """
+        engine = SearchEngine()
+        scored: list[tuple[float, str, _T]] = []
+        for c in candidates:
+            norm_name = SearchEngine.normalize(get_name(c))
+            score = engine.score_candidate(norm_q, norm_name, get_slug(c), get_ext(c), fuzzy=fuzzy)
+            if score is not None:
+                scored.append((score, norm_name, c))
+        scored.sort(key=lambda t: (-t[0], t[1]))
+        return [c for _, _, c in scored[:limit]]
+
+    def _collect_descendant_ids(self, category_id: UUID) -> set[UUID]:
+        """Return the set of all descendant category UUIDs using BFS.
+
+        Args:
+            category_id: The root of the sub-tree to traverse.
+
+        Returns:
+            Set of UUIDs for every category that is (directly or transitively)
+            a child of *category_id*. Does not include *category_id* itself.
+        """
+        links = self._repo.list_category_parent_links()
+        children_map: dict[UUID, list[UUID]] = {}
+        for lnk in links:
+            children_map.setdefault(lnk.parent_category_id, []).append(lnk.category_id)
+
+        result: set[UUID] = set()
+        queue = list(children_map.get(category_id, []))
+        while queue:
+            cid = queue.pop()
+            if cid not in result:
+                result.add(cid)
+                queue.extend(children_map.get(cid, []))
+        return result
+
+    def _load_item_candidates(
+        self,
+        *,
+        category_id: UUID | None,
+        recursive: bool,
+    ) -> list[Item]:
+        """Return item candidates for search, respecting category and recursive filters.
+
+        Args:
+            category_id: Category filter; ``None`` means all items.
+            recursive: When ``True`` and *category_id* is set, include items in
+                all descendant categories (deduplication is applied).
+
+        Returns:
+            Deduplicated list of Item instances.
+        """
+        if category_id is None:
+            return self._repo.list_items()
+
+        if not recursive:
+            # list_items validates category existence
+            return self.list_items(category_id=category_id)
+
+        # Recursive: union of items in category_id and all descendants
+        # Validate existence first (fail-fast before tree traversal)
+        self.get_category(category_id)
+        all_category_ids = {category_id} | self._collect_descendant_ids(category_id)
+
+        item_map = {item.item_id: item for item in self._repo.list_items()}
+        seen: set[UUID] = set()
+        items: list[Item] = []
+        for lnk in self._repo.list_item_parent_links():
+            if lnk.category_id in all_category_ids and lnk.item_id not in seen:
+                seen.add(lnk.item_id)
+                item = item_map.get(lnk.item_id)
+                if item is not None:
+                    items.append(item)
+        return items
