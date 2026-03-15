@@ -585,3 +585,91 @@ def test_django_repository_get_debug_info(db: object) -> None:
     assert isinstance(info, dict)
     assert "database_alias" in info
     assert info["database_alias"] == "default"
+
+
+# ---------------------------------------------------------------------------
+# 032-external-id-index — T001, T002 (db_index field assertions)
+# ---------------------------------------------------------------------------
+
+from taxomesh.contrib.django.models import CategoryModel, ItemModel  # noqa: E402
+
+
+class TestExternalIdIndex:
+    """Assert that external_id fields carry a database index."""
+
+    def test_item_external_id_field_has_db_index(self) -> None:
+        assert ItemModel._meta.get_field("external_id").db_index is True
+
+    def test_category_external_id_field_has_db_index(self) -> None:
+        assert CategoryModel._meta.get_field("external_id").db_index is True
+
+
+# ---------------------------------------------------------------------------
+# 032-external-id-index — T003, T004 (list_*_by_external_id behaviour)
+# ---------------------------------------------------------------------------
+
+
+class TestExternalIdLookup:
+    """Behavioural tests for list_items_by_external_id and list_categories_by_external_id."""
+
+    # --- Items (T003) -------------------------------------------------------
+
+    def test_list_items_by_external_id_no_match(self) -> None:
+        repo = make_repo()
+        result = repo.list_items_by_external_id("no-such-id")
+        assert result == []
+
+    def test_list_items_by_external_id_single_match(self) -> None:
+        repo = make_repo()
+        item = make_item(external_id="unique-1")
+        repo.save_item(item)
+        result = repo.list_items_by_external_id("unique-1")
+        assert len(result) == 1
+        assert result[0].external_id == "unique-1"
+
+    def test_list_items_by_external_id_duplicate_match(self) -> None:
+        repo = make_repo()
+        item_a = make_item(external_id="dup-1")
+        item_b = make_item(external_id="dup-1")
+        repo.save_item(item_a)
+        repo.save_item(item_b)
+        result = repo.list_items_by_external_id("dup-1")
+        assert len(result) == 2
+
+    def test_list_items_by_external_id_blank(self) -> None:
+        repo = make_repo()
+        item = make_item(external_id="")
+        repo.save_item(item)
+        result = repo.list_items_by_external_id("")
+        assert any(i.item_id == item.item_id for i in result)
+
+    # --- Categories (T004) --------------------------------------------------
+
+    def test_list_categories_by_external_id_no_match(self) -> None:
+        repo = make_repo()
+        result = repo.list_categories_by_external_id("no-such-cat-id")
+        assert result == []
+
+    def test_list_categories_by_external_id_single_match(self) -> None:
+        repo = make_repo()
+        cat = make_category(external_id="solo")
+        repo.save_category(cat)
+        result = repo.list_categories_by_external_id("solo")
+        assert len(result) == 1
+        assert result[0].external_id == "solo"
+
+    def test_list_categories_by_external_id_duplicate_match(self) -> None:
+        repo = make_repo()
+        cat_a = make_category(external_id="dup-cat")
+        cat_b = make_category(external_id="dup-cat")
+        repo.save_category(cat_a)
+        repo.save_category(cat_b)
+        result = repo.list_categories_by_external_id("dup-cat")
+        assert len(result) == 2
+
+    def test_list_categories_by_external_id_blank(self) -> None:
+        repo = make_repo()
+        cat = make_category(external_id="")
+        repo.save_category(cat)
+        result = repo.list_categories_by_external_id("")
+        assert any(c.category_id == cat.category_id for c in result)
