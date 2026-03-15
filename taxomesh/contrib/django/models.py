@@ -62,7 +62,7 @@ class CategoryModel(models.Model):
     description = models.CharField(max_length=MAX_DESCRIPTION_LENGTH, blank=True, default=DEFAULT_DESCRIPTION)
     enabled = models.BooleanField(default=True)
     external_id = models.CharField(
-        max_length=MAX_EXTERNAL_ID_STR_LENGTH, blank=True, default=DEFAULT_CATEGORY_EXTERNAL_ID
+        max_length=MAX_EXTERNAL_ID_STR_LENGTH, blank=True, default=DEFAULT_CATEGORY_EXTERNAL_ID, db_index=True
     )
     slug = models.CharField(max_length=MAX_SLUG_LENGTH, blank=True, default="", db_index=True)
     metadata = models.JSONField(blank=True, default=dict)
@@ -91,7 +91,9 @@ class ItemModel(models.Model):
 
     item_id = models.UUIDField(primary_key=True, default=uuid4)
     name = models.CharField(max_length=MAX_ITEM_NAME_LENGTH, blank=True, default="")
-    external_id = models.CharField(max_length=MAX_EXTERNAL_ID_STR_LENGTH, blank=True, default=DEFAULT_ITEM_EXTERNAL_ID)
+    external_id = models.CharField(
+        max_length=MAX_EXTERNAL_ID_STR_LENGTH, blank=True, default=DEFAULT_ITEM_EXTERNAL_ID, db_index=True
+    )
     slug = models.CharField(max_length=MAX_SLUG_LENGTH, blank=True, default="", db_index=True)
     enabled = models.BooleanField(default=True)
     metadata = models.JSONField(blank=True, default=dict)
