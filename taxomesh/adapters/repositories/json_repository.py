@@ -162,12 +162,13 @@ class JsonRepository:
         return self._categories.get(category_id)
 
     def list_categories(self) -> list[Category]:
-        """Return all stored categories.
+        """Return all stored categories ordered by name then category_id.
 
         Returns:
-            List of all categories; empty list if the store is empty.
+            List of all categories ordered by ``(name ASC, category_id ASC)``;
+            empty list if the store is empty.
         """
-        return list(self._categories.values())
+        return sorted(self._categories.values(), key=lambda c: (c.name, str(c.category_id)))
 
     def delete_category(self, category_id: UUID) -> bool:
         """Delete a category by its identifier.
@@ -209,12 +210,13 @@ class JsonRepository:
         return self._items.get(item_id)
 
     def list_items(self) -> list[Item]:
-        """Return all stored items.
+        """Return all stored items ordered by name then item_id.
 
         Returns:
-            List of all items; empty list if the store is empty.
+            List of all items ordered by ``(name ASC, item_id ASC)``; empty
+            list if the store is empty.
         """
-        return list(self._items.values())
+        return sorted(self._items.values(), key=lambda i: (i.name, str(i.item_id)))
 
     def delete_item(self, item_id: UUID) -> bool:
         """Delete an item by its internal identifier.
@@ -322,12 +324,16 @@ class JsonRepository:
         self._flush()
 
     def list_category_parent_links(self) -> list[CategoryParentLink]:
-        """Return all stored category-parent relationships.
+        """Return all stored category-parent relationships grouped by parent then sort_index.
 
         Returns:
-            List of all CategoryParentLink records; empty list if none exist.
+            List of all CategoryParentLink records ordered by
+            ``(parent_category_id ASC, sort_index ASC, category_id ASC)``.
         """
-        return list(self._category_parent_links)
+        return sorted(
+            self._category_parent_links,
+            key=lambda lnk: (str(lnk.parent_category_id), lnk.sort_index, str(lnk.category_id)),
+        )
 
     # ------------------------------------------------------------------
     # Item → Category placement
@@ -351,12 +357,16 @@ class JsonRepository:
         self._flush()
 
     def list_item_parent_links(self) -> list[ItemParentLink]:
-        """Return all item→category placement records.
+        """Return all item→category placements grouped by category then sort_index.
 
         Returns:
-            List of all ItemParentLink records; empty list if none exist.
+            List of all ItemParentLink records ordered by
+            ``(category_id ASC, sort_index ASC, item_id ASC)``.
         """
-        return list(self._item_parent_links)
+        return sorted(
+            self._item_parent_links,
+            key=lambda lnk: (str(lnk.category_id), lnk.sort_index, str(lnk.item_id)),
+        )
 
     def delete_category_parent_link(self, category_id: UUID, parent_category_id: UUID) -> bool:
         """Delete a category→parent relationship.
@@ -446,7 +456,7 @@ class JsonRepository:
             result = [lnk for lnk in self._item_relation_links if lnk.target_item_id == item_id]
         if relation_type is not None:
             result = [lnk for lnk in result if lnk.relation_type == relation_type]
-        return result
+        return sorted(result, key=lambda lnk: (lnk.sort_index, str(lnk.source_item_id), str(lnk.target_item_id)))
 
     def delete_item_relation_link(
         self,
@@ -497,7 +507,10 @@ class JsonRepository:
         Returns:
             List of matching Item instances; empty list if none match.
         """
-        return [item for item in self._items.values() if item.external_id == external_id]
+        return sorted(
+            (item for item in self._items.values() if item.external_id == external_id),
+            key=lambda i: (i.name, str(i.item_id)),
+        )
 
     def list_categories_by_external_id(self, external_id: str) -> list[Category]:
         """Return all categories whose external_id matches the given value.
@@ -513,7 +526,10 @@ class JsonRepository:
         Returns:
             List of matching Category instances; empty list if none match.
         """
-        return [cat for cat in self._categories.values() if cat.external_id == external_id]
+        return sorted(
+            (cat for cat in self._categories.values() if cat.external_id == external_id),
+            key=lambda c: (c.name, str(c.category_id)),
+        )
 
     def get_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given slug, or None.
