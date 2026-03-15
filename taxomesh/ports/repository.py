@@ -42,10 +42,16 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def list_categories(self) -> list[Category]:
-        """Return all stored categories.
+        """Return all stored categories ordered by name then category_id.
+
+        Results are ordered ascending by ``name``; when two categories share the
+        same name they are further ordered ascending by ``category_id`` for
+        deterministic output.  ``Category`` has no direct ``sort_index`` field;
+        ``name`` is the stable fallback for a global category listing.
 
         Returns:
-            List of all categories; empty list if the store is empty.
+            List of all categories ordered by ``(name ASC, category_id ASC)``;
+            empty list if the store is empty.
         """
         ...
 
@@ -82,10 +88,16 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def list_items(self) -> list[Item]:
-        """Return all stored items.
+        """Return all stored items ordered by name then item_id.
+
+        Results are ordered ascending by ``name``; when two items share the same
+        name they are further ordered ascending by ``item_id`` for deterministic
+        output.  ``Item`` has no direct ``sort_index`` field; ``name`` is the
+        stable fallback for a global item listing.
 
         Returns:
-            List of all items; empty list if the store is empty.
+            List of all items ordered by ``(name ASC, item_id ASC)``; empty
+            list if the store is empty.
         """
         ...
 
@@ -166,10 +178,18 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def list_category_parent_links(self) -> list[CategoryParentLink]:
-        """Return all stored category-parent relationships.
+        """Return all stored category-parent relationships grouped by parent then sort_index.
+
+        Results are ordered by ``(parent_category_id ASC, sort_index ASC,
+        category_id ASC)``.  Links are grouped so that all children of the same
+        parent appear together, ordered by their ``sort_index`` within that
+        group.  When two links share the same parent and ``sort_index``, they
+        are further ordered by ``category_id`` for deterministic output.
 
         Returns:
-            List of all CategoryParentLink records; empty list if none exist.
+            List of all CategoryParentLink records ordered by
+            ``(parent_category_id ASC, sort_index ASC, category_id ASC)``;
+            empty list if none exist.
         """
         ...
 
@@ -200,42 +220,56 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def list_item_parent_links(self) -> list[ItemParentLink]:
-        """Return all item→category placement records.
+        """Return all item→category placements grouped by category then sort_index.
+
+        Results are ordered by ``(category_id ASC, sort_index ASC, item_id
+        ASC)``.  Links are grouped so that all items in the same category appear
+        together, ordered by their ``sort_index`` within that group.  When two
+        links share the same category and ``sort_index``, they are further
+        ordered by ``item_id`` for deterministic output.
 
         Returns:
-            List of all ItemParentLink records; empty list if none exist.
+            List of all ItemParentLink records ordered by
+            ``(category_id ASC, sort_index ASC, item_id ASC)``; empty list if
+            none exist.
         """
         ...
 
     # --- External-ID lookup ---
 
     def list_items_by_external_id(self, external_id: str) -> list[Item]:
-        """Return all items whose ``external_id`` matches the given string.
+        """Return all items whose ``external_id`` matches the given string, ordered by name.
 
         Returns an empty list when no item matches (orphan signal for the
         consumer). Returns multiple items when the same external_id was used
         more than once (duplicate signal for the consumer).
 
+        Results are ordered by ``(name ASC, item_id ASC)``.
+
         Args:
             external_id: The external identifier to look up (already a str).
 
         Returns:
-            List of matching Item instances; empty list if none match.
+            List of matching Item instances ordered by ``(name ASC, item_id ASC)``;
+            empty list if none match.
         """
         ...
 
     def list_categories_by_external_id(self, external_id: str) -> list[Category]:
-        """Return all categories whose ``external_id`` matches the given string.
+        """Return all categories whose ``external_id`` matches the given string, ordered by name.
 
         Returns an empty list when no category matches (orphan signal for the
         consumer). Returns multiple categories when the same external_id was
         used more than once (duplicate signal for the consumer).
 
+        Results are ordered by ``(name ASC, category_id ASC)``.
+
         Args:
             external_id: The external identifier to look up (already a str).
 
         Returns:
-            List of matching Category instances; empty list if none match.
+            List of matching Category instances ordered by
+            ``(name ASC, category_id ASC)``; empty list if none match.
         """
         ...
 
@@ -333,7 +367,10 @@ class TaxomeshRepositoryBase(Protocol):
         relation_type: str | None = None,
         direction: Literal["outgoing", "incoming"] = "outgoing",
     ) -> list[ItemRelationLink]:
-        """Return item relation links for the given item.
+        """Return item relation links for the given item, ordered by sort_index.
+
+        Results are ordered by ``(sort_index ASC, source_item_id ASC,
+        target_item_id ASC)``.  Filters are applied before sorting.
 
         Args:
             item_id: The UUID of the item to query.
@@ -344,7 +381,9 @@ class TaxomeshRepositoryBase(Protocol):
                 ``target_item_id`` equals ``item_id``.
 
         Returns:
-            List of matching ItemRelationLink objects; empty list if none match.
+            List of matching ItemRelationLink objects ordered by
+            ``(sort_index ASC, source_item_id ASC, target_item_id ASC)``;
+            empty list if none match.
         """
         ...
 

@@ -254,6 +254,8 @@ Do NOT update README during implement — only after
 - Django ORM — `taxomesh_item.external_id` and `taxomesh_category.external_id` gain (032-external-id-index)
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models), `rapidfuzz>=3.0` (new — fuzzy scoring), `stdlib unicodedata` + `re` (normalization) (033-fuzzy-search)
 - JsonRepository / YAMLRepository / DjangoRepository — no changes; candidates loaded via existing service methods (033-fuzzy-search)
+- Python 3.11 + Pydantic v2, Django ≥ 4.2 (optional adapter), pyyaml ≥ 6.0 (034-default-sort-index)
+- JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM) (034-default-sort-index)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

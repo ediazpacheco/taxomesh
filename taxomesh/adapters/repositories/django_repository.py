@@ -242,12 +242,15 @@ class DjangoRepository:
         return self._row_to_category(row)
 
     def list_categories(self) -> list[Category]:
-        """Return all categories without ordering guarantee.
+        """Return all categories ordered by name then category_id.
 
         Returns:
-            A list of Category domain objects (order undefined).
+            A list of Category domain objects ordered by ``(name ASC, category_id ASC)``.
         """
-        return [self._row_to_category(row) for row in self._CategoryModel.objects.using(self._using).all()]
+        return [
+            self._row_to_category(row)
+            for row in self._CategoryModel.objects.using(self._using).order_by("name", "category_id")
+        ]
 
     def delete_category(self, category_id: UUID) -> bool:
         """Delete the category with the given ID.
@@ -317,12 +320,14 @@ class DjangoRepository:
         return self._row_to_item(row)
 
     def list_items(self) -> list[Item]:
-        """Return all items without ordering guarantee.
+        """Return all items ordered by name then item_id.
 
         Returns:
-            A list of Item domain objects (order undefined).
+            A list of Item domain objects ordered by ``(name ASC, item_id ASC)``.
         """
-        return [self._row_to_item(row) for row in self._ItemModel.objects.using(self._using).all()]
+        return [
+            self._row_to_item(row) for row in self._ItemModel.objects.using(self._using).order_by("name", "item_id")
+        ]
 
     def delete_item(self, item_id: UUID) -> bool:
         """Delete the item with the given ID.
@@ -496,14 +501,17 @@ class DjangoRepository:
             raise TaxomeshRepositoryError(str(exc)) from exc
 
     def list_category_parent_links(self) -> list[CategoryParentLink]:
-        """Return all category parent links without ordering guarantee.
+        """Return all category parent links ordered by parent then sort_index then category.
 
         Returns:
-            A list of CategoryParentLink domain objects (order undefined).
+            A list of CategoryParentLink domain objects ordered by
+            ``(parent_category_id ASC, sort_index ASC, category_id ASC)``.
         """
         return [
             self._row_to_category_parent_link(row)
-            for row in self._CategoryParentLinkModel.objects.using(self._using).all()
+            for row in self._CategoryParentLinkModel.objects.using(self._using).order_by(
+                "parent_category_id", "sort_index", "category_id"
+            )
         ]
 
     # ------------------------------------------------------------------
@@ -537,13 +545,17 @@ class DjangoRepository:
             raise TaxomeshRepositoryError(str(exc)) from exc
 
     def list_item_parent_links(self) -> list[ItemParentLink]:
-        """Return all item parent links without ordering guarantee.
+        """Return all item parent links ordered by category then sort_index then item.
 
         Returns:
-            A list of ItemParentLink domain objects (order undefined).
+            A list of ItemParentLink domain objects ordered by
+            ``(category_id ASC, sort_index ASC, item_id ASC)``.
         """
         return [
-            self._row_to_item_parent_link(row) for row in self._ItemParentLinkModel.objects.using(self._using).all()
+            self._row_to_item_parent_link(row)
+            for row in self._ItemParentLinkModel.objects.using(self._using).order_by(
+                "category_id", "sort_index", "item_id"
+            )
         ]
 
     # ------------------------------------------------------------------
@@ -623,7 +635,9 @@ class DjangoRepository:
         from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
 
         try:
-            rows = self._ItemModel.objects.using(self._using).filter(external_id=external_id)
+            rows = (
+                self._ItemModel.objects.using(self._using).filter(external_id=external_id).order_by("name", "item_id")
+            )
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
         return [self._row_to_item(row) for row in rows]
@@ -649,7 +663,11 @@ class DjangoRepository:
         from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
 
         try:
-            rows = self._CategoryModel.objects.using(self._using).filter(external_id=external_id)
+            rows = (
+                self._CategoryModel.objects.using(self._using)
+                .filter(external_id=external_id)
+                .order_by("name", "category_id")
+            )
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
         return [self._row_to_category(row) for row in rows]
@@ -737,6 +755,7 @@ class DjangoRepository:
                 qs = self._ItemRelationLinkModel.objects.using(self._using).filter(target_item_id=item_id)
             if relation_type is not None:
                 qs = qs.filter(relation_type=relation_type)
+            qs = qs.order_by("sort_index", "source_item_id", "target_item_id")
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
         return [self._row_to_item_relation_link(row) for row in qs]
