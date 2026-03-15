@@ -21,7 +21,7 @@ class Migration(migrations.Migration):
             model_name="categoryparentlinkmodel",
             index=models.Index(
                 fields=["parent_category_id", "sort_index"],
-                name="taxomesh_catlink_parent_sort_idx",
+                name="taxomesh_catlink_par_sort_idx",
             ),
         ),
         migrations.AddIndex(
