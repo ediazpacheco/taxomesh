@@ -766,6 +766,7 @@ class TaxomeshService:
     # External-ID lookup
     # ------------------------------------------------------------------
 
+    @memoize(DEFAULT_CACHE_TTL)
     def get_items_by_external_id(self, external_id: ExternalId) -> list[Item]:
         """Return all items whose external_id matches the given value.
 
@@ -787,6 +788,7 @@ class TaxomeshService:
         """
         return self._repo.list_items_by_external_id(str(external_id))
 
+    @memoize(DEFAULT_CACHE_TTL)
     def get_categories_by_external_id(self, external_id: ExternalId) -> list[Category]:
         """Return all categories whose external_id matches the given value.
 
@@ -870,8 +872,10 @@ class TaxomeshService:
             metadata=metadata if metadata is not None else {},
         )
         self._repo.save_item_relation_link(link)
+        clear_all_caches()
         return link
 
+    @memoize(DEFAULT_CACHE_TTL)
     def list_item_relations(
         self,
         item_id: UUID,
@@ -895,6 +899,7 @@ class TaxomeshService:
         normalised_type = relation_type.strip().lower() if relation_type is not None else None
         return self._repo.list_item_relation_links(item_id, relation_type=normalised_type, direction=direction)
 
+    @memoize(DEFAULT_CACHE_TTL)
     def list_related_items(
         self,
         item_id: UUID,
@@ -940,6 +945,7 @@ class TaxomeshService:
             raise TaxomeshRelationError(
                 f"Relation '{normalised}' from {source_item_id} to {target_item_id} does not exist"
             )
+        clear_all_caches()
 
     def remove_item_from_category(self, item_id: UUID, category_id: UUID) -> None:
         """Remove an item's placement from a category. No-op if the placement does not exist.

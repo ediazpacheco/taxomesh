@@ -240,6 +240,8 @@ Do NOT update README during implement — only after
 - JSON file (`JsonRepository`), YAML file (`YamlRepository`), Django ORM (`DjangoRepository`) (026-admin-service-debug)
 - Python 3.11 + Django 6.0.2, `django.contrib.admin.widgets.AutocompleteSelect` (027-autocomplete-fk-widget)
 - N/A — no new models, no migrations (027-autocomplete-fk-widget)
+- Python 3.11 + `taxomesh/utils/memoize.py` (existing TTL cache utility) (028-service-read-cache)
+- N/A — pure in-process cache; no new storage, no migrations (028-service-read-cache)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
