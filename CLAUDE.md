@@ -260,6 +260,8 @@ Do NOT update README during implement — only after
 - Django ORM — SQLite (tests), PostgreSQL (production) (035-django-ordering-indexes)
 - Python 3.11 + pytest (built-in fixtures: `tmp_path`, `request`), pytest-django (P2 — optional) (036-service-repo-parity)
 - N/A — no production storage changes (036-service-repo-parity)
+- Python 3.11 + `taxomesh/utils/memoize.py` (existing TTL cache utility) (028-service-read-cache)
+- N/A — pure in-process cache; no new storage, no migrations (028-service-read-cache)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
