@@ -343,6 +343,17 @@ class TestListRelatedItemsForSources:
 
         from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
 
+        # Django enforces FK integrity at the DB level, so saving an orphan link
+        # raises IntegrityError before the service can raise TaxomeshItemNotFoundError.
+        # The invariant is upheld by the DB itself; nothing to test at the service layer.
+        try:
+            from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+
+            if isinstance(service._repo, DjangoRepository):
+                pytest.skip("Django FK constraints prevent saving an orphan link")
+        except ImportError:
+            pass
+
         src = service.create_item(name="src")
         # Save a relation link pointing to a non-existent target directly in the repo
         orphan_link = ItemRelationLink(
