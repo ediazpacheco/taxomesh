@@ -253,7 +253,7 @@ class TaxomeshLinkedFKMixin:
     The mixin is fully agnostic of the consuming app: it detects taxomesh FK fields at
     form-construction time by inspecting ``db_field.related_model``.
 
-    Usage:
+    Usage::
 
         from taxomesh.contrib.django.admin import TaxomeshLinkedFKMixin
 
