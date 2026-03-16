@@ -248,8 +248,10 @@ def test_get_debug_repository_type_matches_class(tmp_path: Path) -> None:
     assert info["working_path"] is not None
 
 
-def test_get_debug_django_repo_has_none_working_path(db: object) -> None:
+def test_get_debug_django_repo_has_none_working_path(request: pytest.FixtureRequest) -> None:
     """get_debug() with DjangoRepository returns None for working_path."""
+    pytest.importorskip("django", reason="django not installed")
+    request.getfixturevalue("db")
     svc = TaxomeshService(repository=DjangoRepository())
     info = svc.get_debug()
     assert info["repository_type"] == "DjangoRepository"
