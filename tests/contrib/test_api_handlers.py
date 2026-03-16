@@ -12,6 +12,8 @@ from taxomesh.contrib.api.schemas import (
     CreateItemRequest,
     CreateTagRequest,
     PlaceInCategoryRequest,
+    SearchCategoriesRequest,
+    SearchItemsRequest,
     UpdateCategoryRequest,
     UpdateItemRequest,
     UpdateTagRequest,
@@ -400,6 +402,151 @@ class TestRemoveTagFromItem:
         service.assign_tag(tag.tag_id, item.item_id)
         handlers.remove_tag_from_item(service, tag.tag_id, item.item_id)
         # No exception = success.
+
+
+# ---------------------------------------------------------------------------
+# Search handlers
+# ---------------------------------------------------------------------------
+
+
+class TestSearchItems:
+    """Tests for handlers.search_items."""
+
+    def test_returns_matching_items(self, service: TaxomeshService) -> None:
+        """Items matching the query are returned as Item instances."""
+        service.create_item(name="Anibal Troilo")
+        service.create_item(name="Carlos Gardel")
+        params = SearchItemsRequest(q="Troilo")
+        result = handlers.search_items(service, params)
+        assert any(i.name == "Anibal Troilo" for i in result)
+        assert all(isinstance(i, Item) for i in result)
+
+    def test_blank_q_returns_empty(self, service: TaxomeshService) -> None:
+        """Blank query returns an empty list."""
+        service.create_item(name="Troilo")
+        params = SearchItemsRequest(q="")
+        result = handlers.search_items(service, params)
+        assert result == []
+
+    def test_enabled_only_excludes_disabled(self, service: TaxomeshService) -> None:
+        """enabled_only=True excludes disabled items."""
+        item = service.create_item(name="Piazzolla")
+        service.update_item(item_id=item.item_id, enabled=False)
+        params = SearchItemsRequest(q="Piazzolla", enabled_only=True)
+        result = handlers.search_items(service, params)
+        assert all(i.enabled for i in result)
+
+    def test_limit_respected(self, service: TaxomeshService) -> None:
+        """limit parameter caps the result count."""
+        for i in range(10):
+            service.create_item(name=f"Tango {i}")
+        params = SearchItemsRequest(q="Tango", limit=3)
+        result = handlers.search_items(service, params)
+        assert len(result) <= 3
+
+    def test_unknown_category_id_raises(self, service: TaxomeshService) -> None:
+        """Non-existent category_id propagates TaxomeshCategoryNotFoundError."""
+        params = SearchItemsRequest(q="anything", category_id=uuid4())
+        with pytest.raises(TaxomeshCategoryNotFoundError):
+            handlers.search_items(service, params)
+
+    def test_category_scoping_with_recursive(self, service: TaxomeshService) -> None:
+        """recursive=True includes items in descendant categories; False excludes them."""
+        parent = service.create_category(name="Music")
+        child = service.create_category(name="Music Sub")
+        service.add_category_parent(child.category_id, parent.category_id)
+        item = service.create_item(name="Troilo Bandoneón")
+        service.place_item_in_category(item.item_id, child.category_id)
+
+        params_recursive = SearchItemsRequest(q="Troilo", category_id=parent.category_id, recursive=True)
+        result_recursive = handlers.search_items(service, params_recursive)
+        assert any(i.item_id == item.item_id for i in result_recursive)
+
+        params_direct = SearchItemsRequest(q="Troilo", category_id=parent.category_id, recursive=False)
+        result_direct = handlers.search_items(service, params_direct)
+        assert all(i.item_id != item.item_id for i in result_direct)
+
+    def test_fuzzy_false_restricts_matching(self, service: TaxomeshService) -> None:
+        """fuzzy=False restricts to exact/substring matching — typos are not matched."""
+        service.create_item(name="Piazzolla Astor")
+
+        params_exact = SearchItemsRequest(q="Piazzolla", fuzzy=False)
+        assert any(i.name == "Piazzolla Astor" for i in handlers.search_items(service, params_exact))
+
+        params_typo = SearchItemsRequest(q="Piazcolla", fuzzy=False)
+        assert all(i.name != "Piazzolla Astor" for i in handlers.search_items(service, params_typo))
+
+    def test_whitespace_q_returns_empty(self, service: TaxomeshService) -> None:
+        """Whitespace-only query returns an empty list."""
+        service.create_item(name="Troilo")
+        params = SearchItemsRequest(q="   ")
+        assert handlers.search_items(service, params) == []
+
+    def test_invalid_limit_raises_value_error(self, service: TaxomeshService) -> None:
+        """limit <= 0 propagates ValueError from service without wrapping."""
+        params = SearchItemsRequest(q="tango", limit=0)
+        with pytest.raises(ValueError):
+            handlers.search_items(service, params)
+
+
+class TestSearchCategories:
+    """Tests for handlers.search_categories."""
+
+    def test_returns_matching_categories(self, service: TaxomeshService) -> None:
+        """Categories matching the query are returned as Category instances."""
+        service.create_category(name="Jazz")
+        service.create_category(name="Rock")
+        params = SearchCategoriesRequest(q="Jazz")
+        result = handlers.search_categories(service, params)
+        assert any(c.name == "Jazz" for c in result)
+        assert all(isinstance(c, Category) for c in result)
+
+    def test_blank_q_returns_empty(self, service: TaxomeshService) -> None:
+        """Blank query returns an empty list."""
+        service.create_category(name="Jazz")
+        params = SearchCategoriesRequest(q="")
+        result = handlers.search_categories(service, params)
+        assert result == []
+
+    def test_enabled_only_true_returns_enabled_categories(self, service: TaxomeshService) -> None:
+        """enabled_only=True returns only enabled categories (all categories are enabled by default)."""
+        service.create_category(name="Tango")
+        params = SearchCategoriesRequest(q="Tango", enabled_only=True)
+        result = handlers.search_categories(service, params)
+        assert all(c.enabled for c in result)
+
+    def test_limit_respected(self, service: TaxomeshService) -> None:
+        """limit parameter caps the result count."""
+        for i in range(10):
+            service.create_category(name=f"Genre {i}")
+        params = SearchCategoriesRequest(q="Genre", limit=2)
+        result = handlers.search_categories(service, params)
+        assert len(result) <= 2
+
+    def test_unknown_parent_id_raises(self, service: TaxomeshService) -> None:
+        """Non-existent parent_id propagates TaxomeshCategoryNotFoundError."""
+        params = SearchCategoriesRequest(q="anything", parent_id=uuid4())
+        with pytest.raises(TaxomeshCategoryNotFoundError):
+            handlers.search_categories(service, params)
+
+    def test_parent_id_restricts_to_direct_children(self, service: TaxomeshService) -> None:
+        """parent_id restricts results to direct children of the given parent."""
+        parent = service.create_category(name="Music Genre")
+        child = service.create_category(name="Tango Child")
+        service.add_category_parent(child.category_id, parent.category_id)
+        unrelated = service.create_category(name="Tango Unrelated")
+
+        params = SearchCategoriesRequest(q="Tango", parent_id=parent.category_id)
+        result = handlers.search_categories(service, params)
+        ids = [c.category_id for c in result]
+        assert child.category_id in ids
+        assert unrelated.category_id not in ids
+
+    def test_whitespace_q_returns_empty(self, service: TaxomeshService) -> None:
+        """Whitespace-only query returns an empty list."""
+        service.create_category(name="Tango")
+        params = SearchCategoriesRequest(q="   ")
+        assert handlers.search_categories(service, params) == []
 
 
 # ---------------------------------------------------------------------------

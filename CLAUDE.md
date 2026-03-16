@@ -280,6 +280,8 @@ Do NOT update README during implement — only after
 - N/A — no production storage changes (036-service-repo-parity)
 - Python 3.11 + `taxomesh/utils/memoize.py` (existing TTL cache utility) (028-service-read-cache)
 - N/A — pure in-process cache; no new storage, no migrations (028-service-read-cache)
+- Python 3.11 + Pydantic v2 (schemas), stdlib `typing.Final` (constant); no new runtime deps (037-contrib-api-search)
+- N/A — read-only; delegates entirely to existing service methods (037-contrib-api-search)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

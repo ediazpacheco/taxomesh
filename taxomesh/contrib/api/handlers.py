@@ -15,6 +15,8 @@ from taxomesh.contrib.api.schemas import (
     CreateItemRequest,
     CreateTagRequest,
     PlaceInCategoryRequest,
+    SearchCategoriesRequest,
+    SearchItemsRequest,
     UpdateCategoryRequest,
     UpdateItemRequest,
     UpdateTagRequest,
@@ -434,6 +436,62 @@ def remove_tag_from_item(service: TaxomeshService, tag_id: UUID, item_id: UUID) 
         TaxomeshItemNotFoundError: If no item with the given id exists.
     """
     service.remove_tag(tag_id=tag_id, item_id=item_id)
+
+
+# ---------------------------------------------------------------------------
+# Search
+# ---------------------------------------------------------------------------
+
+
+def search_items(service: TaxomeshService, params: SearchItemsRequest) -> list[Item]:
+    """Search items using all parameters from SearchItemsRequest.
+
+    Delegates 1:1 to service.search_items(). Adds no business logic.
+
+    Args:
+        service: The TaxomeshService instance.
+        params: Validated search parameters.
+
+    Returns:
+        Items ranked by relevance, trimmed to params.limit.
+
+    Raises:
+        ValueError: If params.limit <= 0 (raised by service).
+        TaxomeshCategoryNotFoundError: If params.category_id does not exist.
+    """
+    return service.search_items(
+        params.q,
+        limit=params.limit,
+        category_id=params.category_id,
+        enabled_only=params.enabled_only,
+        fuzzy=params.fuzzy,
+        recursive=params.recursive,
+    )
+
+
+def search_categories(service: TaxomeshService, params: SearchCategoriesRequest) -> list[Category]:
+    """Search categories using all parameters from SearchCategoriesRequest.
+
+    Delegates 1:1 to service.search_categories(). Adds no business logic.
+
+    Args:
+        service: The TaxomeshService instance.
+        params: Validated search parameters.
+
+    Returns:
+        Categories ranked by relevance, trimmed to params.limit.
+
+    Raises:
+        ValueError: If params.limit <= 0 (raised by service).
+        TaxomeshCategoryNotFoundError: If params.parent_id does not exist.
+    """
+    return service.search_categories(
+        params.q,
+        limit=params.limit,
+        parent_id=params.parent_id,
+        enabled_only=params.enabled_only,
+        fuzzy=params.fuzzy,
+    )
 
 
 # ---------------------------------------------------------------------------

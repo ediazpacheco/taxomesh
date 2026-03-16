@@ -11,6 +11,8 @@ from taxomesh.contrib.api.schemas import (
     CreateItemRequest,
     CreateTagRequest,
     PlaceInCategoryRequest,
+    SearchCategoriesRequest,
+    SearchItemsRequest,
     UpdateCategoryRequest,
     UpdateItemRequest,
     UpdateTagRequest,
@@ -18,6 +20,7 @@ from taxomesh.contrib.api.schemas import (
 from taxomesh.domain.constants import (
     MAX_CATEGORY_NAME_LENGTH,
     MAX_ITEM_NAME_LENGTH,
+    MAX_SEARCH_QUERY_LENGTH,
     MAX_SLUG_LENGTH,
     MAX_TAG_NAME_LENGTH,
 )
@@ -175,3 +178,72 @@ class TestPlaceInCategoryRequest:
         req = PlaceInCategoryRequest(category_id=uid)
         assert req.category_id == uid
         assert req.sort_index == 0
+
+
+class TestSearchItemsRequest:
+    """Tests for SearchItemsRequest schema."""
+
+    def test_valid_minimal(self) -> None:
+        """Only q is required; defaults apply for all other fields."""
+        req = SearchItemsRequest(q="troilo")
+        assert req.q == "troilo"
+        assert req.limit == 20
+        assert req.category_id is None
+        assert req.recursive is False
+        assert req.enabled_only is True
+        assert req.fuzzy is True
+
+    def test_q_too_long_raises(self) -> None:
+        """q exceeding MAX_SEARCH_QUERY_LENGTH triggers a ValidationError."""
+        with pytest.raises(ValidationError):
+            SearchItemsRequest(q="x" * (MAX_SEARCH_QUERY_LENGTH + 1))
+
+    def test_category_id_accepts_uuid(self) -> None:
+        """category_id accepts a valid UUID."""
+        uid = UUID("12345678-1234-5678-1234-567812345678")
+        req = SearchItemsRequest(q="troilo", category_id=uid)
+        assert req.category_id == uid
+
+    def test_category_id_accepts_none(self) -> None:
+        """category_id accepts None explicitly."""
+        req = SearchItemsRequest(q="troilo", category_id=None)
+        assert req.category_id is None
+
+    def test_custom_limit(self) -> None:
+        """limit field is accepted as an int."""
+        req = SearchItemsRequest(q="troilo", limit=5)
+        assert req.limit == 5
+
+
+class TestSearchCategoriesRequest:
+    """Tests for SearchCategoriesRequest schema."""
+
+    def test_valid_minimal(self) -> None:
+        """Only q is required; defaults apply for all other fields."""
+        req = SearchCategoriesRequest(q="jazz")
+        assert req.q == "jazz"
+        assert req.limit == 20
+        assert req.parent_id is None
+        assert req.enabled_only is True
+        assert req.fuzzy is True
+
+    def test_q_too_long_raises(self) -> None:
+        """q exceeding MAX_SEARCH_QUERY_LENGTH triggers a ValidationError."""
+        with pytest.raises(ValidationError):
+            SearchCategoriesRequest(q="x" * (MAX_SEARCH_QUERY_LENGTH + 1))
+
+    def test_parent_id_accepts_uuid(self) -> None:
+        """parent_id accepts a valid UUID."""
+        uid = UUID("12345678-1234-5678-1234-567812345678")
+        req = SearchCategoriesRequest(q="jazz", parent_id=uid)
+        assert req.parent_id == uid
+
+    def test_parent_id_accepts_none(self) -> None:
+        """parent_id accepts None explicitly."""
+        req = SearchCategoriesRequest(q="jazz", parent_id=None)
+        assert req.parent_id is None
+
+    def test_custom_limit(self) -> None:
+        """limit field is accepted as an int."""
+        req = SearchCategoriesRequest(q="jazz", limit=3)
+        assert req.limit == 3

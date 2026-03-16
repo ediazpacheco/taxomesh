@@ -10,11 +10,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from taxomesh.application.search import DEFAULT_SEARCH_LIMIT
 from taxomesh.domain.constants import (
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EXTERNAL_ID_STR_LENGTH,
     MAX_ITEM_NAME_LENGTH,
+    MAX_SEARCH_QUERY_LENGTH,
     MAX_SLUG_LENGTH,
     MAX_TAG_NAME_LENGTH,
 )
@@ -91,3 +93,24 @@ class PlaceInCategoryRequest(BaseModel):
 
     category_id: UUID
     sort_index: int = 0
+
+
+class SearchItemsRequest(BaseModel):
+    """Request parameters for searching items via the HTTP API."""
+
+    q: Annotated[str, Field(max_length=MAX_SEARCH_QUERY_LENGTH)]
+    limit: int = DEFAULT_SEARCH_LIMIT
+    category_id: UUID | None = None
+    recursive: bool = False
+    enabled_only: bool = True
+    fuzzy: bool = True
+
+
+class SearchCategoriesRequest(BaseModel):
+    """Request parameters for searching categories via the HTTP API."""
+
+    q: Annotated[str, Field(max_length=MAX_SEARCH_QUERY_LENGTH)]
+    limit: int = DEFAULT_SEARCH_LIMIT
+    parent_id: UUID | None = None
+    enabled_only: bool = True
+    fuzzy: bool = True

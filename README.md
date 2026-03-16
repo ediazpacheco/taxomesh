@@ -161,6 +161,11 @@ Pass `enabled_only=False` to include disabled items and categories.
 
 See [Python API — Fuzzy Search](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md#fuzzy-search) for the full parameter reference.
 
+To expose search in an HTTP endpoint, use the ready-made `SearchItemsRequest` /
+`SearchCategoriesRequest` schemas with `handlers.search_items` / `handlers.search_categories`
+and the `items_to_list` / `categories_to_list` serializers from `taxomesh.contrib.api`.
+See [HTTP API integration — Search endpoints](https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md#search-endpoints) for examples.
+
 ## Why This Exists
 
 Taxonomy work is usually underestimated. A simple category table becomes more complex

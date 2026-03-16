@@ -9,6 +9,7 @@ the taxonomy graph as a JSON response body.
 from typing import Any
 
 from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
+from taxomesh.domain.models import Category, Item
 
 
 # Any: dict values are a heterogeneous JSON mix (str, bool, list, nested dict)
@@ -44,3 +45,31 @@ def graph_to_dict(graph: TaxomeshGraph) -> dict[str, Any]:
         empty graph.  Never raises for any valid graph from the service.
     """
     return {"roots": [_node_to_dict(node) for node in graph.roots]}
+
+
+# Any: heterogeneous JSON dict
+def items_to_list(items: list[Item]) -> list[dict[str, Any]]:
+    """Serialize a list of Item domain objects to JSON-compatible dicts.
+
+    Args:
+        items: List of Item instances (e.g. returned by search_items).
+
+    Returns:
+        List of plain dicts produced by Item.model_dump(mode="json").
+        Empty list when items is empty.
+    """
+    return [item.model_dump(mode="json") for item in items]
+
+
+# Any: heterogeneous JSON dict
+def categories_to_list(categories: list[Category]) -> list[dict[str, Any]]:
+    """Serialize a list of Category domain objects to JSON-compatible dicts.
+
+    Args:
+        categories: List of Category instances (e.g. returned by search_categories).
+
+    Returns:
+        List of plain dicts produced by Category.model_dump(mode="json").
+        Empty list when categories is empty.
+    """
+    return [cat.model_dump(mode="json") for cat in categories]
