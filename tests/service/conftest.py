@@ -6,6 +6,8 @@ from uuid import UUID
 
 import pytest
 
+from taxomesh.adapters.repositories.json_repository import JsonRepository
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
 from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.models import (
     Category,
@@ -241,10 +243,29 @@ class InMemoryRepository:
         return "InMemoryRepository (test)"
 
 
-@pytest.fixture
-def service() -> TaxomeshService:
-    """Return a TaxomeshService backed by a fresh InMemoryRepository."""
-    return TaxomeshService(repository=InMemoryRepository())
+@pytest.fixture(
+    params=["in_memory", "json", "yaml", "django"],
+    ids=["in_memory", "json", "yaml", "django"],
+)
+def service(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshService:
+    """Return a TaxomeshService backed by a fresh repository for each backend.
+
+    Parametrized over InMemoryRepository, JsonRepository, YAMLRepository, and
+    DjangoRepository (optional — skips when Django is not configured) so that every
+    behavioral test runs once per backend, ensuring parity.
+    """
+    if request.param == "in_memory":
+        return TaxomeshService(repository=InMemoryRepository())
+    if request.param == "json":
+        return TaxomeshService(repository=JsonRepository(tmp_path / "test.json"))
+    if request.param == "yaml":
+        return TaxomeshService(repository=YAMLRepository(tmp_path / "test.yaml"))
+    # django
+    pytest.importorskip("django", reason="django not installed")
+    request.getfixturevalue("db")
+    from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+
+    return TaxomeshService(repository=DjangoRepository())
 
 
 @pytest.fixture

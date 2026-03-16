@@ -20,6 +20,7 @@ class TestDjangoRepoWrapsImproperlyConfigured:
     def test_django_repo_wraps_improperly_configured(self) -> None:
         """DjangoRepository() raises TaxomeshRepositoryError with 'DJANGO_SETTINGS_MODULE'
         in the message when ImproperlyConfigured is raised during model import."""
+        pytest.importorskip("django", reason="django not installed")
         from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
 
         # Save original module if present
