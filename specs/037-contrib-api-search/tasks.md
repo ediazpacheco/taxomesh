@@ -20,7 +20,7 @@
 
 **⚠️ CRITICAL**: No schema task can begin until T001 is complete.
 
-- [ ] T001 Add `MAX_SEARCH_QUERY_LENGTH: Final[int] = 500` to `taxomesh/domain/constants.py` near the other `MAX_*` string-length constants
+- [x] T001 Add `MAX_SEARCH_QUERY_LENGTH: Final[int] = 500` to `taxomesh/domain/constants.py` near the other `MAX_*` string-length constants
 
 **Checkpoint**: Constant available — user story schema work can now begin.
 
@@ -34,13 +34,13 @@
 
 ### Tests for User Story 1 ⚠️ Write and confirm FAIL before implementation
 
-- [ ] T002 [P] [US1] Add failing tests for `SearchItemsRequest` schema (required `q`, max-length rejection, all defaults, UUID/None `category_id`) in `tests/contrib/test_api_schemas.py`
-- [ ] T003 [P] [US1] Add failing tests for `search_items` handler (matching query, `enabled_only=True` filtering, blank `q` → `[]`, `limit` respected, `TaxomeshCategoryNotFoundError` propagation) in `tests/contrib/test_api_handlers.py`
+- [x] T002 [P] [US1] Add failing tests for `SearchItemsRequest` schema (required `q`, max-length rejection, all defaults, UUID/None `category_id`) in `tests/contrib/test_api_schemas.py`
+- [x] T003 [P] [US1] Add failing tests for `search_items` handler (matching query, `enabled_only=True` filtering, blank `q` → `[]`, `limit` respected, `TaxomeshCategoryNotFoundError` propagation) in `tests/contrib/test_api_handlers.py`
 
 ### Implementation for User Story 1
 
-- [ ] T004 [US1] Add `SearchItemsRequest` schema to `taxomesh/contrib/api/schemas.py` with `q: Annotated[str, Field(max_length=MAX_SEARCH_QUERY_LENGTH)]`, `limit: int = DEFAULT_SEARCH_LIMIT`, `category_id: UUID | None = None`, `recursive: bool = False`, `enabled_only: bool = True`, `fuzzy: bool = True` (imports: `MAX_SEARCH_QUERY_LENGTH` from `taxomesh.domain.constants`, `DEFAULT_SEARCH_LIMIT` from `taxomesh.application.search`)
-- [ ] T005 [US1] Add `search_items(service: TaxomeshService, params: SearchItemsRequest) -> list[Item]` handler to `taxomesh/contrib/api/handlers.py`, delegating all params as kwargs to `service.search_items()` with no exception handling
+- [x] T004 [US1] Add `SearchItemsRequest` schema to `taxomesh/contrib/api/schemas.py` with `q: Annotated[str, Field(max_length=MAX_SEARCH_QUERY_LENGTH)]`, `limit: int = DEFAULT_SEARCH_LIMIT`, `category_id: UUID | None = None`, `recursive: bool = False`, `enabled_only: bool = True`, `fuzzy: bool = True` (imports: `MAX_SEARCH_QUERY_LENGTH` from `taxomesh.domain.constants`, `DEFAULT_SEARCH_LIMIT` from `taxomesh.application.search`)
+- [x] T005 [US1] Add `search_items(service: TaxomeshService, params: SearchItemsRequest) -> list[Item]` handler to `taxomesh/contrib/api/handlers.py`, delegating all params as kwargs to `service.search_items()` with no exception handling
 
 **Checkpoint**: Run `pytest tests/contrib/test_api_schemas.py tests/contrib/test_api_handlers.py -k "search_item"` — all tests green.
 
@@ -54,13 +54,13 @@
 
 ### Tests for User Story 2 ⚠️ Write and confirm FAIL before implementation
 
-- [ ] T006 [P] [US2] Add failing tests for `SearchCategoriesRequest` schema (required `q`, max-length rejection, all defaults, UUID/None `parent_id`) in `tests/contrib/test_api_schemas.py`
-- [ ] T007 [P] [US2] Add failing tests for `search_categories` handler (matching query, blank `q` → `[]`, `limit` respected, `enabled_only` filtering, `parent_id` scoping) in `tests/contrib/test_api_handlers.py`
+- [x] T006 [P] [US2] Add failing tests for `SearchCategoriesRequest` schema (required `q`, max-length rejection, all defaults, UUID/None `parent_id`) in `tests/contrib/test_api_schemas.py`
+- [x] T007 [P] [US2] Add failing tests for `search_categories` handler (matching query, blank `q` → `[]`, `limit` respected, `enabled_only` filtering, `parent_id` scoping) in `tests/contrib/test_api_handlers.py`
 
 ### Implementation for User Story 2
 
-- [ ] T008 [US2] Add `SearchCategoriesRequest` schema to `taxomesh/contrib/api/schemas.py` with `q: Annotated[str, Field(max_length=MAX_SEARCH_QUERY_LENGTH)]`, `limit: int = DEFAULT_SEARCH_LIMIT`, `parent_id: UUID | None = None`, `enabled_only: bool = True`, `fuzzy: bool = True`
-- [ ] T009 [US2] Add `search_categories(service: TaxomeshService, params: SearchCategoriesRequest) -> list[Category]` handler to `taxomesh/contrib/api/handlers.py`, delegating all params as kwargs to `service.search_categories()` with no exception handling
+- [x] T008 [US2] Add `SearchCategoriesRequest` schema to `taxomesh/contrib/api/schemas.py` with `q: Annotated[str, Field(max_length=MAX_SEARCH_QUERY_LENGTH)]`, `limit: int = DEFAULT_SEARCH_LIMIT`, `parent_id: UUID | None = None`, `enabled_only: bool = True`, `fuzzy: bool = True`
+- [x] T009 [US2] Add `search_categories(service: TaxomeshService, params: SearchCategoriesRequest) -> list[Category]` handler to `taxomesh/contrib/api/handlers.py`, delegating all params as kwargs to `service.search_categories()` with no exception handling
 
 **Checkpoint**: Run `pytest tests/contrib/test_api_schemas.py tests/contrib/test_api_handlers.py -k "search_categor"` — all tests green.
 
@@ -74,12 +74,12 @@
 
 ### Tests for User Story 3 ⚠️ Write and confirm FAIL before implementation
 
-- [ ] T010 [US3] Add failing tests for `items_to_list` (non-empty list → list of dicts with string UUID, empty list → `[]`) and `categories_to_list` (same contract) in `tests/contrib/test_api_serializers.py`
+- [x] T010 [US3] Add failing tests for `items_to_list` (non-empty list → list of dicts with string UUID, empty list → `[]`) and `categories_to_list` (same contract) in `tests/contrib/test_api_serializers.py`
 
 ### Implementation for User Story 3
 
-- [ ] T011 [US3] Add `items_to_list(items: list[Item]) -> list[dict[str, Any]]` to `taxomesh/contrib/api/serializers.py` using `[item.model_dump(mode="json") for item in items]`
-- [ ] T012 [US3] Add `categories_to_list(categories: list[Category]) -> list[dict[str, Any]]` to `taxomesh/contrib/api/serializers.py` using `[cat.model_dump(mode="json") for cat in categories]`
+- [x] T011 [US3] Add `items_to_list(items: list[Item]) -> list[dict[str, Any]]` to `taxomesh/contrib/api/serializers.py` using `[item.model_dump(mode="json") for item in items]`
+- [x] T012 [US3] Add `categories_to_list(categories: list[Category]) -> list[dict[str, Any]]` to `taxomesh/contrib/api/serializers.py` using `[cat.model_dump(mode="json") for cat in categories]`
 
 **Checkpoint**: Run `pytest tests/contrib/test_api_serializers.py` — all tests green.
 
@@ -89,10 +89,10 @@
 
 **Purpose**: Verify all quality gates pass end-to-end before proposing the PR.
 
-- [ ] T013 Run `ruff check .` and fix any linting errors across all modified files
-- [ ] T014 [P] Run `ruff format --check .` and fix any formatting issues
-- [ ] T015 [P] Run `mypy --strict .` and fix any type errors (pay attention to `list[dict[str, Any]]` return types and `Any` justification comments)
-- [ ] T016 Run `pytest --cov=taxomesh --cov-fail-under=80` and confirm coverage ≥ 80% with all tests passing
+- [x] T013 Run `ruff check .` and fix any linting errors across all modified files
+- [x] T014 [P] Run `ruff format --check .` and fix any formatting issues
+- [x] T015 [P] Run `mypy --strict .` and fix any type errors (pay attention to `list[dict[str, Any]]` return types and `Any` justification comments)
+- [x] T016 Run `pytest --cov=taxomesh --cov-fail-under=80` and confirm coverage ≥ 80% with all tests passing
 
 ---
 

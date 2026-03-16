@@ -1,10 +1,10 @@
-"""Tests for taxomesh.contrib.api.serializers — graph_to_dict."""
+"""Tests for taxomesh.contrib.api.serializers — graph_to_dict, items_to_list, categories_to_list."""
 
 import json
 
 import taxomesh.contrib.api as contrib_api
 from taxomesh.application.service import TaxomeshService
-from taxomesh.contrib.api.serializers import graph_to_dict
+from taxomesh.contrib.api.serializers import categories_to_list, graph_to_dict, items_to_list
 
 
 class TestSerializersReExport:
@@ -161,3 +161,85 @@ class TestGraphToDictJsonSerializable:
         service.place_item_in_category(item.item_id, cat.category_id)
         result = graph_to_dict(service.get_graph())
         json.dumps(result)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# items_to_list
+# ---------------------------------------------------------------------------
+
+
+class TestItemsToList:
+    """Tests for items_to_list serializer."""
+
+    def test_single_item_returns_dict_with_string_uuid(self, service: TaxomeshService) -> None:
+        """A single Item is serialized to a dict with item_id as a string."""
+        item = service.create_item(name="Kind of Blue")
+        result = items_to_list([item])
+        assert len(result) == 1
+        entry = result[0]
+        assert isinstance(entry, dict)
+        assert isinstance(entry["item_id"], str)
+        assert entry["name"] == "Kind of Blue"
+
+    def test_empty_list_returns_empty(self) -> None:
+        """Empty input returns an empty list."""
+        assert items_to_list([]) == []
+
+    def test_multiple_items_all_serialized(self, service: TaxomeshService) -> None:
+        """All items in the input are serialized."""
+        items = [service.create_item(name=f"Item {i}") for i in range(3)]
+        result = items_to_list(items)
+        assert len(result) == 3
+        assert all(isinstance(r, dict) for r in result)
+
+    def test_output_matches_model_dump(self, service: TaxomeshService) -> None:
+        """Each dict matches Item.model_dump(mode='json')."""
+        item = service.create_item(name="Troilo")
+        result = items_to_list([item])
+        assert result[0] == item.model_dump(mode="json")
+
+    def test_json_serializable(self, service: TaxomeshService) -> None:
+        """Output passes json.dumps without raising."""
+        item = service.create_item(name="Piazzolla")
+        json.dumps(items_to_list([item]))  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# categories_to_list
+# ---------------------------------------------------------------------------
+
+
+class TestCategoriesToList:
+    """Tests for categories_to_list serializer."""
+
+    def test_single_category_returns_dict_with_string_uuid(self, service: TaxomeshService) -> None:
+        """A single Category is serialized to a dict with category_id as a string."""
+        cat = service.create_category(name="Tango")
+        result = categories_to_list([cat])
+        assert len(result) == 1
+        entry = result[0]
+        assert isinstance(entry, dict)
+        assert isinstance(entry["category_id"], str)
+        assert entry["name"] == "Tango"
+
+    def test_empty_list_returns_empty(self) -> None:
+        """Empty input returns an empty list."""
+        assert categories_to_list([]) == []
+
+    def test_multiple_categories_all_serialized(self, service: TaxomeshService) -> None:
+        """All categories in the input are serialized."""
+        cats = [service.create_category(name=f"Cat {i}") for i in range(3)]
+        result = categories_to_list(cats)
+        assert len(result) == 3
+        assert all(isinstance(r, dict) for r in result)
+
+    def test_output_matches_model_dump(self, service: TaxomeshService) -> None:
+        """Each dict matches Category.model_dump(mode='json')."""
+        cat = service.create_category(name="Jazz")
+        result = categories_to_list([cat])
+        assert result[0] == cat.model_dump(mode="json")
+
+    def test_json_serializable(self, service: TaxomeshService) -> None:
+        """Output passes json.dumps without raising."""
+        cat = service.create_category(name="Folk")
+        json.dumps(categories_to_list([cat]))  # must not raise

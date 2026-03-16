@@ -2,7 +2,7 @@
 
 **Feature Branch**: `037-contrib-api-search`
 **Created**: 2026-03-15
-**Status**: Draft
+**Status**: Implemented
 
 ## User Scenarios & Testing *(mandatory)*
 

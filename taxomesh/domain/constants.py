@@ -40,6 +40,9 @@ MAX_ITEM_NAME_LENGTH: Final[int] = 256
 # Maximum character length for a slug (URL-friendly short identifier).
 MAX_SLUG_LENGTH: Final[int] = 256
 
+# Maximum character length for a search query string.
+MAX_SEARCH_QUERY_LENGTH: Final[int] = 500
+
 # Default value for slug — empty string means "no slug".
 DEFAULT_SLUG: Final[str] = ""
 

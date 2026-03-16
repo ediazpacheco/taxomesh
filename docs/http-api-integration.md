@@ -9,10 +9,10 @@ modules in `taxomesh.contrib.api` that you wire into your existing application. 
 building blocks work in FastAPI, Django, Flask, or any other Python web framework.
 
 ```python
-from taxomesh.contrib.api import schemas      # Pydantic request models
+from taxomesh.contrib.api import schemas      # Pydantic request models (incl. search request schemas)
 from taxomesh.contrib.api import handlers     # Pure delegation functions → TaxomeshService
 from taxomesh.contrib.api import errors       # errors.to_tuple(exc) → (status_code, body)
-from taxomesh.contrib.api import serializers  # serializers.graph_to_dict(graph) → JSON-safe dict
+from taxomesh.contrib.api import serializers  # graph_to_dict, items_to_list, categories_to_list
 ```
 
 ## FastAPI example
@@ -149,6 +149,83 @@ def graph_view(request):
     return JsonResponse(serializers.graph_to_dict(handlers.get_graph(service)))
 ```
 
+## Search endpoints
+
+Use `schemas.SearchItemsRequest` and `schemas.SearchCategoriesRequest` together with
+`handlers.search_items` / `handlers.search_categories` and the `serializers.items_to_list` /
+`serializers.categories_to_list` helpers to add ranked, fuzzy-tolerant search to any endpoint.
+
+### FastAPI example
+
+```python
+from taxomesh.contrib.api import handlers, schemas, serializers
+
+@app.get("/search/items")
+def search_items(q: str, limit: int = 20, fuzzy: bool = True):
+    params = schemas.SearchItemsRequest(q=q, limit=limit, fuzzy=fuzzy)
+    items = handlers.search_items(service, params)
+    return {"results": serializers.items_to_list(items)}
+
+@app.get("/search/categories")
+def search_categories(q: str, limit: int = 20, fuzzy: bool = True):
+    params = schemas.SearchCategoriesRequest(q=q, limit=limit, fuzzy=fuzzy)
+    categories = handlers.search_categories(service, params)
+    return {"results": serializers.categories_to_list(categories)}
+```
+
+### Django example
+
+```python
+from django.http import JsonResponse
+from taxomesh.contrib.api import handlers, schemas, serializers
+
+def search_items_view(request):
+    params = schemas.SearchItemsRequest(
+        q=request.GET.get("q", ""),
+        limit=int(request.GET.get("limit", 20)),
+        fuzzy=request.GET.get("fuzzy", "true").lower() != "false",
+    )
+    items = handlers.search_items(service, params)
+    return JsonResponse({"results": serializers.items_to_list(items)})
+```
+
+### SearchItemsRequest fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `q` | `str` | required | Search query (max 500 chars) |
+| `limit` | `int` | `20` | Maximum results returned |
+| `category_id` | `UUID \| None` | `None` | Restrict results to items in this category |
+| `recursive` | `bool` | `False` | Include items in descendant categories |
+| `enabled_only` | `bool` | `True` | Exclude disabled items |
+| `fuzzy` | `bool` | `True` | Enable typo-tolerant fuzzy matching |
+
+### SearchCategoriesRequest fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `q` | `str` | required | Search query (max 500 chars) |
+| `limit` | `int` | `20` | Maximum results returned |
+| `parent_id` | `UUID \| None` | `None` | Restrict to direct children of this parent |
+| `enabled_only` | `bool` | `True` | Exclude disabled categories |
+| `fuzzy` | `bool` | `True` | Enable typo-tolerant fuzzy matching |
+
+### Serializers
+
+`items_to_list(items)` and `categories_to_list(categories)` convert domain model lists to
+plain JSON-serializable dicts (via `model_dump(mode="json")`). They are separate from the
+handlers so you can apply additional processing (filtering, renaming) before serializing.
+
+```python
+from taxomesh.contrib.api.serializers import categories_to_list, items_to_list
+
+items_to_list([item])        # [{"item_id": "...", "name": "...", ...}]
+categories_to_list([cat])    # [{"category_id": "...", "name": "...", ...}]
+items_to_list([])            # []
+```
+
+---
+
 ## Error mapping
 
 `errors.to_tuple(exc)` maps any `TaxomeshError` to `(status_code, {"detail": "..."})`:
@@ -170,6 +247,7 @@ def graph_view(request):
 | Tags | `list_tags`, `create_tag`, `update_tag`, `delete_tag` |
 | Relationships | `add_category_parent`, `remove_category_parent`, `place_item_in_category`, `remove_item_from_category`, `assign_tag`, `remove_tag_from_item` |
 | Graph | `get_graph` |
+| Search | `search_items`, `search_categories` |
 
 ## Installation note
 
