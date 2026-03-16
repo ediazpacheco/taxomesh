@@ -6,7 +6,7 @@ contains no storage logic itself.
 """
 
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar
 from uuid import UUID, uuid4
@@ -929,6 +929,82 @@ class TaxomeshService:
         if direction == "outgoing":
             return [self.get_item(lnk.target_item_id) for lnk in links]
         return [self.get_item(lnk.source_item_id) for lnk in links]
+
+    def list_related_items_for_sources(
+        self,
+        source_item_ids: Collection[UUID],
+        *,
+        relation_types: Collection[str] | None = None,
+    ) -> dict[UUID, dict[str, list[Item]]]:
+        """Return related items grouped by source item ID and relation type.
+
+        Resolves all outgoing relations for every item in *source_item_ids* in
+        **two repository calls** (one batch link query + one ``list_items``),
+        eliminating the N+1 pattern of calling :meth:`list_related_items` in a
+        loop.  Relation type strings are normalised to lower-case before
+        filtering so callers may pass ``"Covers"`` or ``"COVERS"`` freely.
+
+        Source items that have no outgoing links (or no links matching the
+        filter) are **absent** from the returned dict — they are not represented
+        as empty inner dicts.
+
+        Args:
+            source_item_ids: Collection of source UUIDs.  Duplicates are
+                deduplicated automatically; order is not significant.
+                An empty collection returns ``{}`` immediately.
+            relation_types: Optional case-insensitive allow-list.
+                ``None`` or ``[]`` means no filter — all relation types are
+                included.
+
+        Returns:
+            Nested dict ``{source_item_id: {relation_type: [Item, ...]}}``
+            where items within each relation type list appear in
+            ``(sort_index ASC, target_item_id ASC)`` order.
+            Source IDs with no matching links are absent from the result.
+
+        Raises:
+            TaxomeshItemNotFoundError: If a ``target_item_id`` referenced by
+                any matched link does not exist in the repository.
+
+        Example::
+
+            song_a = service.create_item(name="Song A")
+            song_b = service.create_item(name="Song B")
+            artist = service.create_item(name="Artist X")
+            label  = service.create_item(name="Label Y")
+
+            service.relate_items(song_a.item_id, artist.item_id, "performed_by")
+            service.relate_items(song_a.item_id, label.item_id,  "released_by")
+            service.relate_items(song_b.item_id, artist.item_id, "performed_by")
+
+            result = service.list_related_items_for_sources(
+                [song_a.item_id, song_b.item_id],
+                relation_types=["performed_by"],
+            )
+            # result == {
+            #     song_a.item_id: {"performed_by": [artist]},
+            #     song_b.item_id: {"performed_by": [artist]},
+            # }
+            # Note: song_a's "released_by" link is excluded by the filter.
+            # Note: song_b is present even though it only has one matching link.
+        """
+        unique_ids = set(source_item_ids)
+        if not unique_ids:
+            return {}
+        normalised_types = [t.strip().lower() for t in relation_types] if relation_types else None
+        links = self._repo.list_item_relation_links_for_sources(unique_ids, relation_types=normalised_types)
+        if not links:
+            return {}
+        all_items = self._repo.list_items()
+        item_map: dict[UUID, Item] = {item.item_id: item for item in all_items}
+        result: dict[UUID, dict[str, list[Item]]] = {}
+        for link in links:
+            if link.target_item_id not in item_map:
+                raise TaxomeshItemNotFoundError(f"Item {link.target_item_id!r} referenced by relation not found")
+            result.setdefault(link.source_item_id, {}).setdefault(link.relation_type, []).append(
+                item_map[link.target_item_id]
+            )
+        return result
 
     def remove_item_relation(
         self,

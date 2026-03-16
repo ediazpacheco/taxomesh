@@ -16,7 +16,7 @@ class ItemRelationLink(ModelBase):
     The triple ``(source_item_id, target_item_id, relation_type)`` is the
     natural composite key — two links with the same triple are the same record.
     ``relation_type`` is always stored in lowercase; callers may supply any
-    casing and it will be normalised transparently.
+    casing and it will be normalized transparently.
     """
 
     source_item_id: UUID

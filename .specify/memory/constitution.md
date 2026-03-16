@@ -309,8 +309,12 @@ All public Python **modules** and public **methods/functions** MUST include a do
 following [Google style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings).
 
 - **Module docstring**: one-line summary describing the module's purpose, at the top of every `.py` file.
-- **Function/method docstring**: one-line summary, then `Args:`, `Returns:`, and `Raises:` sections
-  as needed. Omit any section that has nothing to document.
+- **Function/method docstring**: one-line summary, then `Args:`, `Returns:`, `Raises:`, and
+  optionally `Example:` sections as needed. Omit any section that has nothing to document.
+- **`Example:` section**: add to any public method whose return value shape is non-obvious
+  (e.g. nested dicts, grouped structures, filtered lists). Use a reStructuredText code block
+  (`Example::` followed by an indented block). Show a realistic input and the corresponding
+  output as a comment. Keep the example short — three to five lines of setup, one call, one result.
 - **Private methods** (name starts with `_`) are exempt but encouraged for complex logic.
 
 ```python

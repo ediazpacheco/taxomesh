@@ -263,3 +263,94 @@ class TestCascadeDeleteOnItemDeletion:
         remaining = service.list_item_relations(c.item_id)
         assert len(remaining) == 1
         assert remaining[0].target_item_id == d.item_id
+
+
+# ---------------------------------------------------------------------------
+# US6 — list_related_items_for_sources (batch)
+# ---------------------------------------------------------------------------
+
+
+class TestListRelatedItemsForSources:
+    """Tests for service.list_related_items_for_sources."""
+
+    def test_returns_grouped_dict(self, service: TaxomeshService) -> None:
+        src1 = service.create_item(name="src1")
+        src2 = service.create_item(name="src2")
+        tgt1 = service.create_item(name="tgt1")
+        tgt2 = service.create_item(name="tgt2")
+        service.relate_items(src1.item_id, tgt1.item_id, "covers")
+        service.relate_items(src2.item_id, tgt2.item_id, "covers")
+
+        result = service.list_related_items_for_sources([src1.item_id, src2.item_id])
+        assert set(result.keys()) == {src1.item_id, src2.item_id}
+        assert len(result[src1.item_id]["covers"]) == 1
+        assert result[src1.item_id]["covers"][0].item_id == tgt1.item_id
+        assert len(result[src2.item_id]["covers"]) == 1
+        assert result[src2.item_id]["covers"][0].item_id == tgt2.item_id
+
+    def test_empty_source_ids_returns_empty_dict(self, service: TaxomeshService) -> None:
+        result = service.list_related_items_for_sources([])
+        assert result == {}
+
+    def test_source_with_no_links_absent_from_result(self, service: TaxomeshService) -> None:
+        src = service.create_item(name="src")
+        result = service.list_related_items_for_sources([src.item_id])
+        assert result == {}
+
+    def test_deduplicates_source_ids(self, service: TaxomeshService) -> None:
+        src = service.create_item(name="src")
+        tgt = service.create_item(name="tgt")
+        service.relate_items(src.item_id, tgt.item_id, "covers")
+
+        result_once = service.list_related_items_for_sources([src.item_id])
+        result_dup = service.list_related_items_for_sources([src.item_id, src.item_id])
+        assert result_once == result_dup
+
+    def test_filters_by_relation_types(self, service: TaxomeshService) -> None:
+        src = service.create_item(name="src")
+        t1 = service.create_item(name="T1")
+        t2 = service.create_item(name="T2")
+        service.relate_items(src.item_id, t1.item_id, "covers")
+        service.relate_items(src.item_id, t2.item_id, "samples")
+
+        result = service.list_related_items_for_sources([src.item_id], relation_types=["covers"])
+        assert "covers" in result[src.item_id]
+        assert "samples" not in result.get(src.item_id, {})
+
+    def test_case_normalization_in_filter(self, service: TaxomeshService) -> None:
+        src = service.create_item(name="src")
+        tgt = service.create_item(name="tgt")
+        service.relate_items(src.item_id, tgt.item_id, "covers")
+
+        result = service.list_related_items_for_sources([src.item_id], relation_types=["COVERS"])
+        assert src.item_id in result
+        assert "covers" in result[src.item_id]
+
+    def test_preserves_sort_index_order(self, service: TaxomeshService) -> None:
+        src = service.create_item(name="src")
+        t1 = service.create_item(name="T1")
+        t2 = service.create_item(name="T2")
+        service.relate_items(src.item_id, t1.item_id, "covers", sort_index=5)
+        service.relate_items(src.item_id, t2.item_id, "covers", sort_index=1)
+
+        result = service.list_related_items_for_sources([src.item_id])
+        items = result[src.item_id]["covers"]
+        assert items[0].item_id == t2.item_id
+        assert items[1].item_id == t1.item_id
+
+    def test_raises_for_missing_target_item(self, service: TaxomeshService) -> None:
+        from uuid import uuid4  # noqa: PLC0415
+
+        from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
+
+        src = service.create_item(name="src")
+        # Save a relation link pointing to a non-existent target directly in the repo
+        orphan_link = ItemRelationLink(
+            source_item_id=src.item_id,
+            target_item_id=uuid4(),
+            relation_type="covers",
+        )
+        service._repo.save_item_relation_link(orphan_link)
+
+        with pytest.raises(TaxomeshItemNotFoundError):
+            service.list_related_items_for_sources([src.item_id])

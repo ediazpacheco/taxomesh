@@ -6,6 +6,7 @@ repository. Explicit inheritance is NOT required; mypy verifies compliance
 structurally at type-check time.
 """
 
+from collections.abc import Collection
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
@@ -384,6 +385,49 @@ class TaxomeshRepositoryBase(Protocol):
             List of matching ItemRelationLink objects ordered by
             ``(sort_index ASC, source_item_id ASC, target_item_id ASC)``;
             empty list if none match.
+        """
+        ...
+
+    def list_item_relation_links_for_sources(
+        self,
+        source_item_ids: Collection[UUID],
+        *,
+        relation_types: Collection[str] | None = None,
+    ) -> list[ItemRelationLink]:
+        """Return outgoing relation links for many source items in a single query.
+
+        Eliminates the N+1 pattern that arises when calling
+        :meth:`list_item_relation_links` in a loop over many source items.
+        Only outgoing links (where ``source_item_id`` is in *source_item_ids*)
+        are returned.  Results are ordered deterministically by
+        ``(source_item_id ASC, relation_type ASC, sort_index ASC, target_item_id ASC)``.
+
+        Args:
+            source_item_ids: Collection of source UUIDs to query.
+                An empty collection returns ``[]`` immediately without hitting storage.
+            relation_types: Optional allow-list of relation type strings.
+                ``None`` or ``[]`` means no filter — all types are returned.
+
+        Returns:
+            List of matching :class:`~taxomesh.domain.models.ItemRelationLink` objects
+            in deterministic order; empty list if *source_item_ids* is empty or no
+            links match.
+
+        Example::
+
+            # items: song_a (UUID a), song_b (UUID b), artist_x (UUID x), label_y (UUID y)
+            # links: song_a --(performed_by)--> artist_x
+            #        song_b --(performed_by)--> artist_x
+            #        song_a --(released_by)-->  label_y
+
+            links = repo.list_item_relation_links_for_sources(
+                [song_a_id, song_b_id],
+                relation_types=["performed_by"],
+            )
+            # → [
+            #     ItemRelationLink(source=song_a_id, target=artist_x_id, relation_type="performed_by"),
+            #     ItemRelationLink(source=song_b_id, target=artist_x_id, relation_type="performed_by"),
+            #   ]
         """
         ...
 

@@ -113,3 +113,92 @@ class TestJsonBackwardCompat:
         svc2 = _fresh(tmp_json_path)
         links = svc2.list_item_relations(src.item_id)
         assert all(isinstance(lnk, ItemRelationLink) for lnk in links)
+
+
+class TestJsonBatchRelationLookup:
+    """Tests for JsonRepository.list_item_relation_links_for_sources."""
+
+    def test_returns_links_for_multiple_sources(self, tmp_json_path: Path) -> None:
+        svc = _fresh(tmp_json_path)
+        a = svc.create_item(name="A")
+        b = svc.create_item(name="B")
+        c = svc.create_item(name="C")
+        t1 = svc.create_item(name="T1")
+        t2 = svc.create_item(name="T2")
+        svc.relate_items(a.item_id, t1.item_id, "x")
+        svc.relate_items(b.item_id, t2.item_id, "y")
+
+        repo = _fresh(tmp_json_path)._repo
+        links = repo.list_item_relation_links_for_sources([a.item_id, b.item_id])
+        assert len(links) == 2
+        source_ids = {lnk.source_item_id for lnk in links}
+        assert source_ids == {a.item_id, b.item_id}
+        # c has no links — should not appear
+        assert all(lnk.source_item_id != c.item_id for lnk in links)
+
+    def test_empty_source_ids_returns_empty(self, tmp_json_path: Path) -> None:
+        repo = _fresh(tmp_json_path)._repo
+        assert repo.list_item_relation_links_for_sources([]) == []
+
+    def test_filters_by_relation_types(self, tmp_json_path: Path) -> None:
+        svc = _fresh(tmp_json_path)
+        src = svc.create_item(name="src")
+        t1 = svc.create_item(name="T1")
+        t2 = svc.create_item(name="T2")
+        svc.relate_items(src.item_id, t1.item_id, "music_by")
+        svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
+
+        repo = _fresh(tmp_json_path)._repo
+        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=["music_by"])
+        assert len(links) == 1
+        assert links[0].relation_type == "music_by"
+
+    def test_none_filter_returns_all_types(self, tmp_json_path: Path) -> None:
+        svc = _fresh(tmp_json_path)
+        src = svc.create_item(name="src")
+        t1 = svc.create_item(name="T1")
+        t2 = svc.create_item(name="T2")
+        svc.relate_items(src.item_id, t1.item_id, "music_by")
+        svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
+
+        repo = _fresh(tmp_json_path)._repo
+        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=None)
+        assert len(links) == 2
+
+    def test_empty_filter_returns_all_types(self, tmp_json_path: Path) -> None:
+        svc = _fresh(tmp_json_path)
+        src = svc.create_item(name="src")
+        t1 = svc.create_item(name="T1")
+        t2 = svc.create_item(name="T2")
+        svc.relate_items(src.item_id, t1.item_id, "music_by")
+        svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
+
+        repo = _fresh(tmp_json_path)._repo
+        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=[])
+        assert len(links) == 2
+
+    def test_ordering(self, tmp_json_path: Path) -> None:
+        svc = _fresh(tmp_json_path)
+        src = svc.create_item(name="src")
+        t1 = svc.create_item(name="T1")
+        t2 = svc.create_item(name="T2")
+        svc.relate_items(src.item_id, t1.item_id, "covers", sort_index=5)
+        svc.relate_items(src.item_id, t2.item_id, "covers", sort_index=1)
+
+        repo = _fresh(tmp_json_path)._repo
+        links = repo.list_item_relation_links_for_sources([src.item_id])
+        assert links[0].sort_index == 1
+        assert links[1].sort_index == 5
+
+    def test_stable_tiebreak_by_target_id(self, tmp_json_path: Path) -> None:
+        svc = _fresh(tmp_json_path)
+        src = svc.create_item(name="src")
+        t1 = svc.create_item(name="T1")
+        t2 = svc.create_item(name="T2")
+        svc.relate_items(src.item_id, t1.item_id, "covers", sort_index=0)
+        svc.relate_items(src.item_id, t2.item_id, "covers", sort_index=0)
+
+        repo = _fresh(tmp_json_path)._repo
+        links = repo.list_item_relation_links_for_sources([src.item_id])
+        target_ids = [str(lnk.target_item_id) for lnk in links]
+        assert target_ids == sorted(target_ids)
