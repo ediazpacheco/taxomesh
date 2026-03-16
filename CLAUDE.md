@@ -256,6 +256,8 @@ Do NOT update README during implement — only after
 - JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM) (034-default-sort-index)
 - Python 3.11 + Django ≥ 4.2 (ORM + migrations) (035-django-ordering-indexes)
 - Django ORM — SQLite (tests), PostgreSQL (production) (035-django-ordering-indexes)
+- Python 3.11 + pytest (built-in fixtures: `tmp_path`, `request`), pytest-django (P2 — optional) (036-service-repo-parity)
+- N/A — no production storage changes (036-service-repo-parity)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

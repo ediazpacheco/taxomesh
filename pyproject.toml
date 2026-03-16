@@ -88,6 +88,9 @@ exclude = ["taxomesh/contrib/django/", "tests/contrib/django/", "tests/django_ur
 addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
 DJANGO_SETTINGS_MODULE = "tests.django_settings"
+markers = [
+    "django_db: mark test as requiring Django database access (provided by pytest-django when installed)",
+]
 
 [tool.coverage.run]
 omit = [
