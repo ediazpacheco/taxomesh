@@ -19,7 +19,7 @@ from taxomesh.exceptions import (
     TaxomeshValidationError,
 )
 
-__VERSION__ = "0.1.0a23"
+__VERSION__ = "0.1.0a27"
 __version__ = __VERSION__
 
 __all__ = [

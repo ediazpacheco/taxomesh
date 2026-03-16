@@ -236,6 +236,12 @@ class ItemRelationLinkModel(models.Model):
         app_label = APP_LABEL
         db_table = ITEM_RELATION_LINK_TABLE
         unique_together = [("source_item", "target_item", "relation_type")]
+        indexes = [
+            models.Index(
+                fields=["source_item_id", "relation_type", "sort_index", "target_item_id"],
+                name="taxomesh_rl_src_type_sort_idx",
+            ),
+        ]
 
 
 class CategoryGraphProxy(CategoryModel):

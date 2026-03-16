@@ -9,6 +9,7 @@ place with ``os.replace`` so the target file is never in a partial state.
 import json
 import os
 import tempfile
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Final, Literal
 from uuid import UUID
@@ -457,6 +458,25 @@ class JsonRepository:
         if relation_type is not None:
             result = [lnk for lnk in result if lnk.relation_type == relation_type]
         return sorted(result, key=lambda lnk: (lnk.sort_index, str(lnk.source_item_id), str(lnk.target_item_id)))
+
+    def list_item_relation_links_for_sources(
+        self,
+        source_item_ids: Collection[UUID],
+        *,
+        relation_types: Collection[str] | None = None,
+    ) -> list[ItemRelationLink]:
+        """Return outgoing links for many source items."""
+        source_set = set(source_item_ids)
+        if not source_set:
+            return []
+        result = [lnk for lnk in self._item_relation_links if lnk.source_item_id in source_set]
+        if relation_types:
+            type_set = set(relation_types)
+            result = [lnk for lnk in result if lnk.relation_type in type_set]
+        return sorted(
+            result,
+            key=lambda lnk: (str(lnk.source_item_id), lnk.relation_type, lnk.sort_index, str(lnk.target_item_id)),
+        )
 
     def delete_item_relation_link(
         self,

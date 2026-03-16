@@ -12,6 +12,7 @@ Usage::
     svc = TaxomeshService(repository=DjangoRepository())
 """
 
+from collections.abc import Collection
 from typing import Any, Final, Literal
 from uuid import UUID
 
@@ -756,6 +757,29 @@ class DjangoRepository:
             if relation_type is not None:
                 qs = qs.filter(relation_type=relation_type)
             qs = qs.order_by("sort_index", "source_item_id", "target_item_id")
+        except DatabaseError as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
+        return [self._row_to_item_relation_link(row) for row in qs]
+
+    def list_item_relation_links_for_sources(
+        self,
+        source_item_ids: Collection[UUID],
+        *,
+        relation_types: Collection[str] | None = None,
+    ) -> list[ItemRelationLink]:
+        """Return outgoing links for many source items via single ORM query."""
+        from django.db import DatabaseError  # noqa: PLC0415
+
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+        source_list = list(source_item_ids)
+        if not source_list:
+            return []
+        try:
+            qs = self._ItemRelationLinkModel.objects.using(self._using).filter(source_item_id__in=source_list)
+            if relation_types:
+                qs = qs.filter(relation_type__in=list(relation_types))
+            qs = qs.order_by("source_item_id", "relation_type", "sort_index", "target_item_id")
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
         return [self._row_to_item_relation_link(row) for row in qs]

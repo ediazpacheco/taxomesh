@@ -202,6 +202,7 @@ re-solved in each codebase.
 | [Repositories](https://github.com/ediazpacheco/taxomesh/blob/main/docs/repositories.md) | YAML, JSON, and Django storage backends; custom backends |
 | [Configuration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/configuration.md) | `taxomesh.toml` reference |
 | [CLI reference](https://github.com/ediazpacheco/taxomesh/blob/main/docs/cli.md) | Command-line interface for categories, items, tags, and graph |
+| [Changelog](https://github.com/ediazpacheco/taxomesh/blob/main/CHANGELOG.md) | Release history and new API methods |
 
 ## Design
 
