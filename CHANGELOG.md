@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Performance
+
+- `search_items()` and `search_categories()` now pre-normalize each candidate's
+  name, slug, and external\_id exactly once per call (via an internal
+  `SearchCandidate` object), eliminating the previous double-normalization of
+  names and reducing per-call work for large catalogs.
+- When `limit` is smaller than the number of scoring matches, a heap-based
+  top-k selection (O(N log k)) replaces a full sort (O(N log N)), reducing
+  per-keystroke cost for autocomplete workloads. Public API and result ordering
+  are unchanged.
+
+---
+
 ## [0.1.0a27] — 2026-03-16
 
 ### Added
