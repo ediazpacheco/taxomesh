@@ -5,13 +5,14 @@ It delegates all reads and writes to a pluggable repository backend and
 contains no storage logic itself.
 """
 
+import heapq
 import tomllib
 from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar
 from uuid import UUID, uuid4
 
-from taxomesh.application.search import DEFAULT_SEARCH_LIMIT, SearchEngine
+from taxomesh.application.search import DEFAULT_SEARCH_LIMIT, SearchCandidate, SearchEngine
 from taxomesh.domain.constants import DEFAULT_ITEM_EXTERNAL_ID, ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
 from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
@@ -1332,27 +1333,43 @@ class TaxomeshService:
     ) -> list[_T]:
         """Score *candidates* against *norm_q* and return the top *limit* results.
 
+        Each candidate's fields are normalized exactly once via
+        ``SearchCandidate`` before scoring. When ``limit`` is smaller than the
+        number of matching candidates, ``heapq.nsmallest`` is used instead of a
+        full sort to reduce work from O(N log N) to O(N log k).
+
         Args:
             norm_q: Pre-normalised query string.
             candidates: Entities to score (items or categories).
             get_name: Accessor for the candidate's name field.
             get_slug: Accessor for the candidate's slug field.
             get_ext: Accessor for the candidate's external_id field.
-            fuzzy: Passed through to ``SearchEngine.score_candidate``.
+            fuzzy: Passed through to ``SearchEngine._score_prenorm``.
             limit: Maximum number of results to return.
 
         Returns:
             Entities sorted by descending score then normalised name, capped at *limit*.
         """
         engine = SearchEngine()
+        # Normalize each candidate's fields exactly once.
+        search_candidates: list[SearchCandidate[_T]] = [
+            SearchCandidate(
+                obj=c,
+                norm_name=SearchEngine.normalize(get_name(c)),
+                norm_slug=SearchEngine.normalize(get_slug(c)),
+                norm_ext=(SearchEngine.normalize(get_ext(c)) if get_ext(c) != DEFAULT_ITEM_EXTERNAL_ID else ""),
+            )
+            for c in candidates
+        ]
         scored: list[tuple[float, str, _T]] = []
-        for c in candidates:
-            norm_name = SearchEngine.normalize(get_name(c))
-            score = engine.score_candidate(norm_q, norm_name, get_slug(c), get_ext(c), fuzzy=fuzzy)
+        for sc in search_candidates:
+            score = engine._score_prenorm(norm_q, sc.norm_name, sc.norm_slug, sc.norm_ext, fuzzy=fuzzy)
             if score is not None:
-                scored.append((score, norm_name, c))
+                scored.append((score, sc.norm_name, sc.obj))
+        if limit < len(scored):
+            return [c for _, _, c in heapq.nsmallest(limit, scored, key=lambda t: (-t[0], t[1]))]
         scored.sort(key=lambda t: (-t[0], t[1]))
-        return [c for _, _, c in scored[:limit]]
+        return [c for _, _, c in scored]
 
     def _collect_descendant_ids(self, category_id: UUID) -> set[UUID]:
         """Return the set of all descendant category UUIDs using BFS.

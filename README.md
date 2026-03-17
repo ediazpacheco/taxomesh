@@ -159,6 +159,10 @@ Results are sorted by match quality: exact matches first, then prefix, substring
 fuzzy matches. Pass `fuzzy=False` to restrict to exact/prefix/substring matching only.
 Pass `enabled_only=False` to include disabled items and categories.
 
+Both methods are optimized for autocomplete (per-keystroke) usage: candidate fields
+are normalized once per call and a heap-based top-k selection is used when `limit` is
+smaller than the total number of matches, keeping response time low as the catalog grows.
+
 See [Python API — Fuzzy Search](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md#fuzzy-search) for the full parameter reference.
 
 To expose search in an HTTP endpoint, use the ready-made `SearchItemsRequest` /

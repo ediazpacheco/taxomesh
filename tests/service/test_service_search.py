@@ -468,3 +468,140 @@ def test_search_categories_exact_slug_match(svc: TaxomeshService) -> None:
     cat = svc.create_category(name="Some Category", slug="orquesta-tipica")
     results = svc.search_categories("orquesta tipica")
     assert any(r.category_id == cat.category_id for r in results)
+
+
+# ---------------------------------------------------------------------------
+# 039-search-perf: top-k correctness and fuzzy survival (T003, T004)
+# ---------------------------------------------------------------------------
+
+
+def test_topk_matches_full_sort(svc: TaxomeshService) -> None:
+    """search_items(q, limit=5) must return the same items in the same order
+    as the first 5 of search_items(q, limit=50) for varied queries.
+
+    This documents the top-k invariant: using a smaller limit must not change
+    which items are selected, only how many are returned.
+    """
+    names = [
+        "Apple",
+        "Apricot",
+        "Avocado",
+        "Appetizer",
+        "Application",
+        "Banana",
+        "Cherry",
+        "Date",
+        "Elderberry",
+        "Fig",
+        "Grape",
+        "Honeydew",
+        "Kiwi",
+        "Lemon",
+        "Mango",
+        "Nectarine",
+        "Orange",
+        "Papaya",
+        "Quince",
+        "Raspberry",
+        "Strawberry",
+        "Tangerine",
+        "Ugli Fruit",
+        "Vanilla",
+        "Watermelon",
+        "Apricot Jam",
+        "Apple Pie",
+        "Avocado Toast",
+        "Banana Bread",
+        "Cherry Tart",
+        "Apple Sauce",
+        "Apple Cider",
+        "Apple Juice",
+        "Apple Core",
+        "Apple Seed",
+        "Apricot Tree",
+        "Avocado Oil",
+        "Banana Split",
+        "Cherry Blossom",
+        "Date Sugar",
+        "Apple Farm",
+        "Apple Park",
+        "Apricot Extra",
+        "Avocado Green",
+        "Banana Yellow",
+        "Cherry Red",
+        "Apple Tree",
+        "Apple Fresh",
+        "Apricot New",
+        "Avocado Fresh",
+    ]
+    for name in names:
+        svc.create_item(name=name, slug=name.lower().replace(" ", "-"))
+
+    queries = ["app", "apri", "avo", "ban", "che", "apple", "apricot", "avocado", "banana", "cherry"]
+    for q in queries:
+        top5 = [i.item_id for i in svc.search_items(q, limit=5)]
+        all_results = [i.item_id for i in svc.search_items(q, limit=50)]
+        # The limit=5 result must be a prefix of the full result list
+        assert top5 == all_results[: len(top5)], (
+            f"top-k mismatch for query {q!r}: limit=5 gave {top5}, "
+            f"limit=50 first {len(top5)} are {all_results[: len(top5)]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 039-search-perf: ordering stability (T011, T012)
+# ---------------------------------------------------------------------------
+
+
+def test_tie_breaking_by_norm_name(svc: TaxomeshService) -> None:
+    """When multiple items produce equal scores, they must be ordered by
+    normalized name ascending — stable before and after the optimization.
+    """
+    # All five names contain "widget" so they share the same boost tier;
+    # tie-breaking must produce alphabetical order by normalized name.
+    names = ["Widget Zeta", "Widget Alpha", "Widget Mu", "Widget Beta", "Widget Eta"]
+    items = [svc.create_item(name=n, slug=n.lower().replace(" ", "-")) for n in names]
+    _ = items  # referenced via results
+
+    results = svc.search_items("widget", limit=10)
+    result_names = [i.name for i in results]
+    norm_names_in_order = [SearchEngine.normalize(n) for n in result_names]
+    # Scores must be non-increasing
+    assert norm_names_in_order == sorted(norm_names_in_order), f"Tie-breaking order wrong: {norm_names_in_order}"
+
+
+def test_topk_order_identical_to_full_sort(svc: TaxomeshService) -> None:
+    """search_items(q, limit=10) must return the same 10 items in the same order
+    as the first 10 of search_items(q, limit=100) for varied queries.
+    """
+    # 100 items with predictable score distribution for several prefix queries
+    prefixes = ["alpha", "beta", "gamma", "delta", "epsilon"]
+    for prefix in prefixes:
+        for i in range(20):
+            svc.create_item(
+                name=f"{prefix.capitalize()} Item {i:02d}",
+                slug=f"{prefix}-item-{i:02d}",
+            )
+
+    for q in prefixes:
+        top10 = [i.item_id for i in svc.search_items(q, limit=10)]
+        all_results = [i.item_id for i in svc.search_items(q, limit=100)]
+        assert top10 == all_results[: len(top10)], (
+            f"Ordering mismatch for query {q!r}: limit=10 gave {top10}, limit=100 first 10 are {all_results[:10]}"
+        )
+
+
+def test_fuzzy_match_survives_small_limit(svc: TaxomeshService) -> None:
+    """A fuzzy match that ranks within the limit must appear in results.
+
+    Ensures that top-k selection does not accidentally drop fuzzy-scored items
+    that would rank in the top-k under the full-sort order.
+    """
+    fuzzy_item = svc.create_item(name="Laptop Pro", slug="laptop-pro")
+    # Items that score None for the typo query (no structural or fuzzy match)
+    svc.create_item(name="Refrigerator", slug="fridge")
+    svc.create_item(name="Washing Machine", slug="washer")
+
+    results = svc.search_items("labtop", limit=3, fuzzy=True)
+    ids = [i.item_id for i in results]
+    assert fuzzy_item.item_id in ids

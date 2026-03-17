@@ -3,11 +3,15 @@
 This module provides SearchEngine — a stateless scoring utility that ranks
 candidates against a text query using exact, prefix, substring, and
 rapidfuzz-based fuzzy signals.
+
+SearchCandidate is a private helper that bundles a domain object with its
+pre-normalized searchable fields, avoiding repeated normalization work within
+a single search call.
 """
 
 import re
 import unicodedata
-from typing import Final
+from typing import Final, Generic, TypeVar
 
 from rapidfuzz import fuzz
 
@@ -31,6 +35,40 @@ FUZZY_THRESHOLD: Final[int] = 70
 # Characters to treat as word separators during normalisation
 _SEP_RE: Final[re.Pattern[str]] = re.compile(r"['\'\-._\\]")
 _SPACE_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
+
+_T = TypeVar("_T")
+
+
+class SearchCandidate(Generic[_T]):
+    """A domain object paired with its pre-normalized searchable fields.
+
+    Built once per search call to eliminate repeated normalization of the same
+    candidate fields at multiple points in the scoring pipeline.
+
+    Args:
+        obj: The original domain object (Item or Category).
+        norm_name: ``SearchEngine.normalize(obj.name)`` — computed once.
+        norm_slug: ``SearchEngine.normalize(obj.slug)`` — computed once.
+        norm_ext: ``SearchEngine.normalize(obj.external_id)``, or ``""`` for
+            the default external-id sentinel.
+
+    Example:
+
+        sc = SearchCandidate(
+            obj=item,
+            norm_name=SearchEngine.normalize(item.name),
+            norm_slug=SearchEngine.normalize(item.slug),
+            norm_ext=SearchEngine.normalize(item.external_id),
+        )
+        score = engine._score_prenorm(norm_q, sc.norm_name, sc.norm_slug, sc.norm_ext)
+    """
+
+    def __init__(self, obj: _T, norm_name: str, norm_slug: str, norm_ext: str) -> None:
+        """Initialise with the domain object and its pre-normalized field values."""
+        self.obj = obj
+        self.norm_name = norm_name
+        self.norm_slug = norm_slug
+        self.norm_ext = norm_ext
 
 
 class SearchEngine:
@@ -100,13 +138,41 @@ class SearchEngine:
         norm_name = self.normalize(name)
         norm_slug = self.normalize(slug)
         norm_ext = self.normalize(external_id) if external_id != DEFAULT_ITEM_EXTERNAL_ID else ""
+        return self._score_prenorm(query, norm_name, norm_slug, norm_ext, fuzzy=fuzzy)
 
-        boost = self._compute_boost(query, norm_name, norm_slug, norm_ext)
+    def _score_prenorm(
+        self,
+        norm_q: str,
+        norm_name: str,
+        norm_slug: str,
+        norm_ext: str,
+        *,
+        fuzzy: bool = True,
+    ) -> float | None:
+        """Score one candidate using pre-normalized field values.
+
+        Accepts fields that have already been passed through
+        ``SearchEngine.normalize()``. Callers must ensure all fields are
+        normalized before calling this method. For raw inputs, use
+        ``score_candidate()`` instead.
+
+        Args:
+            norm_q: Pre-normalized query string.
+            norm_name: Pre-normalized candidate name.
+            norm_slug: Pre-normalized candidate slug.
+            norm_ext: Pre-normalized external_id, or ``""`` for the default
+                sentinel (disables ext matching).
+            fuzzy: When ``True`` rapidfuzz ratios are included.
+
+        Returns:
+            A numeric score (higher is better) or ``None`` if no match.
+        """
+        boost = self._compute_boost(norm_q, norm_name, norm_slug, norm_ext)
 
         fuzzy_additive = 0.0
         max_fuzzy = 0.0
         if fuzzy:
-            max_fuzzy, fuzzy_additive = self._compute_fuzzy(query, norm_name, norm_slug)
+            max_fuzzy, fuzzy_additive = self._compute_fuzzy(norm_q, norm_name, norm_slug)
 
         if boost > 0:
             return float(boost) + fuzzy_additive

@@ -795,7 +795,7 @@ wheels = [
 
 [[package]]
 name = "taxomesh"
-version = "0.1.0a27"
+version = "0.1.0a28"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
