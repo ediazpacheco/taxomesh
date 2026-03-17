@@ -13,7 +13,7 @@ from typing import Any, Final, Literal, TypeVar
 from uuid import UUID, uuid4
 
 from taxomesh.application.search import DEFAULT_SEARCH_LIMIT, SearchCandidate, SearchEngine
-from taxomesh.domain.constants import DEFAULT_ITEM_EXTERNAL_ID, ROOT_CATEGORY_NAME
+from taxomesh.domain.constants import DEFAULT_CATEGORY_EXTERNAL_ID, DEFAULT_ITEM_EXTERNAL_ID, ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
 from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemRelationLink, Tag
@@ -95,6 +95,8 @@ class TaxomeshService:
         else:
             self._repo = repository
         self._root_id: UUID = self._ensure_root()
+        self._item_corpus: list[SearchCandidate[Item]] | None = None
+        self._category_corpus: list[SearchCandidate[Category]] | None = None
 
     @property
     def repository(self) -> TaxomeshRepositoryBase:
@@ -106,7 +108,9 @@ class TaxomeshService:
 
         Returns:
             Dict with keys: version, config_name, repository_type,
-            working_path, and repository_info.
+            working_path, repository_info, item_corpus_size, and
+            category_corpus_size. Corpus size keys are ``None`` when the
+            respective corpus has not been built yet or has been invalidated.
         """
         import importlib.metadata  # noqa: PLC0415
 
@@ -122,6 +126,8 @@ class TaxomeshService:
             "repository_type": type(self._repo).__name__,
             "working_path": working_path,
             "repository_info": repo_info,
+            "item_corpus_size": len(self._item_corpus) if self._item_corpus is not None else None,
+            "category_corpus_size": len(self._category_corpus) if self._category_corpus is not None else None,
         }
 
     @staticmethod
@@ -235,6 +241,7 @@ class TaxomeshService:
             CategoryParentLink(category_id=category.category_id, parent_category_id=self._root_id, sort_index=0)
         )
         clear_all_caches()
+        self._category_corpus = None
         return category
 
     @memoize(DEFAULT_CACHE_TTL)
@@ -311,6 +318,7 @@ class TaxomeshService:
         if not found:
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
         clear_all_caches()
+        self._category_corpus = None
 
     @memoize(DEFAULT_CACHE_TTL)
     def get_category_by_slug(self, slug: str) -> Category:
@@ -375,6 +383,7 @@ class TaxomeshService:
             category.external_id = external_id
         self._repo.save_category(category)
         clear_all_caches()
+        self._category_corpus = None
         return category
 
     # ------------------------------------------------------------------
@@ -416,6 +425,7 @@ class TaxomeshService:
         )
         self._repo.save_item(item)
         clear_all_caches()
+        self._item_corpus = None
         return item
 
     @memoize(DEFAULT_CACHE_TTL)
@@ -472,6 +482,7 @@ class TaxomeshService:
         if not found:
             raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
         clear_all_caches()
+        self._item_corpus = None
 
     @memoize(DEFAULT_CACHE_TTL)
     def get_item_by_slug(self, slug: str) -> Item:
@@ -534,6 +545,7 @@ class TaxomeshService:
             item.metadata = metadata
         self._repo.save_item(item)
         clear_all_caches()
+        self._item_corpus = None
         return item
 
     # ------------------------------------------------------------------
@@ -1226,6 +1238,12 @@ class TaxomeshService:
     ) -> list[Item]:
         """Search items by name, slug, and external_id using fuzzy matching.
 
+        When *category_id* is ``None`` (the default), candidates are loaded from
+        an internal pre-normalized corpus that is built once and reused across
+        repeated searches. The corpus is automatically invalidated by any item
+        write operation. Category-filtered searches bypass the corpus and load
+        candidates directly.
+
         Args:
             query: The text to search for.
             limit: Maximum number of results to return; must be ≥ 1.
@@ -1254,6 +1272,10 @@ class TaxomeshService:
             return []
 
         norm_q = SearchEngine.normalize(query)
+        if category_id is None:
+            corpus = self._get_item_corpus()
+            filtered = [sc for sc in corpus if sc.obj.enabled] if enabled_only else corpus
+            return self._score_corpus(norm_q, filtered, fuzzy=fuzzy, limit=limit)
         candidates = self._load_item_candidates(category_id=category_id, recursive=recursive)
         if enabled_only:
             candidates = [item for item in candidates if item.enabled]
@@ -1280,6 +1302,12 @@ class TaxomeshService:
 
         The internal root category is always excluded from results.
 
+        When *parent_id* is ``None`` (the default), candidates are loaded from
+        an internal pre-normalized corpus that is built once and reused across
+        repeated searches. The corpus is automatically invalidated by any
+        category write operation. Parent-filtered searches bypass the corpus
+        and load candidates directly.
+
         Args:
             query: The text to search for.
             limit: Maximum number of results to return; must be ≥ 1.
@@ -1304,10 +1332,11 @@ class TaxomeshService:
 
         norm_q = SearchEngine.normalize(query)
         if parent_id is None:
-            candidates = [cat for cat in self._repo.list_categories() if cat.category_id != self._root_id]
-        else:
-            # list_categories(parent_id=X) validates existence and returns direct children
-            candidates = self.list_categories(parent_id=parent_id)
+            corpus = self._get_category_corpus()
+            filtered = [sc for sc in corpus if sc.obj.enabled] if enabled_only else corpus
+            return self._score_corpus(norm_q, filtered, fuzzy=fuzzy, limit=limit)
+        # list_categories(parent_id=X) validates existence and returns direct children
+        candidates = self.list_categories(parent_id=parent_id)
         if enabled_only:
             candidates = [cat for cat in candidates if cat.enabled]
         return self._score_and_rank(
@@ -1319,6 +1348,116 @@ class TaxomeshService:
             fuzzy=fuzzy,
             limit=limit,
         )
+
+    def _get_item_corpus(self) -> list[SearchCandidate[Item]]:
+        """Build and cache pre-normalized search candidates for all items.
+
+        Returns the cached item corpus if already built; otherwise loads all items
+        via the memoized ``list_items()`` path, normalizes each candidate's fields
+        once, stores the result, and returns it.
+
+        The corpus is invalidated (set to ``None``) by any item write operation
+        (``create_item``, ``update_item``, ``delete_item``).
+
+        Returns:
+            List of ``SearchCandidate`` wrappers covering all items.
+        """
+        if self._item_corpus is None:
+            self._item_corpus = [
+                SearchCandidate(
+                    obj=item,
+                    norm_name=SearchEngine.normalize(item.name),
+                    norm_slug=SearchEngine.normalize(item.slug),
+                    norm_ext=(
+                        SearchEngine.normalize(item.external_id)
+                        if item.external_id != DEFAULT_ITEM_EXTERNAL_ID
+                        else ""
+                    ),
+                )
+                for item in self.list_items()
+            ]
+        return self._item_corpus
+
+    def _get_category_corpus(self) -> list[SearchCandidate[Category]]:
+        """Build and cache pre-normalized search candidates for all categories.
+
+        Returns the cached category corpus if already built; otherwise loads all
+        categories from the repository, excludes the internal root category,
+        normalizes each candidate's fields once, stores the result, and returns it.
+
+        The corpus is invalidated (set to ``None``) by any category write operation
+        (``create_category``, ``update_category``, ``delete_category``).
+
+        Returns:
+            List of ``SearchCandidate`` wrappers covering all non-root categories.
+        """
+        if self._category_corpus is None:
+            self._category_corpus = [
+                SearchCandidate(
+                    obj=cat,
+                    norm_name=SearchEngine.normalize(cat.name),
+                    norm_slug=SearchEngine.normalize(cat.slug),
+                    norm_ext=(
+                        SearchEngine.normalize(cat.external_id)
+                        if cat.external_id != DEFAULT_CATEGORY_EXTERNAL_ID
+                        else ""
+                    ),
+                )
+                for cat in self._repo.list_categories()
+                if cat.category_id != self._root_id
+            ]
+        return self._category_corpus
+
+    def _rank_scored(self, scored: list[tuple[float, str, _T]], limit: int) -> list[_T]:
+        """Sort *scored* tuples by descending score then ascending name, capped at *limit*.
+
+        When *limit* is smaller than the number of matches, ``heapq.nsmallest`` is
+        used to avoid a full sort (O(N log k) vs O(N log N)).
+
+        Args:
+            scored: List of ``(score, norm_name, obj)`` tuples to rank.
+            limit: Maximum number of results to return.
+
+        Returns:
+            Domain objects in ranked order, capped at *limit*.
+        """
+        if limit < len(scored):
+            return [c for _, _, c in heapq.nsmallest(limit, scored, key=lambda t: (-t[0], t[1]))]
+        scored.sort(key=lambda t: (-t[0], t[1]))
+        return [c for _, _, c in scored]
+
+    def _score_corpus(
+        self,
+        norm_q: str,
+        corpus: list[SearchCandidate[_T]],
+        *,
+        fuzzy: bool,
+        limit: int,
+    ) -> list[_T]:
+        """Score pre-normalized search candidates and return the top *limit* results.
+
+        Accepts a list of ``SearchCandidate`` wrappers whose fields are already
+        normalized, skipping the per-call normalization step performed by
+        ``_score_and_rank``. Uses the same ranking logic: descending score, then
+        ascending normalized name.
+
+        Args:
+            norm_q: Pre-normalized query string.
+            corpus: Pre-normalized candidates to score.
+            fuzzy: Passed through to ``SearchEngine._score_prenorm``.
+            limit: Maximum number of results to return.
+
+        Returns:
+            Domain objects sorted by descending score then normalised name, capped
+            at *limit*.
+        """
+        engine = SearchEngine()
+        scored: list[tuple[float, str, _T]] = []
+        for sc in corpus:
+            score = engine._score_prenorm(norm_q, sc.norm_name, sc.norm_slug, sc.norm_ext, fuzzy=fuzzy)
+            if score is not None:
+                scored.append((score, sc.norm_name, sc.obj))
+        return self._rank_scored(scored, limit)
 
     def _score_and_rank(
         self,
@@ -1366,10 +1505,7 @@ class TaxomeshService:
             score = engine._score_prenorm(norm_q, sc.norm_name, sc.norm_slug, sc.norm_ext, fuzzy=fuzzy)
             if score is not None:
                 scored.append((score, sc.norm_name, sc.obj))
-        if limit < len(scored):
-            return [c for _, _, c in heapq.nsmallest(limit, scored, key=lambda t: (-t[0], t[1]))]
-        scored.sort(key=lambda t: (-t[0], t[1]))
-        return [c for _, _, c in scored]
+        return self._rank_scored(scored, limit)
 
     def _collect_descendant_ids(self, category_id: UUID) -> set[UUID]:
         """Return the set of all descendant category UUIDs using BFS.
@@ -1412,7 +1548,7 @@ class TaxomeshService:
             Deduplicated list of Item instances.
         """
         if category_id is None:
-            return self._repo.list_items()
+            return self.list_items()
 
         if not recursive:
             # list_items validates category existence

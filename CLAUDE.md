@@ -285,6 +285,8 @@ Do NOT update README during implement — only after
 - Python 3.11 + Pydantic v2, pyyaml ≥ 6.0, Django ≥ 4.2 (optional adapter) (038-batch-item-relations)
 - Python 3.11 + `rapidfuzz >= 3.0` (existing), `heapq` (stdlib) (039-search-perf)
 - N/A — pure in-process optimization; no storage changes (039-search-perf)
+- Python 3.11 + Pydantic v2 (domain models), `rapidfuzz>=3.0` (fuzzy scoring — existing), stdlib `heapq` (existing) (040-search-corpus-cache)
+- N/A — no new storage; optimization is purely in-process (040-search-corpus-cache)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

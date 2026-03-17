@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [0.1.0a29] — 2026-03-17
+
 ### Performance
 
 - `search_items()` and `search_categories()` now pre-normalize each candidate's
@@ -19,6 +23,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   top-k selection (O(N log k)) replaces a full sort (O(N log N)), reducing
   per-keystroke cost for autocomplete workloads. Public API and result ordering
   are unchanged.
+- Unfiltered `search_items()` and `search_categories()` now maintain an
+  internal pre-normalized candidate corpus (`_item_corpus`, `_category_corpus`)
+  that is built once on the first call and reused across repeated searches on
+  the same service instance. Candidate normalization (name, slug, external\_id)
+  is performed exactly once per corpus lifetime instead of on every search call.
+  The corpus is automatically invalidated by any item or category write
+  operation (`create_*`, `update_*`, `delete_*`). Category-filtered and
+  recursive searches are unaffected and continue to load candidates directly.
+- Unfiltered `search_items()` now routes candidate loading through the
+  memoized `list_items()` service path instead of calling the repository
+  directly, eliminating redundant I/O when the service-level cache is warm.
+
+### Changed (internal)
+
+- `TaxomeshService.get_debug()` now returns two additional keys:
+  `item_corpus_size` (integer count of pre-normalized item candidates when the
+  corpus is warm, `None` when cold or invalidated) and `category_corpus_size`
+  (same for categories).
 
 ---
 
