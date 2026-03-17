@@ -159,9 +159,21 @@ Results are sorted by match quality: exact matches first, then prefix, substring
 fuzzy matches. Pass `fuzzy=False` to restrict to exact/prefix/substring matching only.
 Pass `enabled_only=False` to include disabled items and categories.
 
-Both methods are optimized for autocomplete (per-keystroke) usage: candidate fields
-are normalized once per call and a heap-based top-k selection is used when `limit` is
-smaller than the total number of matches, keeping response time low as the catalog grows.
+Both methods are optimized for repeated and per-keystroke (autocomplete) usage:
+
+- **Corpus cache**: on the first unfiltered search, all candidate fields (name, slug,
+  external ID) are normalized and stored in an internal cache. Subsequent searches
+  reuse the pre-normalized corpus — no repository reload, no re-normalization.
+- **Automatic invalidation**: the cache is reset whenever an item or category write
+  operation (`create_*`, `update_*`, `delete_*`) is performed, so results are always
+  consistent with the current state of the catalog.
+- **Heap-based top-k**: when `limit` is smaller than the number of matches,
+  `heapq.nsmallest` is used instead of a full sort (O(N log k) vs O(N log N)).
+- **Category-filtered and recursive searches** bypass the corpus and load candidates
+  directly, so subtree scoping is always precise.
+
+No configuration is required — the optimization is fully automatic and applies to
+all repository backends (Django, YAML, JSON).
 
 See [Python API — Fuzzy Search](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md#fuzzy-search) for the full parameter reference.
 
