@@ -214,9 +214,9 @@ Do NOT update README during implement — only after
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models), Typer ≥ 0.12 (CLI), Rich ≥ 13.0 (terminal rendering) (011-category-models-cli)
 - JsonRepository (JSON file), YAMLRepository (YAML file) — both must persist new Category fields (011-category-models-cli)
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models), Typer ≥ 0.12 (CLI), Rich ≥ 13.0 (terminal rendering), `time.monotonic` (TTL clock — stdlib) (011-category-models-cli)
-- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (via FastAPI), Typer ≥ 0.12, Rich ≥ 13.0, pyyaml ≥ 6.0, Django ≥ 4.2 (optional) (013-external-id-lookup)
-- JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM, optional) (013-external-id-lookup)
-- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models, transitive via FastAPI), Typer ≥ 0.12, Rich ≥ 13.0, pyyaml ≥ 6.0, Django ≥ 4.2 (optional) (013-external-id-lookup)
+- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (via FastAPI), Typer ≥ 0.12, Rich ≥ 13.0, pyyaml ≥ 6.0, Django ≥ 4.2 (optional) (013-external-id-lookup) [superseded by 041: external_id is now str | None, 1:1 unique; use get_item_by_external_id / get_category_by_external_id]
+- JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM, optional) (013-external-id-lookup) [list_*_by_external_id removed; get_*_by_external_id returns T | None]
+- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models, transitive via FastAPI), Typer ≥ 0.12, Rich ≥ 13.0, pyyaml ≥ 6.0, Django ≥ 4.2 (optional) (013-external-id-lookup) [see 041]
 - Python 3.11 + Typer ≥ 0.12 (CLI), stdlib `tomllib` (TOML parsing, already used) (014-cli-config-dump)
 - N/A — read-only feature; no writes to any repository (014-cli-config-dump)
 - Python 3.11 + Typer ≥ 0.12 (CLI), Django ≥ 4.2 (optional — admin view), stdlib `tomllib` (015-django-cli-admin)
@@ -227,8 +227,8 @@ Do NOT update README during implement — only after
 - Django ORM — `CategoryModel.metadata` and `ItemModel.metadata` are `JSONField(blank=True, default=dict)` (019-admin-metadata-fields)
 - Python 3.11 + Pydantic v2 (domain models), stdlib only for this feature (020-slug-lookup)
 - All adapters already implement slug lookups; no storage change needed (020-slug-lookup)
-- Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (ORM + admin), Typer ≥ 0.12 (CLI) (021-optional-external-id)
-- Django ORM (`ItemModel`) — migration required; JSON/YAML repositories — no change (021-optional-external-id)
+- Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (ORM + admin), Typer ≥ 0.12 (CLI) (021-optional-external-id) [superseded by 041: external_id: str | None default None; TaxomeshExternalIdConflictError; unique=True on Django model]
+- Django ORM (both `CategoryModel` and `ItemModel`) — migration 0008 converts '' → NULL, unique=True constraint added (021-optional-external-id) [see 041]
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 ≥ 2.0 (now explicit direct dep; was transitive via FastAPI) (028-contrib-api)
 - N/A — no new storage; handlers delegate entirely to `TaxomeshService` (028-contrib-api)
 - Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (admin), Rich ≥ 13.0 (CLI) (022-unified-str-admin-links)
@@ -287,6 +287,7 @@ Do NOT update README during implement — only after
 - N/A — pure in-process optimization; no storage changes (039-search-perf)
 - Python 3.11 + Pydantic v2 (domain models), `rapidfuzz>=3.0` (fuzzy scoring — existing), stdlib `heapq` (existing) (040-search-corpus-cache)
 - N/A — no new storage; optimization is purely in-process (040-search-corpus-cache)
+- Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (ORM + admin), Typer ≥ 0.12 (CLI), pyyaml ≥ 6.0 (041-unique-external-id)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

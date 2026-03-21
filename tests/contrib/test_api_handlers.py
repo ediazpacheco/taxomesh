@@ -183,20 +183,20 @@ class TestGetItemBySlug:
             handlers.get_item_by_slug(service, "no-such-slug")
 
 
-class TestGetItemsByExternalId:
-    """Tests for handlers.get_items_by_external_id."""
+class TestGetItemByExternalId:
+    """Tests for handlers.get_item_by_external_id."""
 
-    def test_returns_matching_items(self, service: TaxomeshService) -> None:
-        """Returns all items with the given external_id."""
+    def test_returns_matching_item(self, service: TaxomeshService) -> None:
+        """Returns the item with the given external_id."""
         service.create_item(name="X", external_id="ext-99")
-        result = handlers.get_items_by_external_id(service, "ext-99")
-        assert len(result) == 1
-        assert result[0].external_id == "ext-99"
+        result = handlers.get_item_by_external_id(service, "ext-99")
+        assert result is not None
+        assert result.external_id == "ext-99"
 
-    def test_returns_empty_for_unknown(self, service: TaxomeshService) -> None:
-        """Returns an empty list when no item matches."""
-        result = handlers.get_items_by_external_id(service, "ghost")
-        assert result == []
+    def test_returns_none_for_unknown(self, service: TaxomeshService) -> None:
+        """Returns None when no item matches."""
+        result = handlers.get_item_by_external_id(service, "ghost")
+        assert result is None
 
 
 class TestCreateItem:

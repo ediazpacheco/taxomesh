@@ -243,7 +243,7 @@ items_to_list([])            # []
 | Group | Handlers |
 |-------|---------|
 | Categories | `list_categories`, `get_category`, `get_category_by_slug`, `create_category`, `update_category`, `delete_category` |
-| Items | `list_items`, `get_item`, `get_item_by_slug`, `get_items_by_external_id`, `create_item`, `update_item`, `delete_item` |
+| Items | `list_items`, `get_item`, `get_item_by_slug`, `get_item_by_external_id`, `create_item`, `update_item`, `delete_item` |
 | Tags | `list_tags`, `create_tag`, `update_tag`, `delete_tag` |
 | Relationships | `add_category_parent`, `remove_category_parent`, `place_item_in_category`, `remove_item_from_category`, `assign_tag`, `remove_tag_from_item` |
 | Graph | `get_graph` |

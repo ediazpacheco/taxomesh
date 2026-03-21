@@ -147,7 +147,7 @@ class TestCategoryModelAdminServiceRouting:
         mock_obj.name = "TestCat"
         mock_obj.description = "desc"
         mock_obj.enabled = True
-        mock_obj.external_id = ""
+        mock_obj.external_id = None
         mock_obj._state = MagicMock()  # _state is a runtime instance attr; not in spec
 
         with patch(_PATCH_TARGET) as MockSvc:
@@ -167,7 +167,7 @@ class TestCategoryModelAdminServiceRouting:
         mock_obj.name = "UpdatedCat"
         mock_obj.description = "desc"
         mock_obj.enabled = True
-        mock_obj.external_id = ""
+        mock_obj.external_id = None
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
@@ -219,7 +219,7 @@ class TestCategoryModelAdminServiceRouting:
         mock_obj.name = "Bad"
         mock_obj.description = ""
         mock_obj.enabled = True
-        mock_obj.external_id = ""
+        mock_obj.external_id = None
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
@@ -678,7 +678,7 @@ class TestGetItemCategoryIdsHelper:
     """Tests for the _get_item_category_ids module-level helper."""
 
     def test_returns_empty_list_when_no_item_found(self) -> None:
-        """Returns [] when get_items_by_external_id returns no items."""
+        """Returns [] when get_item_by_external_id returns None."""
         from taxomesh.contrib.django.admin import _get_item_category_ids  # noqa: PLC0415
 
         obj = MagicMock()
@@ -687,7 +687,7 @@ class TestGetItemCategoryIdsHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_items_by_external_id.return_value = []
+            mock_svc.get_item_by_external_id.return_value = None
 
             result = _get_item_category_ids(obj, "pk")
 
@@ -718,7 +718,7 @@ class TestGetItemCategoryIdsHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_items_by_external_id.return_value = [mock_item]
+            mock_svc.get_item_by_external_id.return_value = mock_item
             mock_svc.repository.list_item_parent_links.return_value = [link_own, link_other]
 
             result = _get_item_category_ids(obj, "pk")
@@ -741,12 +741,12 @@ class TestReconcileCategoriesHelper:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             _reconcile_categories(obj, form, "pk")
-            mock_svc.get_items_by_external_id.assert_not_called()
+            mock_svc.get_item_by_external_id.assert_not_called()
             mock_svc.place_item_in_category.assert_not_called()
             mock_svc.remove_item_from_category.assert_not_called()
 
     def test_no_op_when_item_not_found(self) -> None:
-        """Returns without calling place/remove when get_items_by_external_id is empty."""
+        """Returns without calling place/remove when get_item_by_external_id returns None."""
         from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
 
         obj = MagicMock()
@@ -757,7 +757,7 @@ class TestReconcileCategoriesHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_items_by_external_id.return_value = []
+            mock_svc.get_item_by_external_id.return_value = None
             _reconcile_categories(obj, form, "pk")
             mock_svc.place_item_in_category.assert_not_called()
             mock_svc.remove_item_from_category.assert_not_called()
@@ -783,7 +783,7 @@ class TestReconcileCategoriesHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_items_by_external_id.return_value = [mock_item]
+            mock_svc.get_item_by_external_id.return_value = mock_item
             mock_svc.repository.list_item_parent_links.return_value = []
             _reconcile_categories(obj, form, "pk")
             mock_svc.place_item_in_category.assert_called_once_with(item_id, cat_id_new)
@@ -811,7 +811,7 @@ class TestReconcileCategoriesHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_items_by_external_id.return_value = [mock_item]
+            mock_svc.get_item_by_external_id.return_value = mock_item
             mock_svc.repository.list_item_parent_links.return_value = [link]
             _reconcile_categories(obj, form, "pk")
             mock_svc.remove_item_from_category.assert_called_once_with(item_id, cat_id_old)
@@ -851,7 +851,7 @@ class TestReconcileCategoriesHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_items_by_external_id.return_value = [mock_item]
+            mock_svc.get_item_by_external_id.return_value = mock_item
             mock_svc.repository.list_item_parent_links.return_value = [link_keep, link_remove]
             _reconcile_categories(obj, form, "pk")
             mock_svc.place_item_in_category.assert_called_once_with(item_id, cat_id_add)
@@ -913,9 +913,9 @@ class TestItemCategoryAssignmentMixin:
         with patch(_PATCH_TARGET) as MockSvc, patch.object(_ModelAdmin, "save_model"):
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_items_by_external_id.return_value = []
+            mock_svc.get_item_by_external_id.return_value = None
             admin_obj.save_model(request, obj, form, False)  # type: ignore[union-attr]
-            mock_svc.get_items_by_external_id.assert_called_once()
+            mock_svc.get_item_by_external_id.assert_called_once()
 
     def test_taxomesh_external_id_attr_default_is_pk(self) -> None:
         """Default taxomesh_external_id_attr is 'pk'."""
@@ -948,7 +948,7 @@ class TestCategoryAdminSlug:
         mock_obj.name = "TestCat"
         mock_obj.description = ""
         mock_obj.enabled = True
-        mock_obj.external_id = ""
+        mock_obj.external_id = None
         mock_obj.slug = "test-cat"
         mock_obj._state = MagicMock()
 
@@ -972,7 +972,7 @@ class TestCategoryAdminSlug:
         mock_obj.name = "UpdatedCat"
         mock_obj.description = ""
         mock_obj.enabled = True
-        mock_obj.external_id = ""
+        mock_obj.external_id = None
         mock_obj.slug = "updated-cat"
 
         with patch(_PATCH_TARGET) as MockSvc:

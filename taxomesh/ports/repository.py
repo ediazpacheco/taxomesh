@@ -28,6 +28,10 @@ class TaxomeshRepositoryBase(Protocol):
 
         Args:
             category: The Category instance to persist.
+
+        Raises:
+            TaxomeshExternalIdConflictError: If category.external_id is not None and another
+                record with a different category_id already holds the same external_id.
         """
         ...
 
@@ -74,6 +78,10 @@ class TaxomeshRepositoryBase(Protocol):
 
         Args:
             item: The Item instance to persist.
+
+        Raises:
+            TaxomeshExternalIdConflictError: If item.external_id is not None and another
+                record with a different item_id already holds the same external_id.
         """
         ...
 
@@ -238,39 +246,32 @@ class TaxomeshRepositoryBase(Protocol):
 
     # --- External-ID lookup ---
 
-    def list_items_by_external_id(self, external_id: str) -> list[Item]:
-        """Return all items whose ``external_id`` matches the given string, ordered by name.
-
-        Returns an empty list when no item matches (orphan signal for the
-        consumer). Returns multiple items when the same external_id was used
-        more than once (duplicate signal for the consumer).
-
-        Results are ordered by ``(name ASC, item_id ASC)``.
+    def get_item_by_external_id(self, external_id: str) -> "Item | None":
+        """Return the item with the given external_id, or None.
 
         Args:
-            external_id: The external identifier to look up (already a str).
+            external_id: The external identifier to look up (already a str; never None).
 
         Returns:
-            List of matching Item instances ordered by ``(name ASC, item_id ASC)``;
-            empty list if none match.
+            The matching Item, or None if no item has this external_id.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
         """
         ...
 
-    def list_categories_by_external_id(self, external_id: str) -> list[Category]:
-        """Return all categories whose ``external_id`` matches the given string, ordered by name.
-
-        Returns an empty list when no category matches (orphan signal for the
-        consumer). Returns multiple categories when the same external_id was
-        used more than once (duplicate signal for the consumer).
-
-        Results are ordered by ``(name ASC, category_id ASC)``.
+    def get_category_by_external_id(self, external_id: str) -> "Category | None":
+        """Return the category with the given external_id, or None.
 
         Args:
-            external_id: The external identifier to look up (already a str).
+            external_id: The external identifier to look up (already a str; never None).
 
         Returns:
-            List of matching Category instances ordered by
-            ``(name ASC, category_id ASC)``; empty list if none match.
+            The matching Category, or None if no category has this external_id.
+            Root category filtering is the caller's responsibility.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
         """
         ...
 

@@ -70,14 +70,26 @@ item = svc.get_item_by_slug("article-123")       # returns Item or raises Taxome
 Slugs are optional URL-friendly identifiers. They must be unique within their namespace
 (categories or items). Both methods raise a typed not-found exception — they never return `None`.
 
-## External ID lookup helpers
+## External ID lookup
+
+`external_id` is a 1:1 unique identifier — each Item or Category owns at most one `external_id`, and each `external_id` value is held by at most one record of its type.
 
 ```python
-items = svc.get_items_by_external_id("article-abc")
-categories = svc.get_categories_by_external_id("legacy-category-id")
+item: Item | None = svc.get_item_by_external_id("article-abc")
+category: Category | None = svc.get_category_by_external_id("legacy-category-id")
 ```
 
-These methods are useful for integrations where domain entities live outside taxomesh.
+Both methods return `None` when no match is found, and also return `None` immediately when called with `external_id=None` (no repository call). UUID and `int` inputs are coerced to `str` automatically.
+
+```python
+from taxomesh import TaxomeshExternalIdConflictError
+
+try:
+    item = svc.create_item(name="Article", external_id="article-abc")
+except TaxomeshExternalIdConflictError:
+    # another Item already owns "article-abc"
+    ...
+```
 
 ## Fuzzy Search
 

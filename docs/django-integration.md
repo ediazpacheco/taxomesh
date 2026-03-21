@@ -45,13 +45,14 @@ from taxomesh.contrib.django import get_taxomesh_service_with_django
 
 def ensure_item_for_external_id(external_id: str) -> None:
     svc = get_taxomesh_service_with_django()
-    if not svc.get_items_by_external_id(external_id):
+    if svc.get_item_by_external_id(external_id) is None:
         svc.create_item(external_id=external_id)
 
 
-def delete_items_for_external_id(external_id: str) -> None:
+def delete_item_for_external_id(external_id: str) -> None:
     svc = get_taxomesh_service_with_django()
-    for item in svc.get_items_by_external_id(external_id):
+    item = svc.get_item_by_external_id(external_id)
+    if item is not None:
         svc.delete_item(item.item_id)
 ```
 

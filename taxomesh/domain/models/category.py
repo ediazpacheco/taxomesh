@@ -24,7 +24,7 @@ class Category(ModelBase):
     name: Annotated[str, Field(max_length=MAX_CATEGORY_NAME_LENGTH)]
     description: Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)] = DEFAULT_DESCRIPTION
     enabled: bool = True
-    external_id: Annotated[str, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = DEFAULT_CATEGORY_EXTERNAL_ID
+    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = DEFAULT_CATEGORY_EXTERNAL_ID
     slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -41,8 +41,10 @@ class Category(ModelBase):
 
     @field_validator("external_id", mode="before")
     @classmethod
-    def _coerce_external_id(cls, v: object) -> str:
-        """Coerce any external_id value to str."""
+    def _coerce_external_id(cls, v: object) -> str | None:
+        """Coerce any external_id value to str; None stays None."""
+        if v is None:
+            return None
         return str(v)
 
     def __str__(self) -> str:

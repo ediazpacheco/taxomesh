@@ -3,7 +3,7 @@
 from pydantic import BaseModel, ConfigDict
 
 
-def _build_str_repr(emoji: str, name: str, id_value: object, slug: str, external_id: str) -> str:
+def _build_str_repr(emoji: str, name: str, id_value: object, slug: str, external_id: str | None) -> str:
     """Build the standard human-readable string representation for a domain model.
 
     Args:
@@ -11,17 +11,17 @@ def _build_str_repr(emoji: str, name: str, id_value: object, slug: str, external
         name: Human-readable display name.
         id_value: Internal UUID identifier.
         slug: URL-friendly slug; omitted from output when empty.
-        external_id: External system identifier; omitted from output when empty.
+        external_id: External system identifier; omitted from output when None.
 
     Returns:
         Formatted string: ``<emoji> <name> (slug: … - id: … - ext_id: …)``
-        with slug and ext_id segments included only when non-empty.
+        with slug and ext_id segments included only when non-None/non-empty.
     """
     parts = []
     if slug:
         parts.append(f"slug: {slug}")
     parts.append(f"id: {id_value}")
-    if external_id:
+    if external_id is not None:
         parts.append(f"ext_id: {external_id}")
     return f"{emoji} {name} ({' - '.join(parts)})"
 

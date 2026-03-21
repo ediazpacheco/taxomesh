@@ -13,7 +13,7 @@ from typing import Any, Final, Literal, TypeVar
 from uuid import UUID, uuid4
 
 from taxomesh.application.search import DEFAULT_SEARCH_LIMIT, SearchCandidate, SearchEngine
-from taxomesh.domain.constants import DEFAULT_CATEGORY_EXTERNAL_ID, DEFAULT_ITEM_EXTERNAL_ID, ROOT_CATEGORY_NAME
+from taxomesh.domain.constants import DEFAULT_ITEM_EXTERNAL_ID, ROOT_CATEGORY_NAME
 from taxomesh.domain.dag import check_no_cycle
 from taxomesh.domain.graph import CategoryNode, TaxomeshGraph
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemRelationLink, Tag
@@ -205,7 +205,7 @@ class TaxomeshService:
         description: str = "",
         metadata: dict[str, Any] | None = None,
         slug: str = "",
-        external_id: str = "",
+        external_id: str | None = None,
     ) -> Category:
         """Create a new category and persist it.
 
@@ -214,7 +214,7 @@ class TaxomeshService:
             description: Optional description; max 100 000 characters. Defaults to "".
             metadata: Optional arbitrary key-value pairs; defaults to {}.
             slug: Optional URL-friendly identifier; must be unique when non-empty. Defaults to "".
-            external_id: Optional external identifier. Defaults to "".
+            external_id: Optional external identifier. Defaults to None (no external reference).
 
         Returns:
             The newly created Category with a library-assigned UUID.
@@ -269,21 +269,24 @@ class TaxomeshService:
         Args:
             parent_id: When provided, returns child categories of this parent
                 ordered by sort_index. When None, returns all root-level categories.
-            external_id: When provided, returns only categories with this external_id.
-                When both parent_id and external_id are given, returns the intersection.
+            external_id: When provided, returns the single category with this external_id
+                (at most one, since external_id is unique). The root category is never
+                returned. When both parent_id and external_id are given, returns the
+                intersection (0 or 1 element; unsorted).
 
         Returns:
-            List of categories.
+            List of categories. When filtering by external_id only, contains at most one
+            element and is not sorted. When filtering by parent_id only, ordered by
+            sort_index.
 
         Raises:
             TaxomeshCategoryNotFoundError: If parent_id is provided but not found.
         """
         if external_id is not None:
-            results = [
-                cat
-                for cat in self._repo.list_categories_by_external_id(external_id)
-                if cat.category_id != self._root_id
-            ]
+            cat = self._repo.get_category_by_external_id(external_id)
+            results: list[Category] = []
+            if cat is not None and cat.category_id != self._root_id:
+                results = [cat]
             if parent_id is not None:
                 self.get_category(parent_id)
                 child_ids = {
@@ -292,7 +295,7 @@ class TaxomeshService:
                     if lnk.parent_category_id == parent_id
                 }
                 results = [c for c in results if c.category_id in child_ids]
-            return sorted(results, key=lambda c: c.name)
+            return results
         if parent_id is None:
             parent_id = self._root_id
         else:
@@ -355,7 +358,7 @@ class TaxomeshService:
             description: New description; unchanged if None.
             slug: New slug; unchanged if None. Pass "" to clear the slug.
             metadata: New metadata dict; unchanged if None.
-            external_id: New external_id; unchanged if None. Pass "" to clear.
+            external_id: New external_id; unchanged if None.
 
         Returns:
             The updated Category.
@@ -402,7 +405,7 @@ class TaxomeshService:
         Args:
             name: Human-readable item name; max 256 characters.
             external_id: Optional caller-provided identifier linking this item to an external
-                entity. May be a UUID, a string (max 256 chars), or an int. Defaults to ""
+                entity. May be a UUID, a string (max 256 chars), or an int. Defaults to None
                 (no external reference).
             metadata: Optional arbitrary key-value pairs; defaults to {}.
             slug: Optional URL-friendly identifier; must be unique when non-empty. Defaults to "".
@@ -419,7 +422,7 @@ class TaxomeshService:
                 raise TaxomeshDuplicateSlugError(f"Slug '{slug}' is already in use")
         item = Item(
             name=name,
-            external_id=str(external_id),
+            external_id=None if external_id is None else str(external_id),
             slug=slug,
             metadata=metadata if metadata is not None else {},
         )
@@ -518,7 +521,7 @@ class TaxomeshService:
             enabled: New enabled state; unchanged if None.
             slug: New slug; unchanged if None. Pass "" to clear the slug.
             name: New name; unchanged if None.
-            external_id: New external identifier; unchanged if None. Pass "" to clear it.
+            external_id: New external identifier; unchanged if None.
             metadata: New metadata dict; unchanged if None.
 
         Returns:
@@ -787,49 +790,48 @@ class TaxomeshService:
     # ------------------------------------------------------------------
 
     @memoize(DEFAULT_CACHE_TTL)
-    def get_items_by_external_id(self, external_id: ExternalId) -> list[Item]:
-        """Return all items whose external_id matches the given value.
+    def get_item_by_external_id(self, external_id: ExternalId) -> Item | None:
+        """Return the item with the given external_id, or None.
 
-        Delegates to the repository without additional business logic.
-        The returned list length signals the item's state to the consumer:
-        - ``len == 0`` — orphan: no item is registered for this external_id.
-        - ``len == 1`` — normal: exactly one item matches.
-        - ``len > 1`` — duplicates exist: more than one item shares the same
-          external_id (consumer decides how to handle).
+        Returns None immediately if external_id is None (no repository call).
+        UUID and int inputs are coerced to str before lookup.
 
         Args:
-            external_id: The external identifier to look up — UUID, int, or str.
+            external_id: The external identifier to look up — UUID, int, str, or None.
 
         Returns:
-            List of matching Item instances; empty list if none match.
+            The matching Item, or None if not found or external_id is None.
 
         Raises:
             TaxomeshRepositoryError: If the underlying repository raises it.
         """
-        return self._repo.list_items_by_external_id(str(external_id))
+        if external_id is None:
+            return None
+        return self._repo.get_item_by_external_id(str(external_id))
 
     @memoize(DEFAULT_CACHE_TTL)
-    def get_categories_by_external_id(self, external_id: ExternalId) -> list[Category]:
-        """Return all categories whose external_id matches the given value.
+    def get_category_by_external_id(self, external_id: ExternalId) -> Category | None:
+        """Return the category with the given external_id, or None.
 
-        Delegates to the repository without additional business logic.
-        The returned list length signals the category's state to the consumer:
-        - ``len == 0`` — orphan: no category is registered for this external_id.
-        - ``len == 1`` — normal: exactly one category matches.
-        - ``len > 1`` — duplicates exist: more than one category shares the same
-          external_id (consumer decides how to handle).
+        Returns None immediately if external_id is None (no repository call).
+        UUID and int inputs are coerced to str before lookup.
+        Root category is always excluded from results.
 
         Args:
-            external_id: The external identifier to look up — UUID, int, or str.
+            external_id: The external identifier to look up — UUID, int, str, or None.
 
         Returns:
-            List of matching Category instances; empty list if none match.
+            The matching non-root Category, or None if not found or external_id is None.
 
         Raises:
             TaxomeshRepositoryError: If the underlying repository raises it.
         """
-        results = self._repo.list_categories_by_external_id(str(external_id))
-        return [cat for cat in results if cat.category_id != self._root_id]
+        if external_id is None:
+            return None
+        cat = self._repo.get_category_by_external_id(str(external_id))
+        if cat is None or cat.category_id == self._root_id:
+            return None
+        return cat
 
     def remove_category_parent(self, category_id: UUID, parent_id: UUID) -> None:
         """Remove a parent relationship from a category. No-op if the link does not exist.
@@ -1368,11 +1370,7 @@ class TaxomeshService:
                     obj=item,
                     norm_name=SearchEngine.normalize(item.name),
                     norm_slug=SearchEngine.normalize(item.slug),
-                    norm_ext=(
-                        SearchEngine.normalize(item.external_id)
-                        if item.external_id != DEFAULT_ITEM_EXTERNAL_ID
-                        else ""
-                    ),
+                    norm_ext=(SearchEngine.normalize(item.external_id) if item.external_id is not None else ""),
                 )
                 for item in self.list_items()
             ]
@@ -1397,11 +1395,7 @@ class TaxomeshService:
                     obj=cat,
                     norm_name=SearchEngine.normalize(cat.name),
                     norm_slug=SearchEngine.normalize(cat.slug),
-                    norm_ext=(
-                        SearchEngine.normalize(cat.external_id)
-                        if cat.external_id != DEFAULT_CATEGORY_EXTERNAL_ID
-                        else ""
-                    ),
+                    norm_ext=(SearchEngine.normalize(cat.external_id) if cat.external_id is not None else ""),
                 )
                 for cat in self._repo.list_categories()
                 if cat.category_id != self._root_id
@@ -1466,7 +1460,7 @@ class TaxomeshService:
         *,
         get_name: Callable[[_T], str],
         get_slug: Callable[[_T], str],
-        get_ext: Callable[[_T], str],
+        get_ext: Callable[[_T], str | None],
         fuzzy: bool,
         limit: int,
     ) -> list[_T]:
@@ -1490,13 +1484,18 @@ class TaxomeshService:
             Entities sorted by descending score then normalised name, capped at *limit*.
         """
         engine = SearchEngine()
+
         # Normalize each candidate's fields exactly once.
+        def _norm_ext(c: _T) -> str:
+            ext = get_ext(c)
+            return SearchEngine.normalize(ext) if ext is not None else ""
+
         search_candidates: list[SearchCandidate[_T]] = [
             SearchCandidate(
                 obj=c,
                 norm_name=SearchEngine.normalize(get_name(c)),
                 norm_slug=SearchEngine.normalize(get_slug(c)),
-                norm_ext=(SearchEngine.normalize(get_ext(c)) if get_ext(c) != DEFAULT_ITEM_EXTERNAL_ID else ""),
+                norm_ext=_norm_ext(c),
             )
             for c in candidates
         ]

@@ -276,59 +276,33 @@ class TestListItemsOrdering:
 # ---------------------------------------------------------------------------
 
 
-class TestListItemsByExternalIdOrdering:
-    """list_items_by_external_id() returns matches ordered by name then item_id."""
+class TestGetItemByExternalId:
+    """get_item_by_external_id() returns Item or None (spec 041)."""
 
-    def test_ordered_by_name(self, tmp_json_path: Path) -> None:
-        """Multiple items sharing an external_id are returned in name order."""
-        repo = JsonRepository(tmp_json_path)
-        ext = "shared-ext"
-        repo.save_item(Item(name="Zeta", external_id=ext))
-        repo.save_item(Item(name="Alpha", external_id=ext))
-        repo.save_item(Item(name="Mu", external_id=ext))
-
-        items = repo.list_items_by_external_id(ext)
-        assert [i.name for i in items] == ["Alpha", "Mu", "Zeta"]
-
-    def test_single_result_returned(self, tmp_json_path: Path) -> None:
-        """Single match is returned correctly (no sorting regression)."""
+    def test_found(self, tmp_json_path: Path) -> None:
         repo = JsonRepository(tmp_json_path)
         item = Item(name="Solo", external_id="solo-ext")
         repo.save_item(item)
+        result = repo.get_item_by_external_id("solo-ext")
+        assert result is not None
+        assert result.item_id == item.item_id
 
-        result = repo.list_items_by_external_id("solo-ext")
-        assert len(result) == 1
-        assert result[0].item_id == item.item_id
-
-    def test_no_match_returns_empty(self, tmp_json_path: Path) -> None:
+    def test_no_match_returns_none(self, tmp_json_path: Path) -> None:
         repo = JsonRepository(tmp_json_path)
-        assert repo.list_items_by_external_id("nonexistent") == []
+        assert repo.get_item_by_external_id("nonexistent") is None
 
 
-class TestListCategoriesByExternalIdOrdering:
-    """list_categories_by_external_id() returns matches ordered by name then category_id."""
+class TestGetCategoryByExternalId:
+    """get_category_by_external_id() returns Category or None (spec 041)."""
 
-    def test_ordered_by_name(self, tmp_json_path: Path) -> None:
-        """Multiple categories sharing an external_id are returned in name order."""
-        repo = JsonRepository(tmp_json_path)
-        ext = "shared-cat-ext"
-        repo.save_category(Category(name="Omega", external_id=ext))
-        repo.save_category(Category(name="Beta", external_id=ext))
-        repo.save_category(Category(name="Gamma", external_id=ext))
-
-        cats = repo.list_categories_by_external_id(ext)
-        assert [c.name for c in cats] == ["Beta", "Gamma", "Omega"]
-
-    def test_single_result_returned(self, tmp_json_path: Path) -> None:
-        """Single match is returned correctly."""
+    def test_found(self, tmp_json_path: Path) -> None:
         repo = JsonRepository(tmp_json_path)
         cat = Category(name="Solo", external_id="solo-cat-ext")
         repo.save_category(cat)
+        result = repo.get_category_by_external_id("solo-cat-ext")
+        assert result is not None
+        assert result.category_id == cat.category_id
 
-        result = repo.list_categories_by_external_id("solo-cat-ext")
-        assert len(result) == 1
-        assert result[0].category_id == cat.category_id
-
-    def test_no_match_returns_empty(self, tmp_json_path: Path) -> None:
+    def test_no_match_returns_none(self, tmp_json_path: Path) -> None:
         repo = JsonRepository(tmp_json_path)
-        assert repo.list_categories_by_external_id("nonexistent") == []
+        assert repo.get_category_by_external_id("nonexistent") is None

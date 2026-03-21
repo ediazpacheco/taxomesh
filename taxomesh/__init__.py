@@ -11,6 +11,7 @@ from taxomesh.exceptions import (
     TaxomeshCyclicDependencyError,
     TaxomeshDuplicateSlugError,
     TaxomeshError,
+    TaxomeshExternalIdConflictError,
     TaxomeshItemNotFoundError,
     TaxomeshNotFoundError,
     TaxomeshRelationError,
@@ -19,7 +20,7 @@ from taxomesh.exceptions import (
     TaxomeshValidationError,
 )
 
-__VERSION__ = "0.1.0a29"
+__VERSION__ = "0.1.0a30"
 __version__ = __VERSION__
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "TaxomeshValidationError",
     "TaxomeshCyclicDependencyError",
     "TaxomeshDuplicateSlugError",
+    "TaxomeshExternalIdConflictError",
     "TaxomeshRelationError",
     "TaxomeshRepositoryError",
     "TaxomeshConfigError",

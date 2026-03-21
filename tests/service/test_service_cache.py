@@ -162,7 +162,7 @@ class TestRelationWriteInvalidation:
 
 
 # ---------------------------------------------------------------------------
-# T005 / T006 / T007 — US1: get_items_by_external_id, get_categories_by_external_id
+# T005 / T006 / T007 — US1: get_item_by_external_id, get_category_by_external_id (spec 041)
 # ---------------------------------------------------------------------------
 
 
@@ -170,66 +170,66 @@ class TestExternalIdLookupCaching:
     def setup_method(self) -> None:
         clear_all_caches()
 
-    def test_get_items_by_external_id_cached(self) -> None:
+    def test_get_item_by_external_id_cached(self) -> None:
         """T005 — second call with same external_id must not hit repo."""
         repo = _mock_repo()
         item = Item(external_id="ext-001", item_id=uuid4())
-        repo.list_items_by_external_id.return_value = [item]
+        repo.get_item_by_external_id.return_value = item
         svc = _make_service(repo)
 
-        svc.get_items_by_external_id("ext-001")
-        svc.get_items_by_external_id("ext-001")
-        repo.list_items_by_external_id.assert_called_once()
+        svc.get_item_by_external_id("ext-001")
+        svc.get_item_by_external_id("ext-001")
+        repo.get_item_by_external_id.assert_called_once()
 
-    def test_get_categories_by_external_id_cached(self) -> None:
+    def test_get_category_by_external_id_cached(self) -> None:
         """T006 — second call with same external_id must not hit repo."""
         repo = _mock_repo()
         cat = Category(category_id=uuid4(), name="Cat", external_id="ext-cat-1")
-        repo.list_categories_by_external_id.return_value = [cat]
+        repo.get_category_by_external_id.return_value = cat
         repo.get_category.return_value = None  # root not involved
         svc = _make_service(repo)
 
-        svc.get_categories_by_external_id("ext-cat-1")
-        svc.get_categories_by_external_id("ext-cat-1")
-        repo.list_categories_by_external_id.assert_called_once()
+        svc.get_category_by_external_id("ext-cat-1")
+        svc.get_category_by_external_id("ext-cat-1")
+        repo.get_category_by_external_id.assert_called_once()
 
-    def test_get_items_by_external_id_empty_result_cached(self) -> None:
-        """T007 — empty-list result must also be cached (not re-queried)."""
+    def test_get_item_by_external_id_none_result_cached(self) -> None:
+        """T007 — None result must also be cached (not re-queried)."""
         repo = _mock_repo()
-        repo.list_items_by_external_id.return_value = []
+        repo.get_item_by_external_id.return_value = None
         svc = _make_service(repo)
 
-        result1 = svc.get_items_by_external_id("unknown")
-        result2 = svc.get_items_by_external_id("unknown")
-        assert result1 == []
-        assert result2 == []
-        repo.list_items_by_external_id.assert_called_once()
+        result1 = svc.get_item_by_external_id("unknown")
+        result2 = svc.get_item_by_external_id("unknown")
+        assert result1 is None
+        assert result2 is None
+        repo.get_item_by_external_id.assert_called_once()
 
-    def test_get_items_by_external_id_cache_expires_after_ttl(self) -> None:
+    def test_get_item_by_external_id_cache_expires_after_ttl(self) -> None:
         """FR-007 — cached result must be re-fetched once the TTL window has elapsed."""
         repo = _mock_repo()
         item = Item(external_id="ext-ttl", item_id=uuid4())
-        repo.list_items_by_external_id.return_value = [item]
+        repo.get_item_by_external_id.return_value = item
         svc = _make_service(repo)
 
         with patch("taxomesh.utils.memoize.time") as mock_time:
             mock_time.monotonic.return_value = 0.0
-            svc.get_items_by_external_id("ext-ttl")
-            assert repo.list_items_by_external_id.call_count == 1
+            svc.get_item_by_external_id("ext-ttl")
+            assert repo.get_item_by_external_id.call_count == 1
 
             mock_time.monotonic.return_value = 6.0  # past DEFAULT_CACHE_TTL (5 s)
-            svc.get_items_by_external_id("ext-ttl")
-            assert repo.list_items_by_external_id.call_count == 2
+            svc.get_item_by_external_id("ext-ttl")
+            assert repo.get_item_by_external_id.call_count == 2
 
     def test_different_external_ids_are_independent_cache_entries(self) -> None:
         """Distinct external IDs must each hit the repo once."""
         repo = _mock_repo()
-        repo.list_items_by_external_id.return_value = []
+        repo.get_item_by_external_id.return_value = None
         svc = _make_service(repo)
 
-        svc.get_items_by_external_id("id-A")
-        svc.get_items_by_external_id("id-B")
-        assert repo.list_items_by_external_id.call_count == 2
+        svc.get_item_by_external_id("id-A")
+        svc.get_item_by_external_id("id-B")
+        assert repo.get_item_by_external_id.call_count == 2
 
 
 # ---------------------------------------------------------------------------

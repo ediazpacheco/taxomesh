@@ -11,6 +11,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a30] — 2026-03-21
+
+### ⚠ BREAKING CHANGES
+
+#### `external_id` is now a 1:1 unique identifier — migration required
+
+`external_id` on `Item` and `Category` has changed from a duplicate-tolerant
+lookup key to a **true unique identifier**.  Every layer of the library has been
+updated accordingly.  Consumer apps that link their own records to taxomesh
+Items or Categories via `external_id` **must** migrate before upgrading.
+
+---
+
+##### What changed
+
+| Layer | Before | After |
+|---|---|---|
+| Domain model type | `str` (default `""`) | `str \| None` (default `None`) |
+| Duplicate external\_ids | allowed | **forbidden** — raises `TaxomeshExternalIdConflictError` |
+| Service lookup | `get_items_by_external_id(…) → list[Item]` | `get_item_by_external_id(…) → Item \| None` |
+| Service lookup | `get_categories_by_external_id(…) → list[Category]` | `get_category_by_external_id(…) → Category \| None` |
+| Repository protocol | `list_items_by_external_id(str) → list[Item]` | `get_item_by_external_id(str) → Item \| None` |
+| Repository protocol | `list_categories_by_external_id(str) → list[Category]` | `get_category_by_external_id(str) → Category \| None` |
+| "No match" signal | empty list (`[]`) | `None` |
+| "Absent" value | empty string (`""`) | `None` |
+| Django ORM | `CharField(db_index=True)` | `CharField(null=True, unique=True)` |
+| Django migration | — | `0008_unique_external_id` converts `""` → `NULL`, adds `UNIQUE` constraint |
+
+---
+
+##### New exception
+
+```python
+TaxomeshExternalIdConflictError(TaxomeshValidationError)
+```
+
+Raised by `save_item` / `save_category` (all three repository backends) when a
+non-`None` `external_id` is already held by a **different** record of the same
+type.  Re-saving a record with its own existing `external_id` (same primary key)
+never raises.
+
+```python
+from taxomesh import TaxomeshExternalIdConflictError
+
+try:
+    service.update_item(item_id, external_id="ext-123")
+except TaxomeshExternalIdConflictError as exc:
+    # "external_id 'ext-123' is already assigned to another item."
+    print(exc)
+```
+
+---
+
+##### Updated service API
+
+```python
+# Look up an Item by its external identifier
+item: Item | None = service.get_item_by_external_id("ext-123")
+item: Item | None = service.get_item_by_external_id(some_uuid)   # coerced to str
+item: Item | None = service.get_item_by_external_id(None)        # returns None immediately
+
+# Look up a Category by its external identifier (root category never returned)
+cat: Category | None = service.get_category_by_external_id("ext-456")
+```
+
+Both methods accept `str | int | UUID | None`.  `None` input short-circuits
+immediately without touching the repository.  Results are memoized for
+`DEFAULT_CACHE_TTL` seconds.
+
+---
+
+##### Consumer app migration checklist
+
+1. **Remove** all calls to `get_items_by_external_id` — replace with
+   `get_item_by_external_id` and handle `Item | None` instead of `list[Item]`.
+
+2. **Remove** all calls to `get_categories_by_external_id` — replace with
+   `get_category_by_external_id` and handle `Category | None`.
+
+3. **Replace** the "empty list = orphan" pattern with a `None` check:
+
+   ```python
+   # Before
+   results = service.get_items_by_external_id(ext_id)
+   if not results:
+       # orphan — external record has no taxomesh Item
+       ...
+   item = results[0]
+
+   # After
+   item = service.get_item_by_external_id(ext_id)
+   if item is None:
+       # no taxomesh Item for this external_id
+       ...
+   ```
+
+4. **Audit** your data for duplicate `external_id` values before running the
+   Django migration.  The migration converts `""` → `NULL` automatically, but
+   two records sharing the same non-empty `external_id` string will **block**
+   the `UNIQUE` constraint from being applied.  Resolve duplicates manually
+   (set one of them to `None`) before migrating:
+
+   ```python
+   # Find conflicts before migrating
+   from collections import Counter
+   counts = Counter(
+       item.external_id
+       for item in service.list_items()
+       if item.external_id  # skip empty/None
+   )
+   duplicates = [eid for eid, n in counts.items() if n > 1]
+   ```
+
+5. **Run the Django migration** (if using `DjangoRepository`):
+
+   ```bash
+   python manage.py migrate taxomesh
+   ```
+
+   Migration `0008_unique_external_id` converts all `external_id = ""` rows to
+   `NULL` and then adds the `UNIQUE` constraint on both `taxomesh_item` and
+   `taxomesh_category`.
+
+6. **Update `external_id` defaults** — any code that creates Items or Categories
+   with `external_id=""` as an explicit "no reference" sentinel should be
+   updated to pass `external_id=None` (or omit the argument, since `None` is
+   now the default).
+
+7. **Catch `TaxomeshExternalIdConflictError`** wherever your app assigns
+   `external_id` values at write time, so accidental duplicates surface
+   immediately instead of silently creating data inconsistencies.
+
+---
+
+##### Unchanged behaviours
+
+- Multiple `NULL` / `None` external IDs **do not conflict** — a taxonomy where
+  most Items have no external reference is fully supported.
+- `external_id` remains optional on both `Item` and `Category`.
+- UUID and `int` inputs are still coerced to `str` before storage.
+- The `search_items()` and `search_categories()` methods continue to score
+  against `external_id` as a search field.
+- `list_categories(external_id=…)` still works; it now returns a list of at
+  most one element (and is not sorted, since there can be only one match).
+
+---
+
 ## [0.1.0a29] — 2026-03-17
 
 ### Performance

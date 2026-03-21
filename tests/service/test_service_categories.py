@@ -230,9 +230,9 @@ def test_create_category_with_external_id(service: TaxomeshService) -> None:
 
 
 def test_create_category_default_external_id(service: TaxomeshService) -> None:
-    """create_category without external_id defaults to empty string."""
+    """create_category without external_id defaults to None."""
     cat = service.create_category(name="Genre2")
-    assert cat.external_id == ""
+    assert cat.external_id is None
 
 
 def test_update_category_external_id_non_none(service: TaxomeshService) -> None:
@@ -257,13 +257,12 @@ def test_update_category_external_id_empty_string_clears(service: TaxomeshServic
 
 
 def test_list_categories_filtered_by_external_id(service: TaxomeshService) -> None:
-    """list_categories(external_id=...) returns only categories with that external_id."""
+    """list_categories(external_id=...) returns the one category with that external_id."""
     service.create_category(name="A", external_id="match")
-    service.create_category(name="B", external_id="match")
     service.create_category(name="C", external_id="other")
     result = service.list_categories(external_id="match")
     names = {c.name for c in result}
-    assert names == {"A", "B"}
+    assert names == {"A"}
 
 
 def test_list_categories_external_id_none_returns_all(service: TaxomeshService) -> None:
@@ -275,7 +274,7 @@ def test_list_categories_external_id_none_returns_all(service: TaxomeshService) 
 
 
 def test_list_categories_external_id_empty_string(service: TaxomeshService) -> None:
-    """list_categories(external_id='') returns only categories with empty external_id."""
+    """list_categories(external_id='') returns only the category with that external_id."""
     service.create_category(name="R", external_id="")
     service.create_category(name="S", external_id="has-val")
     result = service.list_categories(external_id="")
