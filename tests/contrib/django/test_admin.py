@@ -868,3 +868,57 @@ class TestJsonEditorWidgetUS2:
         field = JsonEditorFormField(required=False)
         result = field.clean("")
         assert result == {}
+
+
+class TestCategoryChildLinkInline:
+    def test_category_child_link_inline_registered_on_category_admin(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline, CategoryModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = CategoryModelAdmin(CategoryModel, site)
+        inline_classes = [type(inline) for inline in admin_obj.get_inline_instances(MagicMock())]
+        assert CategoryChildLinkInline in inline_classes
+
+    def test_category_child_link_inline_is_read_only(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+        assert not inline.has_add_permission(request)
+        assert not inline.has_change_permission(request)
+        assert not inline.has_delete_permission(request)
+
+    def test_category_child_link_inline_shows_category_field(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        # No custom fields override — Django renders all fields including the
+        # 'category' FK, which displays CategoryModel.__str__ (the child's name).
+        assert not hasattr(inline, "fields") or inline.fields is None
+
+    def test_category_child_link_inline_queryset_reflects_parent_links(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryParentLinkModel  # noqa: PLC0415
+
+        parent = CategoryModel.objects.create(name="Parent")
+        child = CategoryModel.objects.create(name="Child")
+        CategoryParentLinkModel.objects.create(category=child, parent_category=parent, sort_index=0)
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        request = MagicMock()
+        qs = inline.get_queryset(request).filter(parent_category=parent)
+
+        assert qs.count() == 1
+        assert qs.first().category == child
