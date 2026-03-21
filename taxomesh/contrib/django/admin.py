@@ -180,6 +180,19 @@ def _build_child_entries(  # noqa: PLR0913
 # ---------------------------------------------------------------------------
 
 
+class _ReadOnlyInlineMixin:
+    """Mixin that makes a TabularInline fully read-only (no add, change, or delete)."""
+
+    def has_add_permission(self, request: HttpRequest, obj: object = None) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: object = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: object = None) -> bool:
+        return False
+
+
 class TaxomeshAdminMixin:
     """Mixin that provides a per-request TaxomeshService factory and shared display helpers."""
 
@@ -593,6 +606,21 @@ class CategoryParentLinkInline(TaxomeshAdminMixin, admin.TabularInline):
 
 
 # ---------------------------------------------------------------------------
+# CategoryChildLink Inline
+# ---------------------------------------------------------------------------
+
+
+class CategoryChildLinkInline(_ReadOnlyInlineMixin, admin.TabularInline):
+    """Read-only inline for direct child categories (parent_category == current category)."""
+
+    model = CategoryParentLinkModel
+    fk_name = "parent_category"
+    extra = 0
+    verbose_name = "Child category"
+    verbose_name_plural = "Child categories"
+
+
+# ---------------------------------------------------------------------------
 # Item inlines
 # ---------------------------------------------------------------------------
 
@@ -754,7 +782,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
     list_filter = ("enabled", HasSlugFilter, HasLinkedObjectListFilter)
     fields = ("name", "slug", "description", "enabled", ("external_id", "linked_object_url"), "metadata")
     readonly_fields = ("linked_object_url",)
-    inlines = [CategoryParentLinkInline]
+    inlines = [CategoryParentLinkInline, CategoryChildLinkInline]
     formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
 
     def linked_object_url(self, obj: Any) -> str:
@@ -1219,21 +1247,12 @@ class OutgoingRelationInline(TaxomeshAdminMixin, admin.TabularInline):
             self.message_user(request, str(exc), level=messages.ERROR)
 
 
-class IncomingRelationInline(admin.TabularInline):
+class IncomingRelationInline(_ReadOnlyInlineMixin, admin.TabularInline):
     """Read-only inline for incoming item relations (target_item == current item)."""
 
     model = ItemRelationLinkModel
     fk_name = "target_item"
     extra = 0
-
-    def has_add_permission(self, request: HttpRequest, obj: object = None) -> bool:
-        return False
-
-    def has_change_permission(self, request: HttpRequest, obj: object = None) -> bool:
-        return False
-
-    def has_delete_permission(self, request: HttpRequest, obj: object = None) -> bool:
-        return False
 
 
 # ---------------------------------------------------------------------------
