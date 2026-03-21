@@ -67,7 +67,7 @@ def test_disabled_category_included_us4(service: TaxomeshService) -> None:
     service._repo.save_category(cat.model_copy(update={"enabled": False}))
     clear_all_caches()
 
-    result = service.list_categories_by_item(item.item_id)
+    result = service.list_categories_by_item(item.item_id, enabled=None)
 
     assert len(result) == 1
     assert result[0].category_id == cat.category_id

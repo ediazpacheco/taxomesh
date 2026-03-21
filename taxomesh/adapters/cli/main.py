@@ -128,13 +128,14 @@ def main(
 def category_list(
     ctx: typer.Context,
     parent_id: UUID | None = typer.Option(None, "--parent-id", help="Filter by parent category UUID"),
+    include_disabled: bool = typer.Option(False, "--include-disabled", help="Include disabled categories in output"),
 ) -> None:
     """List categories."""
     result = build(_config_path(ctx))
     _print_verbose(result, _verbose(ctx))
     svc = result.service
     try:
-        categories = svc.list_categories(parent_id=parent_id)
+        categories = svc.list_categories(parent_id=parent_id, enabled=None if include_disabled else True)
     except TaxomeshError as exc:
         _err(str(exc))
     except Exception as exc:
@@ -227,13 +228,14 @@ def category_update(
 def item_list(
     ctx: typer.Context,
     category_id: UUID | None = typer.Option(None, "--category-id", help="Filter by category UUID"),
+    include_disabled: bool = typer.Option(False, "--include-disabled", help="Include disabled items in output"),
 ) -> None:
     """List items."""
     result = build(_config_path(ctx))
     _print_verbose(result, _verbose(ctx))
     svc = result.service
     try:
-        items = svc.list_items(category_id=category_id)
+        items = svc.list_items(category_id=category_id, enabled=None if include_disabled else True)
     except TaxomeshError as exc:
         _err(str(exc))
     except Exception as exc:
@@ -519,6 +521,7 @@ def graph_cmd(
         True, "--show-relations/--no-show-relations", help="Show outgoing item relations"
     ),
     max_depth: int = typer.Option(GRAPH_DEFAULT_MAX_DEPTH, "--max-depth", help="Max depth to display; 0 = unlimited"),
+    include_disabled: bool = typer.Option(False, "--include-disabled", help="Include disabled categories and items"),
 ) -> None:
     """Display the full taxonomy as a colour-coded tree.
 
@@ -529,11 +532,13 @@ def graph_cmd(
     Args:
         ctx: Typer context carrying verbose flag and config path.
         show_relations: When True, render outgoing item relations as dim leaves.
+        include_disabled: When True, include disabled categories and items in the tree.
     """
     result = build(_config_path(ctx))
     _print_verbose(result, _verbose(ctx))
+    enabled = None if include_disabled else True
     try:
-        graph = result.service.get_graph()
+        graph = result.service.get_graph(enabled=enabled)
     except TaxomeshError as exc:
         _err(str(exc))
     if not graph.roots:
@@ -544,7 +549,7 @@ def graph_cmd(
     if show_relations:
         relations = {}
         item_lookup = {}
-        for item in result.service.list_items():
+        for item in result.service.list_items(enabled=enabled):
             item_lookup[item.item_id] = item
             relations[item.item_id] = result.service.list_item_relations(item.item_id)
     tree = Tree("Taxonomy")

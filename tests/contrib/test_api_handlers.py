@@ -428,11 +428,11 @@ class TestSearchItems:
         result = handlers.search_items(service, params)
         assert result == []
 
-    def test_enabled_only_excludes_disabled(self, service: TaxomeshService) -> None:
-        """enabled_only=True excludes disabled items."""
+    def test_enabled_true_excludes_disabled(self, service: TaxomeshService) -> None:
+        """enabled=True excludes disabled items."""
         item = service.create_item(name="Piazzolla")
         service.update_item(item_id=item.item_id, enabled=False)
-        params = SearchItemsRequest(q="Piazzolla", enabled_only=True)
+        params = SearchItemsRequest(q="Piazzolla", enabled=True)
         result = handlers.search_items(service, params)
         assert all(i.enabled for i in result)
 
@@ -508,10 +508,10 @@ class TestSearchCategories:
         result = handlers.search_categories(service, params)
         assert result == []
 
-    def test_enabled_only_true_returns_enabled_categories(self, service: TaxomeshService) -> None:
-        """enabled_only=True returns only enabled categories (all categories are enabled by default)."""
+    def test_enabled_true_returns_enabled_categories(self, service: TaxomeshService) -> None:
+        """enabled=True returns only enabled categories (all categories are enabled by default)."""
         service.create_category(name="Tango")
-        params = SearchCategoriesRequest(q="Tango", enabled_only=True)
+        params = SearchCategoriesRequest(q="Tango", enabled=True)
         result = handlers.search_categories(service, params)
         assert all(c.enabled for c in result)
 

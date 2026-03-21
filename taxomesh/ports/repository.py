@@ -46,7 +46,7 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
-    def list_categories(self) -> list[Category]:
+    def list_categories(self, *, enabled: bool | None = True) -> list[Category]:
         """Return all stored categories ordered by name then category_id.
 
         Results are ordered ascending by ``name``; when two categories share the
@@ -96,7 +96,7 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
-    def list_items(self) -> list[Item]:
+    def list_items(self, *, enabled: bool | None = True) -> list[Item]:
         """Return all stored items ordered by name then item_id.
 
         Results are ordered ascending by ``name``; when two items share the same

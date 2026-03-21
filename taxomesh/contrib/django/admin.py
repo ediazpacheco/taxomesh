@@ -396,7 +396,7 @@ class TaxomeshCategoryListFilter(admin.SimpleListFilter):
             cat_uuid = UUID(value)
             repo = DjangoRepository()
             svc = TaxomeshService(repository=repo)
-            items = svc.list_items(category_id=cat_uuid)
+            items = svc.list_items(category_id=cat_uuid, enabled=None)
             external_ids = [str(item.external_id) for item in items if item.external_id]
             return queryset.filter(pk__in=external_ids)
         except Exception:
@@ -1011,7 +1011,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
         repo = DjangoRepository()
         svc = TaxomeshService(repository=repo)
 
-        root_cats = [c for c in repo.list_categories() if c.name == ROOT_CATEGORY_NAME]
+        root_cats = [c for c in repo.list_categories(enabled=None) if c.name == ROOT_CATEGORY_NAME]
         root_uuid = root_cats[0].category_id if root_cats else None
         if root_uuid is not None and node_uuid == root_uuid:
             return JsonResponse({"error": "Cannot reparent ROOT category"}, status=400)
@@ -1041,7 +1041,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
             repo = DjangoRepository()
             svc = TaxomeshService(repository=repo)
 
-            all_cats = repo.list_categories()
+            all_cats = repo.list_categories(enabled=None)
             root_domain = next((c for c in all_cats if c.name == ROOT_CATEGORY_NAME), None)
             root_uuid: UUID | None = root_domain.category_id if root_domain else None
             root_uuid_str = str(root_uuid) if root_uuid else ""
@@ -1121,8 +1121,8 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
             repo = DjangoRepository()
             svc = TaxomeshService(repository=repo)
 
-            child_cats = svc.list_categories(parent_id=parent_uuid)
-            items = svc.list_items(category_id=parent_uuid)
+            child_cats = svc.list_categories(parent_id=parent_uuid, enabled=None)
+            items = svc.list_items(category_id=parent_uuid, enabled=None)
 
             all_cat_links = repo.list_category_parent_links()
             all_item_links = repo.list_item_parent_links()

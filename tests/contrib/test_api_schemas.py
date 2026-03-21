@@ -190,7 +190,7 @@ class TestSearchItemsRequest:
         assert req.limit == 20
         assert req.category_id is None
         assert req.recursive is False
-        assert req.enabled_only is True
+        assert req.enabled is True
         assert req.fuzzy is True
 
     def test_q_too_long_raises(self) -> None:
@@ -224,7 +224,7 @@ class TestSearchCategoriesRequest:
         assert req.q == "jazz"
         assert req.limit == 20
         assert req.parent_id is None
-        assert req.enabled_only is True
+        assert req.enabled is True
         assert req.fuzzy is True
 
     def test_q_too_long_raises(self) -> None:

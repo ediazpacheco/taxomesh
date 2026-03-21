@@ -11,6 +11,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a34] — 2026-03-21
+
+### ⚠ BREAKING CHANGES
+
+#### Repository-level `enabled` filtering — default behaviour changed
+
+All listing and search methods now return only **enabled** records by default.
+Previously, disabled records were included silently and callers were responsible
+for filtering. The `enabled_only` parameter name on search methods has been
+removed and replaced by `enabled`.
+
+##### Migration
+
+| Before | After |
+|--------|-------|
+| `svc.list_categories()` — returned all categories | `svc.list_categories()` — returns only enabled; pass `enabled=None` for all |
+| `svc.list_items()` — returned all items | `svc.list_items()` — returns only enabled; pass `enabled=None` for all |
+| `svc.list_categories_by_item(id)` — included disabled categories | `svc.list_categories_by_item(id)` — returns only enabled; pass `enabled=None` for all |
+| `svc.get_graph()` — included disabled nodes | `svc.get_graph()` — excludes disabled; pass `enabled=None` for all |
+| `svc.search_items("q", enabled_only=True)` | `svc.search_items("q", enabled=True)` |
+| `svc.search_categories("q", enabled_only=False)` | `svc.search_categories("q", enabled=False)` |
+| CLI `taxomesh category list` — returned all | `taxomesh category list` — returns only enabled; add `--include-disabled` for all |
+| CLI `taxomesh item list` — returned all | `taxomesh item list` — returns only enabled; add `--include-disabled` for all |
+| CLI `taxomesh graph` — showed all nodes | `taxomesh graph` — shows only enabled; add `--include-disabled` for all |
+| API `list_categories` — returned all | API `list_categories` — returns only enabled; pass `include_disabled=true` for all |
+| API `list_items` — returned all | API `list_items` — returns only enabled; pass `include_disabled=true` for all |
+| API `get_graph` — returned all nodes | API `get_graph` — returns only enabled; pass `include_disabled=true` for all |
+| `SearchItemsRequest(enabled_only=True)` | `SearchItemsRequest(enabled=True)` |
+| `SearchCategoriesRequest(enabled_only=True)` | `SearchCategoriesRequest(enabled=True)` |
+
+##### Repository port
+
+`TaxomeshRepositoryBase.list_categories` and `list_categories` gain a keyword-only
+`enabled: bool | None = True` parameter with three-way semantics:
+- `True` (default) — only enabled records
+- `False` — only disabled records
+- `None` — all records regardless of state
+
+All adapter implementations (JSON, YAML, Django ORM, InMemory) implement this parameter.
+The Django adapter applies the filter at ORM level (`WHERE enabled = <value>`); no
+full-table fetch occurs for enabled-filtered calls.
+
+### Added
+
+#### `TaxomeshService.update_category` — `enabled` parameter
+
+`update_category()` now accepts `enabled: bool | None = None`, consistent with `update_item()`.
+
+---
+
 ## [0.1.0a33] — 2026-03-21
 
 ### Added
@@ -20,10 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 New public method `list_categories_by_item(item_id: UUID) -> list[Category]` exposes the
 item→categories traversal direction.
 
-- Returns all categories in which the item has an active placement link, ordered by `ItemParentLink.sort_index` ascending.
+- Returns only enabled categories by default; pass `enabled=None` to include disabled ones.
 - Raises `TaxomeshItemNotFoundError` if the item does not exist.
 - Returns `[]` if the item has no placements.
-- Disabled categories are included (structural read; filtering by `enabled` is the caller's responsibility).
 - Result memoized at `DEFAULT_CACHE_TTL`; automatically invalidated by `place_item_in_category`, `remove_item_from_category`, and `reorder_items_in_category`.
 
 ---

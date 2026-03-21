@@ -901,7 +901,7 @@ def test_graph_shows_item_enabled_false() -> None:
     svc.update_item(item.item_id, enabled=False)
     svc.place_item_in_category(item.item_id, cat.category_id)
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
-        result = runner.invoke(app, ["graph"])
+        result = runner.invoke(app, ["graph", "--include-disabled"])
     assert result.exit_code == 0
     assert "✗" in result.output
     assert "enabled=False" not in result.output

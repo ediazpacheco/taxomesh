@@ -195,7 +195,7 @@ class TaxomeshService:
         Scans the repository for an existing root category. Creates one if absent.
         Called once at the end of ``__init__``.
         """
-        for cat in self._repo.list_categories():
+        for cat in self._repo.list_categories(enabled=None):
             if cat.name == ROOT_CATEGORY_NAME:
                 return cat.category_id
         root = Category(category_id=uuid4(), name=ROOT_CATEGORY_NAME)
@@ -270,8 +270,14 @@ class TaxomeshService:
         return result
 
     @memoize(DEFAULT_CACHE_TTL)
-    def list_categories(self, *, parent_id: UUID | None = None, external_id: str | None = None) -> list[Category]:
-        """Return stored categories, optionally filtered by parent and/or external_id.
+    def list_categories(
+        self,
+        *,
+        parent_id: UUID | None = None,
+        external_id: str | None = None,
+        enabled: bool | None = True,
+    ) -> list[Category]:
+        """Return stored categories, optionally filtered by parent, external_id, and/or enabled.
 
         Args:
             parent_id: When provided, returns child categories of this parent
@@ -280,6 +286,8 @@ class TaxomeshService:
                 (at most one, since external_id is unique). The root category is never
                 returned. When both parent_id and external_id are given, returns the
                 intersection (0 or 1 element; unsorted).
+            enabled: True (default) returns only enabled categories; False
+                returns only disabled; None returns all regardless of enabled state.
 
         Returns:
             List of categories. When filtering by external_id only, contains at most one
@@ -294,6 +302,8 @@ class TaxomeshService:
             results: list[Category] = []
             if cat is not None and cat.category_id != self._root_id:
                 results = [cat]
+            if enabled is not None:
+                results = [c for c in results if c.enabled == enabled]
             if parent_id is not None:
                 self.get_category(parent_id)
                 child_ids = {
@@ -311,7 +321,10 @@ class TaxomeshService:
             [lnk for lnk in self._repo.list_category_parent_links() if lnk.parent_category_id == parent_id],
             key=lambda lnk: lnk.sort_index,
         )
-        return [self.get_category(lnk.category_id) for lnk in links]
+        cats = [self.get_category(lnk.category_id) for lnk in links]
+        if enabled is not None:
+            cats = [c for c in cats if c.enabled == enabled]
+        return cats
 
     def delete_category(self, category_id: UUID) -> None:
         """Delete a category by its identifier.
@@ -356,8 +369,9 @@ class TaxomeshService:
         slug: str | None = None,
         metadata: dict[str, Any] | None = None,
         external_id: str | None | _UnsetType = _UNSET,
+        enabled: bool | None = None,
     ) -> Category:
-        """Update a category's name, description, slug, external_id, and/or metadata.
+        """Update a category's name, description, slug, external_id, enabled, and/or metadata.
 
         Args:
             category_id: The library-assigned UUID of the category to update.
@@ -366,6 +380,7 @@ class TaxomeshService:
             slug: New slug; unchanged if None. Pass "" to clear the slug.
             metadata: New metadata dict; unchanged if None.
             external_id: New external_id; pass None to clear the field; omit to leave unchanged.
+            enabled: New enabled state; unchanged if None.
 
         Returns:
             The updated Category.
@@ -391,6 +406,8 @@ class TaxomeshService:
             category.metadata = metadata
         if not isinstance(external_id, _UnsetType):
             category.external_id = external_id
+        if enabled is not None:
+            category.enabled = enabled
         self._repo.save_category(category)
         clear_all_caches()
         self._category_corpus = None
@@ -457,12 +474,14 @@ class TaxomeshService:
         return result
 
     @memoize(DEFAULT_CACHE_TTL)
-    def list_items(self, *, category_id: UUID | None = None) -> list[Item]:
-        """Return stored items, optionally filtered by category.
+    def list_items(self, *, category_id: UUID | None = None, enabled: bool | None = True) -> list[Item]:
+        """Return stored items, optionally filtered by category and/or enabled state.
 
         Args:
             category_id: When provided, returns items placed in this category
                 ordered by sort_index. When None, returns all items.
+            enabled: True (default) returns only enabled items; False
+                returns only disabled; None returns all regardless of enabled state.
 
         Returns:
             List of items.
@@ -471,29 +490,33 @@ class TaxomeshService:
             TaxomeshCategoryNotFoundError: If category_id is provided but not found.
         """
         if category_id is None:
-            return self._repo.list_items()
+            return self._repo.list_items(enabled=enabled)
         self.get_category(category_id)
         links = sorted(
             [lnk for lnk in self._repo.list_item_parent_links() if lnk.category_id == category_id],
             key=lambda lnk: lnk.sort_index,
         )
-        return [self.get_item(lnk.item_id) for lnk in links]
+        items = [self.get_item(lnk.item_id) for lnk in links]
+        if enabled is not None:
+            items = [i for i in items if i.enabled == enabled]
+        return items
 
     @memoize(DEFAULT_CACHE_TTL)
-    def list_categories_by_item(self, item_id: UUID) -> list[Category]:
+    def list_categories_by_item(self, item_id: UUID, *, enabled: bool | None = True) -> list[Category]:
         """Return the categories in which the given item has an active placement.
 
         Categories are returned in ascending sort_index order (the order defined
-        by item-to-category placement links). This is a structural graph read —
-        disabled categories are included; filtering by enabled state is the
-        caller's responsibility.
+        by item-to-category placement links).
 
         Args:
             item_id: The library-assigned UUID of the item.
+            enabled: True (default) returns only enabled categories; False
+                returns only disabled; None returns all regardless of enabled state.
 
         Returns:
             List of Category objects ordered by ItemParentLink.sort_index ascending.
-            Returns an empty list when the item has no placements.
+            Returns an empty list when the item has no placements (or none match the
+            enabled filter).
 
         Raises:
             TaxomeshItemNotFoundError: If no item with the given item_id exists.
@@ -509,7 +532,10 @@ class TaxomeshService:
             [lnk for lnk in self._repo.list_item_parent_links() if lnk.item_id == item_id],
             key=lambda lnk: lnk.sort_index,
         )
-        return [self.get_category(lnk.category_id) for lnk in links]
+        cats = [self.get_category(lnk.category_id) for lnk in links]
+        if enabled is not None:
+            cats = [c for c in cats if c.enabled == enabled]
+        return cats
 
     def delete_item(self, item_id: UUID) -> None:
         """Delete an item by its internal identifier.
@@ -728,13 +754,17 @@ class TaxomeshService:
         return link
 
     @memoize(DEFAULT_CACHE_TTL)
-    def get_graph(self) -> TaxomeshGraph:
+    def get_graph(self, *, enabled: bool | None = True) -> TaxomeshGraph:
         """Build and return a full taxonomy snapshot.
 
         Reads all categories (excluding the internal root), all category-parent
         relationships, and all item placements from the configured repository.
         Constructs a tree of CategoryNode instances rooted at the implicit
         taxonomy root.
+
+        Args:
+            enabled: True (default) includes only enabled categories and items;
+                False includes only disabled; None includes all regardless of state.
 
         Returns:
             A TaxomeshGraph snapshot. Returns a graph with an empty roots list
@@ -743,11 +773,22 @@ class TaxomeshService:
         Raises:
             TaxomeshRepositoryError: If the underlying repository fails during read.
         """
-        all_cats = {c.category_id: c for c in self._repo.list_categories() if c.category_id != self._root_id}
+        all_cats = {
+            c.category_id: c for c in self._repo.list_categories(enabled=enabled) if c.category_id != self._root_id
+        }
         all_links = self._repo.list_category_parent_links()
 
-        explicit_links = [lnk for lnk in all_links if lnk.parent_category_id != self._root_id]
-        root_child_links = [lnk for lnk in all_links if lnk.parent_category_id == self._root_id]
+        # Filter links to only include categories present in all_cats (respects enabled filter)
+        explicit_links = [
+            lnk
+            for lnk in all_links
+            if lnk.parent_category_id != self._root_id
+            and lnk.category_id in all_cats
+            and lnk.parent_category_id in all_cats
+        ]
+        root_child_links = [
+            lnk for lnk in all_links if lnk.parent_category_id == self._root_id and lnk.category_id in all_cats
+        ]
         root_sort = {lnk.category_id: lnk.sort_index for lnk in root_child_links}
 
         explicitly_parented = {lnk.category_id for lnk in explicit_links}
@@ -760,10 +801,11 @@ class TaxomeshService:
             bucket.sort(key=lambda t: t[0])
 
         item_links = self._repo.list_item_parent_links()
-        items_map = {i.item_id: i for i in self._repo.list_items()}
+        items_map = {i.item_id: i for i in self._repo.list_items(enabled=enabled)}
         items_pairs_by_cat: dict[UUID, list[tuple[int, Item]]] = {}
         for ilnk in item_links:
-            items_pairs_by_cat.setdefault(ilnk.category_id, []).append((ilnk.sort_index, items_map[ilnk.item_id]))
+            if ilnk.item_id in items_map:
+                items_pairs_by_cat.setdefault(ilnk.category_id, []).append((ilnk.sort_index, items_map[ilnk.item_id]))
         sorted_items_by_cat: dict[UUID, list[Item]] = {
             cid: [item for _, item in sorted(pairs, key=lambda t: t[0])] for cid, pairs in items_pairs_by_cat.items()
         }
@@ -1273,7 +1315,7 @@ class TaxomeshService:
         *,
         limit: int = DEFAULT_SEARCH_LIMIT,
         category_id: UUID | None = None,
-        enabled_only: bool = True,
+        enabled: bool = True,
         fuzzy: bool = True,
         recursive: bool = False,
     ) -> list[Item]:
@@ -1291,8 +1333,8 @@ class TaxomeshService:
             category_id: When provided, restrict candidates to items placed in
                 this category. When *recursive* is also ``True`` the candidates
                 include items in all descendant categories as well.
-            enabled_only: When ``True`` (default) only enabled items are
-                considered. Pass ``False`` to include disabled items.
+            enabled: When ``True`` (default) only enabled items are
+                considered. Pass ``False`` for only disabled items.
             fuzzy: When ``True`` (default) rapidfuzz scores are included in
                 ranking. Pass ``False`` for exact/substring matching only.
             recursive: Only meaningful when *category_id* is set. When ``True``
@@ -1315,11 +1357,10 @@ class TaxomeshService:
         norm_q = SearchEngine.normalize(query)
         if category_id is None:
             corpus = self._get_item_corpus()
-            filtered = [sc for sc in corpus if sc.obj.enabled] if enabled_only else corpus
+            filtered = [sc for sc in corpus if sc.obj.enabled == enabled]
             return self._score_corpus(norm_q, filtered, fuzzy=fuzzy, limit=limit)
         candidates = self._load_item_candidates(category_id=category_id, recursive=recursive)
-        if enabled_only:
-            candidates = [item for item in candidates if item.enabled]
+        candidates = [item for item in candidates if item.enabled == enabled]
         return self._score_and_rank(
             norm_q,
             candidates,
@@ -1336,7 +1377,7 @@ class TaxomeshService:
         *,
         limit: int = DEFAULT_SEARCH_LIMIT,
         parent_id: UUID | None = None,
-        enabled_only: bool = True,
+        enabled: bool = True,
         fuzzy: bool = True,
     ) -> list[Category]:
         """Search categories by name, slug, and external_id using fuzzy matching.
@@ -1354,8 +1395,8 @@ class TaxomeshService:
             limit: Maximum number of results to return; must be ≥ 1.
             parent_id: When provided, restrict candidates to direct children of
                 this category.
-            enabled_only: When ``True`` (default) only enabled categories are
-                considered.
+            enabled: When ``True`` (default) only enabled categories are
+                considered. Pass ``False`` for only disabled categories.
             fuzzy: When ``True`` (default) rapidfuzz scores are included.
 
         Returns:
@@ -1374,12 +1415,9 @@ class TaxomeshService:
         norm_q = SearchEngine.normalize(query)
         if parent_id is None:
             corpus = self._get_category_corpus()
-            filtered = [sc for sc in corpus if sc.obj.enabled] if enabled_only else corpus
+            filtered = [sc for sc in corpus if sc.obj.enabled == enabled]
             return self._score_corpus(norm_q, filtered, fuzzy=fuzzy, limit=limit)
-        # list_categories(parent_id=X) validates existence and returns direct children
-        candidates = self.list_categories(parent_id=parent_id)
-        if enabled_only:
-            candidates = [cat for cat in candidates if cat.enabled]
+        candidates = self.list_categories(parent_id=parent_id, enabled=enabled)
         return self._score_and_rank(
             norm_q,
             candidates,
@@ -1411,7 +1449,7 @@ class TaxomeshService:
                     norm_slug=SearchEngine.normalize(item.slug),
                     norm_ext=(SearchEngine.normalize(item.external_id) if item.external_id is not None else ""),
                 )
-                for item in self.list_items()
+                for item in self._repo.list_items(enabled=None)
             ]
         return self._item_corpus
 
@@ -1436,7 +1474,7 @@ class TaxomeshService:
                     norm_slug=SearchEngine.normalize(cat.slug),
                     norm_ext=(SearchEngine.normalize(cat.external_id) if cat.external_id is not None else ""),
                 )
-                for cat in self._repo.list_categories()
+                for cat in self._repo.list_categories(enabled=None)
                 if cat.category_id != self._root_id
             ]
         return self._category_corpus
