@@ -113,6 +113,21 @@ print([node.category.name for node in svc.get_graph().roots])  # ["Music", "Form
 The item still belongs to your application. `taxomesh` manages the taxonomy layer
 around it: placement, ordering, tags, relations, slugs, and traversal.
 
+### Resolving which categories an item belongs to
+
+`list_categories_by_item()` is the inverse of `list_items(category_id=...)` — it answers
+*"which categories does this item belong to?"*, ordered by sort position:
+
+```python
+cats = svc.list_categories_by_item(album.item_id)
+# [Category(name="Jazz", ...), Category(name="Vinyl", ...)]
+# — ordered by the sort_index set when the item was placed
+```
+
+If the item has no placements, an empty list is returned. Disabled categories are
+included; filtering by `enabled` state is the caller's responsibility.
+Raises `TaxomeshItemNotFoundError` when the item does not exist.
+
 ### Resolving items and categories by external_id
 
 `external_id` is a **unique** identifier (`str | None`). Each record can have at most

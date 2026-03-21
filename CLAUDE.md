@@ -293,6 +293,8 @@ Do NOT update README during implement — only after
 - Python 3.11 + Pydantic v2 (domain models), stdlib `typing.Final` (043-clear-external-id)
 - JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM) — **no changes required** (043-clear-external-id)
 - Django ORM — `CategoryParentLinkModel` table; no migrations required (044-child-categories-edit)
+- Python 3.11 + Pydantic v2 (domain models), stdlib `uuid`, `typing.Final` (045-item-categories-lookup)
+- All backends unchanged — `list_item_parent_links()` confirmed present in JsonRepository, YAMLRepository, DjangoRepository, and InMemoryRepository (045-item-categories-lookup)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

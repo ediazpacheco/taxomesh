@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a33] — 2026-03-21
+
+### Added
+
+#### `TaxomeshService.list_categories_by_item`
+
+New public method `list_categories_by_item(item_id: UUID) -> list[Category]` exposes the
+item→categories traversal direction.
+
+- Returns all categories in which the item has an active placement link, ordered by `ItemParentLink.sort_index` ascending.
+- Raises `TaxomeshItemNotFoundError` if the item does not exist.
+- Returns `[]` if the item has no placements.
+- Disabled categories are included (structural read; filtering by `enabled` is the caller's responsibility).
+- Result memoized at `DEFAULT_CACHE_TTL`; automatically invalidated by `place_item_in_category`, `remove_item_from_category`, and `reorder_items_in_category`.
+
+---
+
 ## [0.1.0a30] — 2026-03-21
 
 ### ⚠ BREAKING CHANGES
