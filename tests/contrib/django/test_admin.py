@@ -881,19 +881,6 @@ class TestCategoryChildLinkInline:
         inline_classes = [type(inline) for inline in admin_obj.get_inline_instances(MagicMock())]
         assert CategoryChildLinkInline in inline_classes
 
-    def test_category_child_link_inline_is_read_only(self) -> None:
-        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
-        from django.http import HttpRequest  # noqa: PLC0415
-
-        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = CategoryChildLinkInline(CategoryModel, site)
-        request = MagicMock(spec=HttpRequest)
-        assert not inline.has_add_permission(request)
-        assert not inline.has_change_permission(request)
-        assert not inline.has_delete_permission(request)
-
     def test_category_child_link_inline_shows_category_field(self) -> None:
         from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
 
@@ -922,3 +909,200 @@ class TestCategoryChildLinkInline:
 
         assert qs.count() == 1
         assert qs.first().category == child
+
+
+# ---------------------------------------------------------------------------
+# TestCategoryChildLinkForm — DAG integrity validation via clean()
+# ---------------------------------------------------------------------------
+
+
+class TestCategoryChildLinkForm:
+    def test_valid_child_link_form_is_valid(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryChildLinkForm  # noqa: PLC0415
+
+        cat_a = CategoryModel.objects.create(name="Cat A")
+        cat_b = CategoryModel.objects.create(name="Cat B")
+        form = CategoryChildLinkForm(
+            data={"category": str(cat_b.pk), "parent_category": str(cat_a.pk), "sort_index": "0"}
+        )
+        assert form.is_valid()
+
+    def test_self_link_raises_validation_error(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryChildLinkForm  # noqa: PLC0415
+
+        cat_a = CategoryModel.objects.create(name="Cat A")
+        form = CategoryChildLinkForm(
+            data={"category": str(cat_a.pk), "parent_category": str(cat_a.pk), "sort_index": "0"}
+        )
+        assert not form.is_valid()
+
+    def test_cycle_raises_validation_error(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryChildLinkForm  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryParentLinkModel  # noqa: PLC0415
+
+        cat_a = CategoryModel.objects.create(name="Cat A")
+        cat_b = CategoryModel.objects.create(name="Cat B")
+        CategoryParentLinkModel.objects.create(category=cat_b, parent_category=cat_a, sort_index=0)
+        # Making A a child of B would create a cycle
+        form = CategoryChildLinkForm(
+            data={"category": str(cat_a.pk), "parent_category": str(cat_b.pk), "sort_index": "0"}
+        )
+        assert not form.is_valid()
+        errors = str(form.errors)
+        assert "cycle" in errors.lower() or "cyclic" in errors.lower()
+
+    def test_duplicate_raises_validation_error(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryChildLinkForm  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryParentLinkModel  # noqa: PLC0415
+
+        cat_a = CategoryModel.objects.create(name="Cat A")
+        cat_b = CategoryModel.objects.create(name="Cat B")
+        CategoryParentLinkModel.objects.create(category=cat_b, parent_category=cat_a, sort_index=0)
+        form = CategoryChildLinkForm(
+            data={"category": str(cat_b.pk), "parent_category": str(cat_a.pk), "sort_index": "0"}
+        )
+        assert not form.is_valid()
+
+
+# ---------------------------------------------------------------------------
+# TestCategoryChildLinkInlineEditable — permissions, autocomplete, service calls
+# ---------------------------------------------------------------------------
+
+
+class TestCategoryChildLinkInlineEditable:
+    def test_has_add_permission_returns_true(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        request = MagicMock()
+        request.user.has_perm.return_value = True
+        assert inline.has_add_permission(request, obj=None)
+
+    def test_has_change_permission_returns_true(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        request = MagicMock()
+        request.user.has_perm.return_value = True
+        assert inline.has_change_permission(request, obj=None)
+
+    def test_fk_name_is_parent_category(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+
+        assert CategoryChildLinkInline.fk_name == "parent_category"
+
+    def test_autocomplete_fields_includes_category(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+
+        assert "category" in CategoryChildLinkInline.autocomplete_fields
+
+    def test_save_model_calls_service_add_category_parent(self) -> None:
+        import uuid  # noqa: PLC0415
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryParentLinkModel  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        obj = MagicMock(spec=CategoryParentLinkModel)
+        obj.category_id = uuid.uuid4()
+        obj.parent_category_id = uuid.uuid4()
+        obj.sort_index = 0
+
+        mock_svc = MagicMock()
+        with patch.object(inline, "_make_service", return_value=mock_svc):
+            inline.save_model(request, obj, MagicMock(), False)
+
+        mock_svc.add_category_parent.assert_called_once_with(
+            category_id=obj.category_id,
+            parent_id=obj.parent_category_id,
+            sort_index=obj.sort_index,
+        )
+
+    @pytest.mark.django_db
+    def test_root_category_excluded_from_child_selector(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryParentLinkModel  # noqa: PLC0415
+        from taxomesh.domain.constants import ROOT_CATEGORY_NAME  # noqa: PLC0415
+
+        CategoryModel.objects.create(name=ROOT_CATEGORY_NAME)
+        CategoryModel.objects.create(name="Visible")
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+        db_field = CategoryParentLinkModel._meta.get_field("category")
+        form_field = inline.formfield_for_foreignkey(db_field, request)
+
+        names = list(form_field.queryset.values_list("name", flat=True))  # type: ignore[union-attr]
+        assert ROOT_CATEGORY_NAME not in names
+        assert "Visible" in names
+
+    def test_sort_index_field_is_editable(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+
+        assert "sort_index" not in (getattr(CategoryChildLinkInline, "readonly_fields", None) or [])
+
+    def test_sort_index_field_accessible_in_form(self) -> None:
+        from taxomesh.contrib.django.admin import CategoryChildLinkForm  # noqa: PLC0415
+
+        cat_a = CategoryModel.objects.create(name="Cat A")
+        cat_b = CategoryModel.objects.create(name="Cat B")
+        form = CategoryChildLinkForm(
+            data={"category": str(cat_b.pk), "parent_category": str(cat_a.pk), "sort_index": "0"}
+        )
+        assert form.is_valid()
+        assert form.cleaned_data["sort_index"] == 0
+
+    def test_has_delete_permission_returns_true(self) -> None:
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        request = MagicMock()
+        request.user.has_perm.return_value = True
+        assert inline.has_delete_permission(request, obj=None)
+
+    def test_delete_model_calls_service_remove_category_parent(self) -> None:
+        import uuid  # noqa: PLC0415
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
+        from taxomesh.contrib.django.models import CategoryParentLinkModel  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryChildLinkInline(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        obj = MagicMock(spec=CategoryParentLinkModel)
+        obj.category_id = uuid.uuid4()
+        obj.parent_category_id = uuid.uuid4()
+
+        mock_svc = MagicMock()
+        with patch.object(inline, "_make_service", return_value=mock_svc):
+            inline.delete_model(request, obj)
+
+        mock_svc.remove_category_parent.assert_called_once_with(
+            category_id=obj.category_id,
+            parent_id=obj.parent_category_id,
+        )
