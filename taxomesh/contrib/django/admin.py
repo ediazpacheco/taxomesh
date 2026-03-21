@@ -534,6 +534,45 @@ class CategoryParentLinkForm(forms.ModelForm):  # type: ignore[type-arg]
 
 
 # ---------------------------------------------------------------------------
+# CategoryChildLink Form (cycle / self-reference validation via clean())
+# ---------------------------------------------------------------------------
+
+
+class CategoryChildLinkForm(forms.ModelForm):  # type: ignore[type-arg]
+    """ModelForm for CategoryParentLinkModel (child perspective) that enforces DAG integrity.
+
+    Used by CategoryChildLinkInline.  The 'category' field is the child and
+    'parent_category' is the current (parent) category.  clean() rejects
+    self-references and would-be cycles.
+    """
+
+    class Meta:
+        model = CategoryParentLinkModel
+        fields = "__all__"
+
+    def clean(self) -> dict[str, Any]:
+        """Validate that the proposed child link does not create a cycle or self-reference.
+
+        Raises:
+            forms.ValidationError: If category == parent_category (self-reference), or
+                if the link would introduce a cycle in the category DAG.
+        """
+        cleaned_data: dict[str, Any] = super().clean()
+        category = cleaned_data.get("category")
+        parent_category = cleaned_data.get("parent_category")
+        if category and parent_category:
+            cat_id = category.category_id
+            parent_id = parent_category.category_id
+            if cat_id == parent_id:
+                raise forms.ValidationError("A category cannot be its own parent.")
+            try:
+                check_no_cycle(cat_id, parent_id, DjangoRepository().list_category_parent_links())
+            except TaxomeshCyclicDependencyError as exc:
+                raise forms.ValidationError(str(exc)) from exc
+        return cleaned_data
+
+
+# ---------------------------------------------------------------------------
 # CategoryParentLink Inline
 # ---------------------------------------------------------------------------
 
@@ -610,14 +649,68 @@ class CategoryParentLinkInline(TaxomeshAdminMixin, admin.TabularInline):
 # ---------------------------------------------------------------------------
 
 
-class CategoryChildLinkInline(_ReadOnlyInlineMixin, admin.TabularInline):
-    """Read-only inline for direct child categories (parent_category == current category)."""
+class CategoryChildLinkInline(TaxomeshAdminMixin, admin.TabularInline):
+    """Editable inline for direct child categories (parent_category == current category)."""
 
     model = CategoryParentLinkModel
+    form = CategoryChildLinkForm
     fk_name = "parent_category"
     extra = 0
     verbose_name = "Child category"
     verbose_name_plural = "Child categories"
+    autocomplete_fields = ["category"]
+
+    def save_model(
+        self,
+        request: HttpRequest,
+        obj: CategoryParentLinkModel,
+        form: forms.BaseModelForm,
+        change: bool,
+    ) -> None:
+        """Persist the child link via the service layer.
+
+        Args:
+            request: The current HTTP request.
+            obj: The CategoryParentLinkModel instance being saved.
+            form: The bound ModelForm.
+            change: True if updating an existing record; False if creating.
+        """
+        svc = self._make_service()
+        svc.add_category_parent(
+            category_id=obj.category_id,
+            parent_id=obj.parent_category_id,
+            sort_index=obj.sort_index,
+        )
+
+    def delete_model(self, request: HttpRequest, obj: CategoryParentLinkModel) -> None:
+        """Remove the child link via the service layer.
+
+        Args:
+            request: The current HTTP request.
+            obj: The CategoryParentLinkModel instance being deleted.
+        """
+        svc = self._make_service()
+        svc.remove_category_parent(
+            category_id=obj.category_id,
+            parent_id=obj.parent_category_id,
+        )
+
+    def formfield_for_foreignkey(  # type: ignore[override]
+        self,
+        db_field: object,
+        request: HttpRequest,
+        **kwargs: object,
+    ) -> object:
+        """Exclude the root category from the category (child) FK dropdown.
+
+        Args:
+            db_field: The ForeignKey field descriptor.
+            request: The current HTTP request.
+            **kwargs: Passed through to super().
+        """
+        if getattr(db_field, "name", None) == "category":
+            kwargs["queryset"] = CategoryModel.objects.exclude(name=ROOT_CATEGORY_NAME)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
