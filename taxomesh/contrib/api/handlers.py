@@ -190,17 +190,17 @@ def get_item_by_slug(service: TaxomeshService, slug: str) -> Item:
     return service.get_item_by_slug(slug)
 
 
-def get_items_by_external_id(service: TaxomeshService, external_id: str) -> list[Item]:
-    """Return all items matching the given external_id.
+def get_item_by_external_id(service: TaxomeshService, external_id: str) -> Item | None:
+    """Return the item matching the given external_id, or None.
 
     Args:
         service: The TaxomeshService instance to delegate to.
         external_id: The external identifier to look up.
 
     Returns:
-        List of matching items; empty list if none match.
+        The matching Item, or None if not found.
     """
-    return service.get_items_by_external_id(external_id)
+    return service.get_item_by_external_id(external_id)
 
 
 def create_item(service: TaxomeshService, body: CreateItemRequest) -> Item:

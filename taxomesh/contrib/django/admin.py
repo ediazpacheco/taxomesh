@@ -41,7 +41,7 @@ class GraphEntry(TypedDict):
     name: str
     uuid: str
     enabled: bool
-    external_id: str
+    external_id: str | None
     linked_url: str | None
     has_descendants: bool
     depth_limited: bool
@@ -71,7 +71,7 @@ DRAG_KIND_ITEM: Final[str] = "item"
 DRAG_KIND_CATEGORY: Final[str] = "category"
 
 
-def _resolve_linked_url(external_id: str, setting_name: str = TAXOMESH_LINKED_MODEL_SETTING) -> str | None:
+def _resolve_linked_url(external_id: str | None, setting_name: str = TAXOMESH_LINKED_MODEL_SETTING) -> str | None:
     """Resolve a Django admin change URL for a configured linked model instance.
 
     Reads the given Django settings key, looks up the instance by external_id as its
@@ -309,11 +309,10 @@ def _get_item_category_ids(obj: Any, external_id_attr: str) -> list[UUID]:
     """
     external_id = str(getattr(obj, external_id_attr))
     svc = TaxomeshService(repository=DjangoRepository())
-    items = svc.get_items_by_external_id(external_id)
-    if not items:
+    item = svc.get_item_by_external_id(external_id)
+    if item is None:
         return []
-    item_id = items[0].item_id
-    return [link.category_id for link in svc.repository.list_item_parent_links() if link.item_id == item_id]
+    return [link.category_id for link in svc.repository.list_item_parent_links() if link.item_id == item.item_id]
 
 
 def _reconcile_categories(obj: Any, form: Any, external_id_attr: str) -> None:
@@ -328,16 +327,16 @@ def _reconcile_categories(obj: Any, form: Any, external_id_attr: str) -> None:
         return
     external_id = str(getattr(obj, external_id_attr))
     svc = TaxomeshService(repository=DjangoRepository())
-    items = svc.get_items_by_external_id(external_id)
-    if not items:
+    item = svc.get_item_by_external_id(external_id)
+    if item is None:
         return
-    item_id = items[0].item_id
-    current_ids = {link.category_id for link in svc.repository.list_item_parent_links() if link.item_id == item_id}
+    all_links = svc.repository.list_item_parent_links()
+    current_ids = {link.category_id for link in all_links if link.item_id == item.item_id}
     selected = {cat.category_id for cat in form.cleaned_data["categories"]}
     for cat_id in selected - current_ids:
-        svc.place_item_in_category(item_id, cat_id)
+        svc.place_item_in_category(item.item_id, cat_id)
     for cat_id in current_ids - selected:
-        svc.remove_item_from_category(item_id, cat_id)
+        svc.remove_item_from_category(item.item_id, cat_id)
 
 
 # ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ def test_search_candidate_stores_prenormalized_fields() -> None:
         obj=item,
         norm_name=SearchEngine.normalize(item.name),
         norm_slug=SearchEngine.normalize(item.slug),
-        norm_ext=SearchEngine.normalize(item.external_id),
+        norm_ext=SearchEngine.normalize(item.external_id or ""),
     )
     assert sc.norm_name == SearchEngine.normalize("Ñoño Café")
     assert sc.norm_slug == SearchEngine.normalize("nono-cafe")

@@ -44,7 +44,12 @@ item_app.add_typer(relation_app, name="relation")
 
 
 def _parse_external_id(raw: str) -> ExternalId:
-    """Parse raw CLI string as UUID → int → str."""
+    """Parse raw CLI string as UUID → int → str → None.
+
+    Empty string input returns None (no external_id supplied).
+    """
+    if not raw:
+        return None
     try:
         return UUID(raw)
     except ValueError:

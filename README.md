@@ -115,25 +115,30 @@ around it: placement, ordering, tags, relations, slugs, and traversal.
 
 ### Resolving items and categories by external_id
 
-Use the dedicated lookup methods for point lookups by `external_id`:
+`external_id` is a **unique** identifier (`str | None`). Each record can have at most
+one `external_id`; the same value cannot be assigned to two items (or two categories)
+simultaneously. `None` means no external reference — multiple records may have `None`.
+
+Use the dedicated lookup methods for point lookups:
 
 ```python
-# Correct — uses the database index directly
-items = svc.get_items_by_external_id("catalog:42")       # list[Item]
-categories = svc.get_categories_by_external_id("solo")  # list[Category]
+item = svc.get_item_by_external_id("catalog:42")    # Item | None
+cat  = svc.get_category_by_external_id("solo")      # Category | None
 ```
 
-Do **not** use `list_items()` or `list_categories()` with a Python filter — that
-performs a full table scan and bypasses the index.
+Both methods return `None` when no record matches or when `None` is passed as input.
 
-The `external_id` field is **indexed** on the Django backend but **not unique**.
-Result length indicates the state of your data:
+Attempting to save two records with the same non-`None` `external_id` raises
+`TaxomeshExternalIdConflictError` (a subclass of `TaxomeshValidationError`):
 
-| Length | Meaning |
-|--------|---------|
-| `0` | No match — the external ID is an orphan or was never assigned |
-| `1` | Unique match — the expected case for a well-maintained catalog |
-| `>= 2` | Duplicates exist — review and deduplicate as needed |
+```python
+from taxomesh import TaxomeshExternalIdConflictError
+
+try:
+    svc.create_item(name="B", external_id="catalog:42")
+except TaxomeshExternalIdConflictError as exc:
+    print(exc)  # external_id 'catalog:42' is already assigned to another item.
+```
 
 ## Fuzzy Search
 

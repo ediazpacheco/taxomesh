@@ -21,7 +21,7 @@ pytestmark = pytest.mark.django_db
 def _save_category(
     name: str,
     enabled: bool = True,
-    external_id: str = "",
+    external_id: str | None = None,
 ) -> CategoryModel:
     return CategoryModel.objects.create(
         category_id=uuid4(),

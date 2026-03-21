@@ -23,14 +23,16 @@ def _render_tree(category_node: CategoryNode) -> str:
 def _make_category(
     *,
     enabled: bool = True,
-    external_id: str = "",
+    external_id: str | None = None,
     slug: str = "",
 ) -> Category:
     """Create a Category with minimal required fields."""
     return Category(category_id=uuid4(), name="TestCat", enabled=enabled, external_id=external_id, slug=slug)
 
 
-def _make_item(*, enabled: bool = True, external_id: str = "item-1", slug: str = "", name: str = "TestItem") -> Item:
+def _make_item(
+    *, enabled: bool = True, external_id: str | None = "item-1", slug: str = "", name: str = "TestItem"
+) -> Item:
     """Create an Item with minimal required fields."""
     return Item(name=name, external_id=external_id, enabled=enabled, slug=slug)
 
@@ -63,7 +65,7 @@ class TestCategoryEnabledIcon:
 
 class TestCategoryExternalId:
     def test_category_external_id_shown_in_graph(self) -> None:
-        # Category.__str__ includes external_id when non-empty
+        # Category.__str__ includes external_id when not None
         node = CategoryNode(
             category=_make_category(external_id="genre-rock"),
             items=[],
@@ -72,9 +74,9 @@ class TestCategoryExternalId:
         output = _render_tree(node)
         assert "genre-rock" in output
 
-    def test_category_with_empty_external_id_omits_it(self) -> None:
+    def test_category_with_none_external_id_omits_it(self) -> None:
         node = CategoryNode(
-            category=_make_category(external_id=""),
+            category=_make_category(external_id=None),
             items=[],
             children=[],
         )

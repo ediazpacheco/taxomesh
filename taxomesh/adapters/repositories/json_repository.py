@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 from uuid import UUID
 
+from taxomesh.adapters.repositories._external_id import check_external_id_unique
 from taxomesh.domain.models import (
     Category,
     CategoryParentLink,
@@ -147,7 +148,12 @@ class JsonRepository:
 
         Args:
             category: The Category instance to persist.
+
+        Raises:
+            TaxomeshExternalIdConflictError: If category.external_id is not None and another
+                record with a different category_id already holds the same external_id.
         """
+        check_external_id_unique(category.category_id, category.external_id, self._categories, "category")
         self._categories[category.category_id] = category
         self._flush()
 
@@ -195,7 +201,12 @@ class JsonRepository:
 
         Args:
             item: The Item instance to persist.
+
+        Raises:
+            TaxomeshExternalIdConflictError: If item.external_id is not None and another
+                record with a different item_id already holds the same external_id.
         """
+        check_external_id_unique(item.item_id, item.external_id, self._items, "item")
         self._items[item.item_id] = item
         self._flush()
 
@@ -513,43 +524,27 @@ class JsonRepository:
     # External-ID lookup
     # ------------------------------------------------------------------
 
-    def list_items_by_external_id(self, external_id: str) -> list[Item]:
-        """Return all items whose external_id matches the given value.
-
-        Performs an exact-type match (str vs int vs UUID are distinct).
-        Returns an empty list when no item matches (orphan signal for the
-        consumer). Returns multiple items when the same external_id was used
-        more than once (duplicate signal).
+    def get_item_by_external_id(self, external_id: str) -> Item | None:
+        """Return the item with the given external_id, or None.
 
         Args:
-            external_id: The external identifier to look up.
+            external_id: The external identifier to look up (already a str; never None).
 
         Returns:
-            List of matching Item instances; empty list if none match.
+            The matching Item, or None if no item has this external_id.
         """
-        return sorted(
-            (item for item in self._items.values() if item.external_id == external_id),
-            key=lambda i: (i.name, str(i.item_id)),
-        )
+        return next((item for item in self._items.values() if item.external_id == external_id), None)
 
-    def list_categories_by_external_id(self, external_id: str) -> list[Category]:
-        """Return all categories whose external_id matches the given value.
-
-        Performs an exact-type match (str vs int vs UUID are distinct).
-        Returns an empty list when no category matches (orphan signal for the
-        consumer). Returns multiple categories when the same external_id was
-        used more than once (duplicate signal).
+    def get_category_by_external_id(self, external_id: str) -> Category | None:
+        """Return the category with the given external_id, or None.
 
         Args:
-            external_id: The external identifier to look up.
+            external_id: The external identifier to look up (already a str; never None).
 
         Returns:
-            List of matching Category instances; empty list if none match.
+            The matching Category, or None if no category has this external_id.
         """
-        return sorted(
-            (cat for cat in self._categories.values() if cat.external_id == external_id),
-            key=lambda c: (c.name, str(c.category_id)),
-        )
+        return next((cat for cat in self._categories.values() if cat.external_id == external_id), None)
 
     def get_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given slug, or None.

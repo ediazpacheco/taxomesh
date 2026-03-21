@@ -209,37 +209,33 @@ class TestListItemsOrdering:
 # ---------------------------------------------------------------------------
 
 
-class TestListItemsByExternalIdOrdering:
-    """list_items_by_external_id() returns matches ordered by name then item_id."""
+class TestGetItemByExternalId:
+    """get_item_by_external_id() returns Item or None (spec 041)."""
 
-    def test_ordered_by_name(self) -> None:
+    def test_found(self) -> None:
         repo = DjangoRepository()
-        ext = "shared-ext"
-        repo.save_item(Item(name="Zeta", external_id=ext))
-        repo.save_item(Item(name="Alpha", external_id=ext))
-        repo.save_item(Item(name="Mu", external_id=ext))
+        item = Item(name="Solo", external_id="dj-solo-ext")
+        repo.save_item(item)
+        result = repo.get_item_by_external_id("dj-solo-ext")
+        assert result is not None
+        assert result.item_id == item.item_id
 
-        items = repo.list_items_by_external_id(ext)
-        assert [i.name for i in items] == ["Alpha", "Mu", "Zeta"]
-
-    def test_no_match_returns_empty(self) -> None:
+    def test_no_match_returns_none(self) -> None:
         repo = DjangoRepository()
-        assert repo.list_items_by_external_id("nonexistent") == []
+        assert repo.get_item_by_external_id("nonexistent") is None
 
 
-class TestListCategoriesByExternalIdOrdering:
-    """list_categories_by_external_id() returns matches ordered by name then category_id."""
+class TestGetCategoryByExternalId:
+    """get_category_by_external_id() returns Category or None (spec 041)."""
 
-    def test_ordered_by_name(self) -> None:
+    def test_found(self) -> None:
         repo = DjangoRepository()
-        ext = "shared-cat-ext"
-        repo.save_category(Category(name="Omega", external_id=ext))
-        repo.save_category(Category(name="Beta", external_id=ext))
-        repo.save_category(Category(name="Gamma", external_id=ext))
+        cat = Category(name="Solo", external_id="dj-solo-cat-ext")
+        repo.save_category(cat)
+        result = repo.get_category_by_external_id("dj-solo-cat-ext")
+        assert result is not None
+        assert result.category_id == cat.category_id
 
-        cats = repo.list_categories_by_external_id(ext)
-        assert [c.name for c in cats] == ["Beta", "Gamma", "Omega"]
-
-    def test_no_match_returns_empty(self) -> None:
+    def test_no_match_returns_none(self) -> None:
         repo = DjangoRepository()
-        assert repo.list_categories_by_external_id("nonexistent") == []
+        assert repo.get_category_by_external_id("nonexistent") is None

@@ -58,3 +58,7 @@ class TaxomeshConfigError(TaxomeshError):
 
 class TaxomeshRootCategoryError(TaxomeshError):
     """Raised when a mutating operation is attempted on the reserved root category."""
+
+
+class TaxomeshExternalIdConflictError(TaxomeshValidationError):
+    """Raised when a non-None external_id is already assigned to a different record of the same type."""

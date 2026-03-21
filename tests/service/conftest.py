@@ -168,13 +168,13 @@ class InMemoryRepository:
 
     # --- External-ID lookup ---
 
-    def list_items_by_external_id(self, external_id: str) -> list[Item]:
-        """Return all items whose external_id matches the given value."""
-        return [item for item in self._items.values() if item.external_id == external_id]
+    def get_item_by_external_id(self, external_id: str) -> Item | None:
+        """Return the item with the given external_id, or None."""
+        return next((item for item in self._items.values() if item.external_id == external_id), None)
 
-    def list_categories_by_external_id(self, external_id: str) -> list[Category]:
-        """Return all categories whose external_id matches the given value."""
-        return [cat for cat in self._categories.values() if cat.external_id == external_id]
+    def get_category_by_external_id(self, external_id: str) -> Category | None:
+        """Return the category with the given external_id, or None."""
+        return next((cat for cat in self._categories.values() if cat.external_id == external_id), None)
 
     def get_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given slug, or None."""

@@ -120,3 +120,54 @@ def test_duplicate_slug_error_exported_from_package() -> None:
     from taxomesh import TaxomeshDuplicateSlugError as _TaxomeshDuplicateSlugError  # noqa: PLC0415
 
     assert _TaxomeshDuplicateSlugError is TaxomeshDuplicateSlugError
+
+
+# ------------------------------------------------------------------
+# TaxomeshExternalIdConflictError (spec 041)
+# ------------------------------------------------------------------
+
+
+def test_external_id_conflict_error_is_subclass_of_validation_error() -> None:
+    from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
+
+    assert issubclass(TaxomeshExternalIdConflictError, TaxomeshValidationError)
+
+
+def test_external_id_conflict_error_is_subclass_of_taxomesh_error() -> None:
+    from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
+
+    assert issubclass(TaxomeshExternalIdConflictError, TaxomeshError)
+
+
+def test_external_id_conflict_error_is_not_a_not_found_error() -> None:
+    from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
+
+    assert not issubclass(TaxomeshExternalIdConflictError, TaxomeshNotFoundError)
+
+
+def test_external_id_conflict_error_catchable_as_validation_error() -> None:
+    from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
+
+    with pytest.raises(TaxomeshValidationError):
+        raise TaxomeshExternalIdConflictError("external_id 'abc-123' is already assigned to another item.")
+
+
+def test_external_id_conflict_error_catchable_as_taxomesh_error() -> None:
+    from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
+
+    with pytest.raises(TaxomeshError):
+        raise TaxomeshExternalIdConflictError("external_id 'abc-123' is already assigned to another item.")
+
+
+def test_external_id_conflict_error_message_contains_conflicting_value() -> None:
+    from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
+
+    exc = TaxomeshExternalIdConflictError("external_id 'dup-key-42' is already assigned to another item.")
+    assert "dup-key-42" in str(exc)
+
+
+def test_external_id_conflict_error_exported_from_package() -> None:
+    from taxomesh import TaxomeshExternalIdConflictError as _err  # noqa: PLC0415
+    from taxomesh.exceptions import TaxomeshExternalIdConflictError as _err2  # noqa: PLC0415
+
+    assert _err is _err2

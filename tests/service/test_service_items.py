@@ -138,4 +138,4 @@ def test_list_items_category_not_found_raises(service: TaxomeshService) -> None:
 
 def test_create_item_without_external_id(service: TaxomeshService) -> None:
     item = service.create_item(name="no-id-item")
-    assert item.external_id == ""
+    assert item.external_id is None

@@ -206,11 +206,17 @@ class DjangoRepository:
             category: The Category domain object to save.
 
         Raises:
-            TaxomeshRepositoryError: On database error.
+            TaxomeshExternalIdConflictError: If category.external_id is not None and another
+                record with a different category_id already holds the same external_id.
+            TaxomeshRepositoryError: On any other database error.
         """
-        from django.db import DatabaseError, transaction  # type: ignore[import-untyped]  # noqa: PLC0415
+        from django.db import (  # type: ignore[import-untyped]  # noqa: PLC0415
+            DatabaseError,
+            IntegrityError,
+            transaction,
+        )
 
-        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+        from taxomesh.exceptions import TaxomeshExternalIdConflictError, TaxomeshRepositoryError  # noqa: PLC0415
 
         try:
             with transaction.atomic(using=self._using):
@@ -225,6 +231,10 @@ class DjangoRepository:
                         "metadata": category.metadata,
                     },
                 )
+        except IntegrityError as exc:
+            raise TaxomeshExternalIdConflictError(
+                f"external_id {category.external_id!r} is already assigned to another category."
+            ) from exc
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
 
@@ -285,11 +295,13 @@ class DjangoRepository:
             item: The Item domain object to save.
 
         Raises:
-            TaxomeshRepositoryError: On database error.
+            TaxomeshExternalIdConflictError: If item.external_id is not None and another
+                record with a different item_id already holds the same external_id.
+            TaxomeshRepositoryError: On any other database error.
         """
-        from django.db import DatabaseError, transaction  # noqa: PLC0415
+        from django.db import DatabaseError, IntegrityError, transaction  # noqa: PLC0415
 
-        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+        from taxomesh.exceptions import TaxomeshExternalIdConflictError, TaxomeshRepositoryError  # noqa: PLC0415
 
         try:
             with transaction.atomic(using=self._using):
@@ -303,6 +315,10 @@ class DjangoRepository:
                         "metadata": item.metadata,
                     },
                 )
+        except IntegrityError as exc:
+            raise TaxomeshExternalIdConflictError(
+                f"external_id {item.external_id!r} is already assigned to another item."
+            ) from exc
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
 
@@ -615,18 +631,14 @@ class DjangoRepository:
     # External-ID lookup
     # ------------------------------------------------------------------
 
-    def list_items_by_external_id(self, external_id: str) -> list[Item]:
-        """Return all items whose external_id matches the given string.
-
-        Returns an empty list when no item matches (orphan signal for the
-        consumer). Returns multiple items when the same external_id was used
-        more than once (duplicate signal).
+    def get_item_by_external_id(self, external_id: str) -> Item | None:
+        """Return the item with the given external_id, or None.
 
         Args:
-            external_id: The external identifier to look up (already a str).
+            external_id: The external identifier to look up (already a str; never None).
 
         Returns:
-            List of matching Item domain objects; empty list if none match.
+            The matching Item domain object, or None if not found.
 
         Raises:
             TaxomeshRepositoryError: On database error.
@@ -636,25 +648,19 @@ class DjangoRepository:
         from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
 
         try:
-            rows = (
-                self._ItemModel.objects.using(self._using).filter(external_id=external_id).order_by("name", "item_id")
-            )
+            row = self._ItemModel.objects.using(self._using).filter(external_id=external_id).first()
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
-        return [self._row_to_item(row) for row in rows]
+        return self._row_to_item(row) if row is not None else None
 
-    def list_categories_by_external_id(self, external_id: str) -> list[Category]:
-        """Return all categories whose external_id matches the given string.
-
-        Returns an empty list when no category matches (orphan signal for the
-        consumer). Returns multiple categories when the same external_id was
-        used more than once (duplicate signal).
+    def get_category_by_external_id(self, external_id: str) -> Category | None:
+        """Return the category with the given external_id, or None.
 
         Args:
-            external_id: The external identifier to look up (already a str).
+            external_id: The external identifier to look up (already a str; never None).
 
         Returns:
-            List of matching Category domain objects; empty list if none match.
+            The matching Category domain object, or None if not found.
 
         Raises:
             TaxomeshRepositoryError: On database error.
@@ -664,14 +670,10 @@ class DjangoRepository:
         from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
 
         try:
-            rows = (
-                self._CategoryModel.objects.using(self._using)
-                .filter(external_id=external_id)
-                .order_by("name", "category_id")
-            )
+            row = self._CategoryModel.objects.using(self._using).filter(external_id=external_id).first()
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
-        return [self._row_to_category(row) for row in rows]
+        return self._row_to_category(row) if row is not None else None
 
     def get_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given slug, or None.

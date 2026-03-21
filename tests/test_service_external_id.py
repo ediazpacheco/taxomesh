@@ -1,4 +1,4 @@
-"""Tests for TaxomeshService.get_items_by_external_id and get_categories_by_external_id (spec 013)."""
+"""Tests for TaxomeshService.get_item_by_external_id and get_category_by_external_id (spec 041)."""
 
 from pathlib import Path
 from uuid import uuid4
@@ -16,168 +16,177 @@ def svc(tmp_path: Path) -> TaxomeshService:
 
 
 # ---------------------------------------------------------------------------
-# get_items_by_external_id — str external_id
+# get_item_by_external_id — found cases
 # ---------------------------------------------------------------------------
 
 
-def test_get_items_by_external_id_str_found(svc: TaxomeshService) -> None:
-    item = svc.create_item("my-entity-uuid", "my-entity-uuid")
-    results = svc.get_items_by_external_id("my-entity-uuid")
-    assert len(results) == 1
-    assert results[0].item_id == item.item_id
+def test_get_item_by_external_id_str_found(svc: TaxomeshService) -> None:
+    item = svc.create_item("my-entity", external_id="my-entity-uuid")
+    result = svc.get_item_by_external_id("my-entity-uuid")
+    assert result is not None
+    assert result.item_id == item.item_id
 
 
-def test_get_items_by_external_id_str_not_found(svc: TaxomeshService) -> None:
-    svc.create_item("other-id", "other-id")
-    results = svc.get_items_by_external_id("my-entity-uuid")
-    assert results == []
+def test_get_item_by_external_id_int_found(svc: TaxomeshService) -> None:
+    item = svc.create_item("item-42", external_id=42)
+    result = svc.get_item_by_external_id(42)
+    assert result is not None
+    assert result.item_id == item.item_id
 
 
-def test_get_items_by_external_id_empty_store(svc: TaxomeshService) -> None:
-    results = svc.get_items_by_external_id("any-id")
-    assert results == []
-
-
-# ---------------------------------------------------------------------------
-# get_items_by_external_id — int external_id
-# ---------------------------------------------------------------------------
-
-
-def test_get_items_by_external_id_int_found(svc: TaxomeshService) -> None:
-    item = svc.create_item("42", 42)
-    results = svc.get_items_by_external_id(42)
-    assert len(results) == 1
-    assert results[0].item_id == item.item_id
-
-
-def test_get_items_by_external_id_int_not_found(svc: TaxomeshService) -> None:
-    svc.create_item("99", 99)
-    results = svc.get_items_by_external_id(42)
-    assert results == []
-
-
-# ---------------------------------------------------------------------------
-# get_items_by_external_id — UUID external_id
-# ---------------------------------------------------------------------------
-
-
-def test_get_items_by_external_id_uuid_found(svc: TaxomeshService) -> None:
+def test_get_item_by_external_id_uuid_found(svc: TaxomeshService) -> None:
     ext = uuid4()
-    item = svc.create_item(str(ext), ext)
-    results = svc.get_items_by_external_id(ext)
-    assert len(results) == 1
-    assert results[0].item_id == item.item_id
-
-
-def test_get_items_by_external_id_uuid_not_found(svc: TaxomeshService) -> None:
-    _u = uuid4()
-    svc.create_item(str(_u), _u)
-    results = svc.get_items_by_external_id(uuid4())
-    assert results == []
+    item = svc.create_item(str(ext), external_id=ext)
+    result = svc.get_item_by_external_id(ext)
+    assert result is not None
+    assert result.item_id == item.item_id
 
 
 # ---------------------------------------------------------------------------
-# get_items_by_external_id — duplicate detection
+# get_item_by_external_id — not-found cases
 # ---------------------------------------------------------------------------
 
 
-def test_get_items_by_external_id_multiple_matches(svc: TaxomeshService) -> None:
-    """Returns all items sharing the same external_id (consumer detects duplicates via len > 1)."""
-    svc.create_item("dup-id", "dup-id")
-    svc.create_item("dup-id", "dup-id")
-    results = svc.get_items_by_external_id("dup-id")
-    assert len(results) == 2
+def test_get_item_by_external_id_not_found(svc: TaxomeshService) -> None:
+    svc.create_item("other", external_id="other-id")
+    result = svc.get_item_by_external_id("missing-id")
+    assert result is None
 
 
-def test_get_items_by_external_id_returns_list_of_item_instances(svc: TaxomeshService) -> None:
-    svc.create_item("check-type", "check-type")
-    results = svc.get_items_by_external_id("check-type")
-    assert all(isinstance(r, Item) for r in results)
+def test_get_item_by_external_id_empty_store(svc: TaxomeshService) -> None:
+    result = svc.get_item_by_external_id("any-id")
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
-# get_categories_by_external_id — str external_id
+# get_item_by_external_id — None short-circuit
 # ---------------------------------------------------------------------------
 
 
-def test_get_categories_by_external_id_str_found(svc: TaxomeshService) -> None:
+def test_get_item_by_external_id_none_input_returns_none(svc: TaxomeshService) -> None:
+    """None input must return None without calling repository."""
+    result = svc.get_item_by_external_id(None)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# get_item_by_external_id — return type
+# ---------------------------------------------------------------------------
+
+
+def test_get_item_by_external_id_returns_item_instance(svc: TaxomeshService) -> None:
+    svc.create_item("check-type", external_id="check-type")
+    result = svc.get_item_by_external_id("check-type")
+    assert isinstance(result, Item)
+
+
+# ---------------------------------------------------------------------------
+# get_category_by_external_id — found cases
+# ---------------------------------------------------------------------------
+
+
+def test_get_category_by_external_id_str_found(svc: TaxomeshService) -> None:
     cat = Category(category_id=uuid4(), name="Animals", external_id="ext-animals")
     svc.repository.save_category(cat)
-    results = svc.get_categories_by_external_id("ext-animals")
-    assert len(results) == 1
-    assert results[0].category_id == cat.category_id
+    result = svc.get_category_by_external_id("ext-animals")
+    assert result is not None
+    assert result.category_id == cat.category_id
 
 
-def test_get_categories_by_external_id_str_not_found(svc: TaxomeshService) -> None:
-    cat = Category(category_id=uuid4(), name="Plants", external_id="ext-plants")
-    svc.repository.save_category(cat)
-    results = svc.get_categories_by_external_id("nonexistent")
-    assert results == []
-
-
-def test_get_categories_by_external_id_empty_external_id_not_returned(svc: TaxomeshService) -> None:
-    """Root category (external_id='') is not returned when searching for a non-empty external_id."""
-    results = svc.get_categories_by_external_id("any-ext")
-    assert results == []
-
-
-def test_get_categories_by_external_id_root_not_returned_for_empty_string(svc: TaxomeshService) -> None:
-    """Root category is excluded even when searching by its own external_id ('') — FR-002 / D-007."""
-    results = svc.get_categories_by_external_id("")
-    assert results == []
-
-
-# ---------------------------------------------------------------------------
-# get_categories_by_external_id — int and UUID
-# ---------------------------------------------------------------------------
-
-
-def test_get_categories_by_external_id_int_found(svc: TaxomeshService) -> None:
+def test_get_category_by_external_id_int_found(svc: TaxomeshService) -> None:
     cat = Category(category_id=uuid4(), name="LevelOne", external_id=7)  # type: ignore[arg-type]
     svc.repository.save_category(cat)
-    results = svc.get_categories_by_external_id(7)
-    assert len(results) == 1
-    assert results[0].category_id == cat.category_id
+    result = svc.get_category_by_external_id(7)
+    assert result is not None
+    assert result.category_id == cat.category_id
 
 
-def test_get_categories_by_external_id_uuid_found(svc: TaxomeshService) -> None:
+def test_get_category_by_external_id_uuid_found(svc: TaxomeshService) -> None:
     ext = uuid4()
     cat = Category(category_id=uuid4(), name="UUIDCat", external_id=ext)  # type: ignore[arg-type]
     svc.repository.save_category(cat)
-    results = svc.get_categories_by_external_id(ext)
-    assert len(results) == 1
-    assert results[0].category_id == cat.category_id
+    result = svc.get_category_by_external_id(ext)
+    assert result is not None
+    assert result.category_id == cat.category_id
 
 
 # ---------------------------------------------------------------------------
-# get_categories_by_external_id — duplicate detection
+# get_category_by_external_id — not-found cases
 # ---------------------------------------------------------------------------
 
 
-def test_get_categories_by_external_id_multiple_matches(svc: TaxomeshService) -> None:
-    """Returns all categories sharing the same external_id (consumer detects duplicates via len > 1)."""
-    cat1 = Category(category_id=uuid4(), name="A", external_id="shared-ext")
-    cat2 = Category(category_id=uuid4(), name="B", external_id="shared-ext")
-    svc.repository.save_category(cat1)
-    svc.repository.save_category(cat2)
-    results = svc.get_categories_by_external_id("shared-ext")
-    assert len(results) == 2
+def test_get_category_by_external_id_not_found(svc: TaxomeshService) -> None:
+    cat = Category(category_id=uuid4(), name="Plants", external_id="ext-plants")
+    svc.repository.save_category(cat)
+    result = svc.get_category_by_external_id("nonexistent")
+    assert result is None
 
 
-def test_get_categories_by_external_id_returns_list_of_category_instances(svc: TaxomeshService) -> None:
+# ---------------------------------------------------------------------------
+# get_category_by_external_id — None short-circuit
+# ---------------------------------------------------------------------------
+
+
+def test_get_category_by_external_id_none_input_returns_none(svc: TaxomeshService) -> None:
+    result = svc.get_category_by_external_id(None)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# get_category_by_external_id — root category excluded
+# ---------------------------------------------------------------------------
+
+
+def test_get_category_by_external_id_root_not_returned(svc: TaxomeshService) -> None:
+    """Root category is excluded even if it somehow had an external_id matching the query."""
+    result = svc.get_category_by_external_id("any-ext")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# get_category_by_external_id — return type
+# ---------------------------------------------------------------------------
+
+
+def test_get_category_by_external_id_returns_category_instance(svc: TaxomeshService) -> None:
     cat = Category(category_id=uuid4(), name="TypeCheck", external_id="tc-ext")
     svc.repository.save_category(cat)
-    results = svc.get_categories_by_external_id("tc-ext")
-    assert all(isinstance(r, Category) for r in results)
+    result = svc.get_category_by_external_id("tc-ext")
+    assert isinstance(result, Category)
 
 
 # ---------------------------------------------------------------------------
-# Smoke test — matches plan verification snippet
+# None input for category (US4)
 # ---------------------------------------------------------------------------
 
 
-def test_smoke_get_items_by_external_id(tmp_path: Path) -> None:
-    svc = TaxomeshService(repository=JsonRepository(tmp_path / "smoke.json"))
-    svc.create_item("my-entity-uuid", "my-entity-uuid")
-    results = svc.get_items_by_external_id("my-entity-uuid")
-    assert len(results) == 1
+def test_get_category_by_external_id_none_does_not_call_repo(
+    svc: TaxomeshService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Passing None must short-circuit before the repository is called."""
+    called = []
+
+    def _fake_get(external_id: str) -> Category | None:
+        called.append(external_id)
+        return None
+
+    monkeypatch.setattr(svc.repository, "get_category_by_external_id", _fake_get)
+    result = svc.get_category_by_external_id(None)
+    assert result is None
+    assert called == [], "Repository must NOT be called when external_id is None"
+
+
+def test_get_item_by_external_id_none_does_not_call_repo(
+    svc: TaxomeshService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Passing None must short-circuit before the repository is called."""
+    called = []
+
+    def _fake_get(external_id: str) -> Item | None:
+        called.append(external_id)
+        return None
+
+    monkeypatch.setattr(svc.repository, "get_item_by_external_id", _fake_get)
+    result = svc.get_item_by_external_id(None)
+    assert result is None
+    assert called == [], "Repository must NOT be called when external_id is None"
