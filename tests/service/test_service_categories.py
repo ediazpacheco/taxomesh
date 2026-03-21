@@ -242,11 +242,11 @@ def test_update_category_external_id_non_none(service: TaxomeshService) -> None:
     assert updated.external_id == "new-val"
 
 
-def test_update_category_external_id_none_is_noop(service: TaxomeshService) -> None:
-    """update_category with external_id=None leaves the field unchanged."""
+def test_update_category_external_id_none_clears(service: TaxomeshService) -> None:
+    """update_category with external_id=None clears the field to None."""
     cat = service.create_category(name="Y", external_id="original")
     updated = service.update_category(cat.category_id, external_id=None)
-    assert updated.external_id == "original"
+    assert updated.external_id is None
 
 
 def test_update_category_external_id_empty_string_clears(service: TaxomeshService) -> None:
