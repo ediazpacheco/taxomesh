@@ -290,6 +290,8 @@ Do NOT update README during implement — only after
 - Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (ORM + admin), Typer ≥ 0.12 (CLI), pyyaml ≥ 6.0 (041-unique-external-id)
 - Python 3.11 + Django ≥ 4.2, Pydantic v2 (domain models) (042-admin-child-categories)
 - Django ORM — no new migrations required; uses the existing `CategoryParentLinkModel` table (042-admin-child-categories)
+- Python 3.11 + Pydantic v2 (domain models), stdlib `typing.Final` (043-clear-external-id)
+- JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM) — **no changes required** (043-clear-external-id)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

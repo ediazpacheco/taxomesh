@@ -37,6 +37,13 @@ _DEFAULT_CONFIG_FILENAME: Final[str] = "taxomesh.toml"
 DEFAULT_CACHE_TTL: Final[int] = 5
 
 
+class _UnsetType:
+    """Singleton sentinel distinguishing 'not provided' from None in update methods."""
+
+
+_UNSET: Final[_UnsetType] = _UnsetType()
+
+
 class TaxomeshService:
     """Single entry point for all taxomesh category, item, and tag operations.
 
@@ -348,7 +355,7 @@ class TaxomeshService:
         description: str | None = None,
         slug: str | None = None,
         metadata: dict[str, Any] | None = None,
-        external_id: str | None = None,
+        external_id: str | None | _UnsetType = _UNSET,
     ) -> Category:
         """Update a category's name, description, slug, external_id, and/or metadata.
 
@@ -358,7 +365,7 @@ class TaxomeshService:
             description: New description; unchanged if None.
             slug: New slug; unchanged if None. Pass "" to clear the slug.
             metadata: New metadata dict; unchanged if None.
-            external_id: New external_id; unchanged if None.
+            external_id: New external_id; pass None to clear the field; omit to leave unchanged.
 
         Returns:
             The updated Category.
@@ -382,7 +389,7 @@ class TaxomeshService:
             category.slug = slug
         if metadata is not None:
             category.metadata = metadata
-        if external_id is not None:
+        if not isinstance(external_id, _UnsetType):
             category.external_id = external_id
         self._repo.save_category(category)
         clear_all_caches()
@@ -511,7 +518,7 @@ class TaxomeshService:
         enabled: bool | None = None,
         slug: str | None = None,
         name: str | None = None,
-        external_id: str | None = None,
+        external_id: str | None | _UnsetType = _UNSET,
         metadata: dict[str, Any] | None = None,
     ) -> Item:
         """Update an item's enabled state, slug, name, external_id, and/or metadata.
@@ -521,7 +528,7 @@ class TaxomeshService:
             enabled: New enabled state; unchanged if None.
             slug: New slug; unchanged if None. Pass "" to clear the slug.
             name: New name; unchanged if None.
-            external_id: New external identifier; unchanged if None.
+            external_id: New external identifier; pass None to clear the field; omit to leave unchanged.
             metadata: New metadata dict; unchanged if None.
 
         Returns:
@@ -542,7 +549,7 @@ class TaxomeshService:
             item.slug = slug
         if name is not None:
             item.name = name
-        if external_id is not None:
+        if not isinstance(external_id, _UnsetType):
             item.external_id = external_id
         if metadata is not None:
             item.metadata = metadata
