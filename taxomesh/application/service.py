@@ -479,6 +479,38 @@ class TaxomeshService:
         )
         return [self.get_item(lnk.item_id) for lnk in links]
 
+    @memoize(DEFAULT_CACHE_TTL)
+    def list_categories_by_item(self, item_id: UUID) -> list[Category]:
+        """Return the categories in which the given item has an active placement.
+
+        Categories are returned in ascending sort_index order (the order defined
+        by item-to-category placement links). This is a structural graph read —
+        disabled categories are included; filtering by enabled state is the
+        caller's responsibility.
+
+        Args:
+            item_id: The library-assigned UUID of the item.
+
+        Returns:
+            List of Category objects ordered by ItemParentLink.sort_index ascending.
+            Returns an empty list when the item has no placements.
+
+        Raises:
+            TaxomeshItemNotFoundError: If no item with the given item_id exists.
+
+        Example::
+
+            cats = svc.list_categories_by_item(album.item_id)
+            # [Category(name="Jazz", ...), Category(name="Music", ...)]
+            # — ordered by sort_index assigned at placement time
+        """
+        self.get_item(item_id)
+        links = sorted(
+            [lnk for lnk in self._repo.list_item_parent_links() if lnk.item_id == item_id],
+            key=lambda lnk: lnk.sort_index,
+        )
+        return [self.get_category(lnk.category_id) for lnk in links]
+
     def delete_item(self, item_id: UUID) -> None:
         """Delete an item by its internal identifier.
 
