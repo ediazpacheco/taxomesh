@@ -252,16 +252,20 @@ class DjangoRepository:
             return None
         return self._row_to_category(row)
 
-    def list_categories(self) -> list[Category]:
-        """Return all categories ordered by name then category_id.
+    def list_categories(self, *, enabled: bool | None = True) -> list[Category]:
+        """Return categories ordered by name then category_id.
+
+        Args:
+            enabled: ``True`` returns only enabled; ``False`` only disabled;
+                ``None`` returns all regardless of enabled state.
 
         Returns:
             A list of Category domain objects ordered by ``(name ASC, category_id ASC)``.
         """
-        return [
-            self._row_to_category(row)
-            for row in self._CategoryModel.objects.using(self._using).order_by("name", "category_id")
-        ]
+        qs = self._CategoryModel.objects.using(self._using)
+        if enabled is not None:
+            qs = qs.filter(enabled=enabled)
+        return [self._row_to_category(row) for row in qs.order_by("name", "category_id")]
 
     def delete_category(self, category_id: UUID) -> bool:
         """Delete the category with the given ID.
@@ -336,15 +340,20 @@ class DjangoRepository:
             return None
         return self._row_to_item(row)
 
-    def list_items(self) -> list[Item]:
-        """Return all items ordered by name then item_id.
+    def list_items(self, *, enabled: bool | None = True) -> list[Item]:
+        """Return items ordered by name then item_id.
+
+        Args:
+            enabled: ``True`` returns only enabled; ``False`` only disabled;
+                ``None`` returns all regardless of enabled state.
 
         Returns:
             A list of Item domain objects ordered by ``(name ASC, item_id ASC)``.
         """
-        return [
-            self._row_to_item(row) for row in self._ItemModel.objects.using(self._using).order_by("name", "item_id")
-        ]
+        qs = self._ItemModel.objects.using(self._using)
+        if enabled is not None:
+            qs = qs.filter(enabled=enabled)
+        return [self._row_to_item(row) for row in qs.order_by("name", "item_id")]
 
     def delete_item(self, item_id: UUID) -> bool:
         """Delete the item with the given ID.

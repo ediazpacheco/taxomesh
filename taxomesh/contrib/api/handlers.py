@@ -29,13 +29,19 @@ from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParen
 # ---------------------------------------------------------------------------
 
 
-def list_categories(service: TaxomeshService, parent_id: UUID | None = None) -> list[Category]:
+def list_categories(
+    service: TaxomeshService,
+    parent_id: UUID | None = None,
+    include_disabled: bool = False,
+) -> list[Category]:
     """List categories, optionally filtered by parent.
 
     Args:
         service: The TaxomeshService instance to delegate to.
         parent_id: When provided, returns children of this parent ordered by
             sort_index. When None, returns top-level categories.
+        include_disabled: When True, returns all categories regardless of
+            enabled state. When False (default), returns only enabled categories.
 
     Returns:
         List of matching categories.
@@ -43,7 +49,7 @@ def list_categories(service: TaxomeshService, parent_id: UUID | None = None) -> 
     Raises:
         TaxomeshCategoryNotFoundError: If parent_id is provided but not found.
     """
-    return service.list_categories(parent_id=parent_id)
+    return service.list_categories(parent_id=parent_id, enabled=None if include_disabled else True)
 
 
 def get_category(service: TaxomeshService, category_id: UUID) -> Category:
@@ -141,13 +147,19 @@ def delete_category(service: TaxomeshService, category_id: UUID) -> None:
 # ---------------------------------------------------------------------------
 
 
-def list_items(service: TaxomeshService, category_id: UUID | None = None) -> list[Item]:
+def list_items(
+    service: TaxomeshService,
+    category_id: UUID | None = None,
+    include_disabled: bool = False,
+) -> list[Item]:
     """List items, optionally filtered by category.
 
     Args:
         service: The TaxomeshService instance to delegate to.
         category_id: When provided, returns items in this category ordered by
             sort_index. When None, returns all items.
+        include_disabled: When True, returns all items regardless of enabled
+            state. When False (default), returns only enabled items.
 
     Returns:
         List of matching items.
@@ -155,7 +167,7 @@ def list_items(service: TaxomeshService, category_id: UUID | None = None) -> lis
     Raises:
         TaxomeshCategoryNotFoundError: If category_id is provided but not found.
     """
-    return service.list_items(category_id=category_id)
+    return service.list_items(category_id=category_id, enabled=None if include_disabled else True)
 
 
 def get_item(service: TaxomeshService, item_id: UUID) -> Item:
@@ -463,7 +475,7 @@ def search_items(service: TaxomeshService, params: SearchItemsRequest) -> list[I
         params.q,
         limit=params.limit,
         category_id=params.category_id,
-        enabled_only=params.enabled_only,
+        enabled=params.enabled,
         fuzzy=params.fuzzy,
         recursive=params.recursive,
     )
@@ -489,7 +501,7 @@ def search_categories(service: TaxomeshService, params: SearchCategoriesRequest)
         params.q,
         limit=params.limit,
         parent_id=params.parent_id,
-        enabled_only=params.enabled_only,
+        enabled=params.enabled,
         fuzzy=params.fuzzy,
     )
 
@@ -499,13 +511,15 @@ def search_categories(service: TaxomeshService, params: SearchCategoriesRequest)
 # ---------------------------------------------------------------------------
 
 
-def get_graph(service: TaxomeshService) -> TaxomeshGraph:
+def get_graph(service: TaxomeshService, *, include_disabled: bool = False) -> TaxomeshGraph:
     """Build and return the full taxonomy graph snapshot.
 
     Args:
         service: The TaxomeshService instance to delegate to.
+        include_disabled: When True, returns all categories and items regardless of
+            enabled state. When False (default), returns only enabled records.
 
     Returns:
         A TaxomeshGraph snapshot with all categories, items, and relationships.
     """
-    return service.get_graph()
+    return service.get_graph(enabled=None if include_disabled else True)

@@ -124,8 +124,8 @@ cats = svc.list_categories_by_item(album.item_id)
 # — ordered by the sort_index set when the item was placed
 ```
 
-If the item has no placements, an empty list is returned. Disabled categories are
-included; filtering by `enabled` state is the caller's responsibility.
+If the item has no placements, an empty list is returned. Only enabled categories
+are returned by default; pass `enabled=None` to include disabled ones.
 Raises `TaxomeshItemNotFoundError` when the item does not exist.
 
 ### Resolving items and categories by external_id
@@ -177,7 +177,7 @@ results = svc.search_categories("orkesta tipika", parent_id=parent.category_id)
 
 Results are sorted by match quality: exact matches first, then prefix, substring, and
 fuzzy matches. Pass `fuzzy=False` to restrict to exact/prefix/substring matching only.
-Pass `enabled_only=False` to include disabled items and categories.
+Pass `enabled=False` to include only disabled items and categories, or `enabled=None` for all.
 
 Both methods are optimized for repeated and per-keystroke (autocomplete) usage:
 

@@ -102,7 +102,7 @@ class SearchItemsRequest(BaseModel):
     limit: int = DEFAULT_SEARCH_LIMIT
     category_id: UUID | None = None
     recursive: bool = False
-    enabled_only: bool = True
+    enabled: bool = True
     fuzzy: bool = True
 
 
@@ -112,5 +112,5 @@ class SearchCategoriesRequest(BaseModel):
     q: Annotated[str, Field(max_length=MAX_SEARCH_QUERY_LENGTH)]
     limit: int = DEFAULT_SEARCH_LIMIT
     parent_id: UUID | None = None
-    enabled_only: bool = True
+    enabled: bool = True
     fuzzy: bool = True

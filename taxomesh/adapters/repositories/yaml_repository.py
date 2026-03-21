@@ -175,14 +175,21 @@ class YAMLRepository:
         """
         return self._categories.get(category_id)
 
-    def list_categories(self) -> list[Category]:
-        """Return all stored categories ordered by name then category_id.
+    def list_categories(self, *, enabled: bool | None = True) -> list[Category]:
+        """Return stored categories ordered by name then category_id.
+
+        Args:
+            enabled: ``True`` returns only enabled; ``False`` only disabled;
+                ``None`` returns all regardless of enabled state.
 
         Returns:
-            List of all categories ordered by ``(name ASC, category_id ASC)``;
-            empty list if the store is empty.
+            List of categories ordered by ``(name ASC, category_id ASC)``;
+            empty list if no categories match.
         """
-        return sorted(self._categories.values(), key=lambda c: (c.name, str(c.category_id)))
+        cats = list(self._categories.values())
+        if enabled is not None:
+            cats = [c for c in cats if c.enabled == enabled]
+        return sorted(cats, key=lambda c: (c.name, str(c.category_id)))
 
     def delete_category(self, category_id: UUID) -> bool:
         """Delete a category by its identifier.
@@ -228,14 +235,21 @@ class YAMLRepository:
         """
         return self._items.get(item_id)
 
-    def list_items(self) -> list[Item]:
-        """Return all stored items ordered by name then item_id.
+    def list_items(self, *, enabled: bool | None = True) -> list[Item]:
+        """Return stored items ordered by name then item_id.
+
+        Args:
+            enabled: ``True`` returns only enabled; ``False`` only disabled;
+                ``None`` returns all regardless of enabled state.
 
         Returns:
-            List of all items ordered by ``(name ASC, item_id ASC)``; empty
-            list if the store is empty.
+            List of items ordered by ``(name ASC, item_id ASC)``; empty list
+            if no items match.
         """
-        return sorted(self._items.values(), key=lambda i: (i.name, str(i.item_id)))
+        items = list(self._items.values())
+        if enabled is not None:
+            items = [i for i in items if i.enabled == enabled]
+        return sorted(items, key=lambda i: (i.name, str(i.item_id)))
 
     def delete_item(self, item_id: UUID) -> bool:
         """Delete an item by its internal identifier.

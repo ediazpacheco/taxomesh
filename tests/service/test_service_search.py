@@ -200,11 +200,11 @@ def test_search_items_respects_limit(svc: TaxomeshService) -> None:
     assert len(results) <= 3
 
 
-def test_search_items_enabled_only_filters_disabled(svc: TaxomeshService) -> None:
+def test_search_items_enabled_true_filters_disabled(svc: TaxomeshService) -> None:
     enabled_item = svc.create_item(name="Laptop Enabled")
     disabled_item = svc.create_item(name="Laptop Disabled")
     svc.update_item(disabled_item.item_id, enabled=False)
-    results = svc.search_items("laptop", enabled_only=True)
+    results = svc.search_items("laptop", enabled=True)
     ids = [i.item_id for i in results]
     assert enabled_item.item_id in ids
     assert disabled_item.item_id not in ids
@@ -346,16 +346,22 @@ def test_search_items_external_id_match(svc: TaxomeshService) -> None:
     assert any(i.item_id == item.item_id for i in results)
 
 
-def test_search_items_all_disabled_enabled_only(svc: TaxomeshService) -> None:
+def test_search_items_all_disabled_enabled_true(svc: TaxomeshService) -> None:
     item = svc.create_item(name="Laptop Test")
     svc.update_item(item.item_id, enabled=False)
-    results = svc.search_items("laptop", enabled_only=True)
+    results = svc.search_items("laptop", enabled=True)
     assert results == []
 
 
-def test_search_categories_all_disabled_enabled_only(svc: TaxomeshService) -> None:
+def test_search_categories_all_disabled_enabled_true(svc: TaxomeshService) -> None:
     disabled = svc.create_category(name="Disabled Electronics")
-    results = svc.search_categories("disabled electronics", enabled_only=False)
+    # Actually disable the category so it appears when enabled=False
+    disabled_obj = svc.repository.get_category(disabled.category_id)
+    assert disabled_obj is not None
+    disabled_obj.enabled = False
+    svc.repository.save_category(disabled_obj)
+    svc._category_corpus = None  # invalidate corpus
+    results = svc.search_categories("disabled electronics", enabled=False)
     ids = [r.category_id for r in results]
     assert disabled.category_id in ids
 
@@ -367,14 +373,14 @@ def test_search_items_no_items_returns_empty(svc: TaxomeshService) -> None:
 
 
 # ---------------------------------------------------------------------------
-# T035–T036: enabled_only=False and fuzzy=False
+# T035–T036: enabled=False and fuzzy=False
 # ---------------------------------------------------------------------------
 
 
-def test_search_items_enabled_only_false_includes_disabled(svc: TaxomeshService) -> None:
+def test_search_items_enabled_false_includes_disabled(svc: TaxomeshService) -> None:
     item = svc.create_item(name="Laptop Disabled")
     svc.update_item(item.item_id, enabled=False)
-    results = svc.search_items("laptop", enabled_only=False)
+    results = svc.search_items("laptop", enabled=False)
     assert any(i.item_id == item.item_id for i in results)
 
 

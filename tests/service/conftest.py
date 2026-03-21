@@ -48,9 +48,12 @@ class InMemoryRepository:
         """Return category by id, or None."""
         return self._categories.get(category_id)
 
-    def list_categories(self) -> list[Category]:
-        """Return all categories."""
-        return list(self._categories.values())
+    def list_categories(self, *, enabled: bool | None = True) -> list[Category]:
+        """Return categories, filtered by enabled state."""
+        cats = list(self._categories.values())
+        if enabled is not None:
+            cats = [c for c in cats if c.enabled == enabled]
+        return cats
 
     def delete_category(self, category_id: UUID) -> bool:
         """Delete category; return True if it existed."""
@@ -69,9 +72,12 @@ class InMemoryRepository:
         """Return item by id, or None."""
         return self._items.get(item_id)
 
-    def list_items(self) -> list[Item]:
-        """Return all items."""
-        return list(self._items.values())
+    def list_items(self, *, enabled: bool | None = True) -> list[Item]:
+        """Return items, filtered by enabled state."""
+        items = list(self._items.values())
+        if enabled is not None:
+            items = [i for i in items if i.enabled == enabled]
+        return items
 
     def delete_item(self, item_id: UUID) -> bool:
         """Delete item; return True if it existed. Cascades relation links."""
