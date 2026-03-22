@@ -918,11 +918,28 @@ class HasLinkedObjectListFilter(admin.SimpleListFilter):
 class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
     """Admin view for Category records."""
 
-    list_display = ("category_id", "external_id_with_link", "name", "slug", "enabled")
+    list_display = (
+        "category_id",
+        "external_id_with_link",
+        "name",
+        "slug",
+        "enabled",
+        "version",
+        "created_at",
+        "updated_at",
+    )  # noqa: E501
     search_fields = ("name", "slug", "category_id")
     list_filter = ("enabled", HasSlugFilter, HasLinkedObjectListFilter)
-    fields = ("name", "slug", "description", "enabled", ("external_id", "linked_object_url"), "metadata")
-    readonly_fields = ("linked_object_url",)
+    fields = (
+        "name",
+        "slug",
+        "description",
+        "enabled",
+        ("external_id", "linked_object_url"),
+        "metadata",
+        ("created_at", "updated_at", "version"),
+    )
+    readonly_fields = ("linked_object_url", "created_at", "updated_at", "version")
     inlines = [CategoryParentLinkInline, CategoryChildLinkInline, CategoryItemLinkInline]
     formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
 
@@ -1344,16 +1361,12 @@ class ItemRelationLinkForm(forms.ModelForm):  # type: ignore[type-arg]
 # ---------------------------------------------------------------------------
 
 
-class OutgoingRelationInline(TaxomeshAdminMixin, admin.TabularInline):
-    """Editable inline for outgoing item relations (source_item == current item)."""
+class _ItemRelationInlineBase(TaxomeshAdminMixin, admin.TabularInline):
+    """Shared base for item-relation inlines. Subclasses set fk_name, verbose_name*, autocomplete_fields."""
 
     model = ItemRelationLinkModel
-    verbose_name = "Item related with"
-    verbose_name_plural = "Items related with"
     form = ItemRelationLinkForm
-    fk_name = "source_item"
     extra = 0
-    autocomplete_fields = ["target_item"]
 
     def save_model(
         self,
@@ -1388,6 +1401,32 @@ class OutgoingRelationInline(TaxomeshAdminMixin, admin.TabularInline):
             self.message_user(request, str(exc), level=messages.ERROR)
 
 
+class OutgoingRelationInline(_ItemRelationInlineBase):
+    """Editable inline for outgoing item relations (source_item == current item)."""
+
+    verbose_name = "Item related with (as source)"
+    verbose_name_plural = "Items related with (as source)"
+    fk_name = "source_item"
+    autocomplete_fields = ["target_item"]
+
+    def get_queryset(self, request: HttpRequest) -> object:  # type: ignore[override]
+        parent_id = request.resolver_match.kwargs.get("object_id")
+        return super().get_queryset(request).filter(source_item_id=parent_id)  # type: ignore[union-attr]
+
+
+class IncomingRelationInline(_ItemRelationInlineBase):
+    """Editable inline for incoming item relations (target_item == current item)."""
+
+    verbose_name = "Item related with (as target)"
+    verbose_name_plural = "Items related with (as target)"
+    fk_name = "target_item"
+    autocomplete_fields = ["source_item"]
+
+    def get_queryset(self, request: HttpRequest) -> object:  # type: ignore[override]
+        parent_id = request.resolver_match.kwargs.get("object_id")
+        return super().get_queryset(request).filter(target_item_id=parent_id)  # type: ignore[union-attr]
+
+
 # ---------------------------------------------------------------------------
 # ItemModelAdmin
 # ---------------------------------------------------------------------------
@@ -1397,12 +1436,19 @@ class OutgoingRelationInline(TaxomeshAdminMixin, admin.TabularInline):
 class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type-arg]
     """Admin view for Item records."""
 
-    list_display = ("name", "external_id_with_link", "slug", "enabled")
+    list_display = ("name", "external_id_with_link", "slug", "enabled", "version", "created_at", "updated_at")
     search_fields = ("name", "external_id", "slug", "item_id")
     list_filter = ("enabled", HasSlugFilter)
-    fields = ("name", ("external_id", "linked_object_url"), "slug", "enabled", "metadata")
-    readonly_fields = ("linked_object_url",)
-    inlines = [ItemParentLinkInline, ItemTagLinkInline, OutgoingRelationInline]
+    fields = (
+        "name",
+        ("external_id", "linked_object_url"),
+        "slug",
+        "enabled",
+        "metadata",
+        ("created_at", "updated_at", "version"),
+    )
+    readonly_fields = ("linked_object_url", "created_at", "updated_at", "version")
+    inlines = [ItemParentLinkInline, OutgoingRelationInline, IncomingRelationInline, ItemTagLinkInline]
     formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
 
     def save_model(
@@ -1494,7 +1540,7 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
         from django.contrib import messages  # noqa: PLC0415
 
         fk_name = getattr(getattr(formset, "fk", None), "name", None)
-        if formset.model is ItemRelationLinkModel and fk_name == "source_item":
+        if formset.model is ItemRelationLinkModel and fk_name in ("source_item", "target_item"):
             svc = self._make_service()
             instances = formset.save(commit=False)
             for obj in instances:

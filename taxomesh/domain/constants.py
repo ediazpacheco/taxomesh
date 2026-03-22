@@ -6,6 +6,7 @@ module ensures that the two layers stay in sync without duplicating magic
 number literals.
 """
 
+from datetime import UTC, datetime
 from typing import Final
 
 # Maximum character length for a category name.
@@ -54,3 +55,9 @@ DIRECTION_OUTGOING: Final[str] = "outgoing"
 
 # Direction constant for incoming item relations (target ← source).
 DIRECTION_INCOMING: Final[str] = "incoming"
+
+# Sentinel default for created_at/updated_at on legacy records that pre-date audit fields.
+AUDIT_EPOCH: Final[datetime] = datetime(1970, 1, 1, tzinfo=UTC)
+
+# Default version for newly created domain objects.
+DEFAULT_VERSION: Final[int] = 0

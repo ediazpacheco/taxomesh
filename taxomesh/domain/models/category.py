@@ -1,13 +1,16 @@
 """Category domain model."""
 
+from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from pydantic import Field, field_validator
 
 from taxomesh.domain.constants import (
+    AUDIT_EPOCH,
     DEFAULT_CATEGORY_EXTERNAL_ID,
     DEFAULT_DESCRIPTION,
+    DEFAULT_VERSION,
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_EXTERNAL_ID_STR_LENGTH,
@@ -27,6 +30,9 @@ class Category(ModelBase):
     external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = DEFAULT_CATEGORY_EXTERNAL_ID
     slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default=AUDIT_EPOCH)
+    updated_at: datetime = Field(default=AUDIT_EPOCH)
+    version: Annotated[int, Field(ge=0)] = DEFAULT_VERSION
 
     @field_validator("description", mode="before")
     @classmethod
