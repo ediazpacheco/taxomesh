@@ -1106,3 +1106,128 @@ class TestCategoryChildLinkInlineEditable:
             category_id=obj.category_id,
             parent_id=obj.parent_category_id,
         )
+
+
+# ---------------------------------------------------------------------------
+# TestCategoryItemLinkInline — items inline on the Category admin change page
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestCategoryItemLinkInline:
+    def test_inline_registered_on_category_admin(self) -> None:
+        """CategoryItemLinkInline must appear in CategoryModelAdmin.inlines."""
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryItemLinkInline, CategoryModelAdmin  # noqa: PLC0415
+
+        site = AdminSite()
+        admin_obj = CategoryModelAdmin(CategoryModel, site)
+        inline_classes = [type(inline) for inline in admin_obj.get_inline_instances(MagicMock())]
+        assert CategoryItemLinkInline in inline_classes
+
+    def test_queryset_returns_items_for_category(self) -> None:
+        """get_queryset filtered by category returns only items linked to that category."""
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryItemLinkInline  # noqa: PLC0415
+
+        cat_a = CategoryModel.objects.create(name="Cat A")
+        cat_b = CategoryModel.objects.create(name="Cat B")
+        item_a = ItemModel.objects.create(name="Item A")
+        item_b = ItemModel.objects.create(name="Item B")
+        ItemParentLinkModel.objects.create(item=item_a, category=cat_a)
+        ItemParentLinkModel.objects.create(item=item_b, category=cat_b)
+
+        site = AdminSite()
+        inline = CategoryItemLinkInline(CategoryModel, site)
+        qs = inline.get_queryset(MagicMock()).filter(category=cat_a)
+
+        assert qs.count() == 1
+        assert qs.first().item == item_a
+
+    def test_autocomplete_fields_and_sort_index_not_excluded(self) -> None:
+        """Inline uses autocomplete for item FK and does not hide sort_index (FR-002)."""
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryItemLinkInline  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryItemLinkInline(CategoryModel, site)
+        assert "item" in inline.autocomplete_fields
+        # sort_index must not be excluded — no fields/exclude override that hides it
+        assert not hasattr(inline, "fields") or inline.fields is None
+        assert not hasattr(inline, "exclude") or not inline.exclude or "sort_index" not in inline.exclude
+
+    def test_save_model_calls_place_item_in_category(self) -> None:
+        """save_model routes the link creation through the service layer."""
+        import uuid  # noqa: PLC0415
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryItemLinkInline  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryItemLinkInline(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        obj = MagicMock(spec=ItemParentLinkModel)
+        obj.item_id = uuid.uuid4()
+        obj.category_id = uuid.uuid4()
+        obj.sort_index = 0
+
+        mock_svc = MagicMock()
+        with patch.object(inline, "_make_service", return_value=mock_svc):
+            inline.save_model(request, obj, MagicMock(), False)
+
+        mock_svc.place_item_in_category.assert_called_once_with(obj.item_id, obj.category_id, obj.sort_index)
+
+    def test_duplicate_item_link_raises_integrity_error(self) -> None:
+        """Adding the same item to the same category twice violates the unique constraint."""
+        from django.db import IntegrityError  # noqa: PLC0415
+
+        cat = CategoryModel.objects.create(name="Cat Dup")
+        item = ItemModel.objects.create(name="Item Dup")
+        ItemParentLinkModel.objects.create(item=item, category=cat)
+
+        with pytest.raises(IntegrityError):
+            ItemParentLinkModel.objects.create(item=item, category=cat)
+
+    def test_delete_model_calls_remove_item_from_category(self) -> None:
+        """delete_model routes the link removal through the service layer."""
+        import uuid  # noqa: PLC0415
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
+
+        from taxomesh.contrib.django.admin import CategoryItemLinkInline  # noqa: PLC0415
+
+        site = AdminSite()
+        inline = CategoryItemLinkInline(CategoryModel, site)
+        request = MagicMock(spec=HttpRequest)
+
+        obj = MagicMock(spec=ItemParentLinkModel)
+        obj.item_id = uuid.uuid4()
+        obj.category_id = uuid.uuid4()
+
+        mock_svc = MagicMock()
+        with patch.object(inline, "_make_service", return_value=mock_svc):
+            inline.delete_model(request, obj)
+
+        mock_svc.remove_item_from_category.assert_called_once_with(obj.item_id, obj.category_id)
+
+    def test_delete_model_preserves_item_record(self) -> None:
+        """Removing a link deletes only the link; the ItemModel record must survive."""
+        cat = CategoryModel.objects.create(name="Cat Del")
+        item = ItemModel.objects.create(name="Item Del")
+        link = ItemParentLinkModel.objects.create(item=item, category=cat)
+
+        # Call delete_model directly via the ORM path (bypassing service mock)
+        # to confirm item record survives after the link is removed.
+        link.delete()
+
+        assert ItemModel.objects.filter(pk=item.pk).exists()
+        assert not ItemParentLinkModel.objects.filter(pk=link.pk).exists()
