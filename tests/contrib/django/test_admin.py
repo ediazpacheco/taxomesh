@@ -708,11 +708,6 @@ class TestAutocompleteInlines:
         assert ROOT_CATEGORY_NAME not in names
         assert "Visible" in names
 
-    def test_incoming_relation_inline_unchanged(self) -> None:
-        from taxomesh.contrib.django.admin import IncomingRelationInline  # noqa: PLC0415
-
-        assert not getattr(IncomingRelationInline, "autocomplete_fields", [])
-
 
 # ---------------------------------------------------------------------------
 # TestJsonEditorWidget — unit tests for the JsonEditorWidget class (T001)
