@@ -1388,14 +1388,6 @@ class OutgoingRelationInline(TaxomeshAdminMixin, admin.TabularInline):
             self.message_user(request, str(exc), level=messages.ERROR)
 
 
-class IncomingRelationInline(_ReadOnlyInlineMixin, admin.TabularInline):
-    """Read-only inline for incoming item relations (target_item == current item)."""
-
-    model = ItemRelationLinkModel
-    fk_name = "target_item"
-    extra = 0
-
-
 # ---------------------------------------------------------------------------
 # ItemModelAdmin
 # ---------------------------------------------------------------------------
@@ -1410,7 +1402,7 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
     list_filter = ("enabled", HasSlugFilter)
     fields = ("name", ("external_id", "linked_object_url"), "slug", "enabled", "metadata")
     readonly_fields = ("linked_object_url",)
-    inlines = [ItemParentLinkInline, ItemTagLinkInline, OutgoingRelationInline, IncomingRelationInline]
+    inlines = [ItemParentLinkInline, ItemTagLinkInline, OutgoingRelationInline]
     formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
 
     def save_model(
