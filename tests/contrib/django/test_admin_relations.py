@@ -31,18 +31,13 @@ class TestOutgoingRelationInline:
         inline_classes = [type(inline) for inline in admin_obj.get_inline_instances(MagicMock())]
         assert OutgoingRelationInline in inline_classes
 
-    def test_incoming_inline_not_registered_on_item_admin(self) -> None:
-        from taxomesh.contrib.django.models import ItemRelationLinkModel  # noqa: PLC0415
+    def test_incoming_inline_registered_on_item_admin(self) -> None:
+        from taxomesh.contrib.django.admin import IncomingRelationInline  # noqa: PLC0415
 
         site = AdminSite()
         admin_obj = ItemModelAdmin(ItemModel, site)
-        inlines = admin_obj.get_inline_instances(MagicMock())
-        incoming = [
-            i
-            for i in inlines
-            if getattr(i, "model", None) is ItemRelationLinkModel and getattr(i, "fk_name", None) == "target_item"
-        ]
-        assert incoming == [], "IncomingRelationInline must not be registered on ItemModelAdmin"
+        inline_classes = [type(inline) for inline in admin_obj.get_inline_instances(MagicMock())]
+        assert IncomingRelationInline in inline_classes
 
     def test_outgoing_inline_save_calls_service_relate_items(self) -> None:
         from taxomesh.contrib.django.admin import OutgoingRelationInline  # noqa: PLC0415

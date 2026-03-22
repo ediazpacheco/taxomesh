@@ -117,6 +117,9 @@ class DjangoRepository:
             external_id=row.external_id,  # type: ignore[attr-defined]
             slug=row.slug,  # type: ignore[attr-defined]
             metadata=row.metadata,  # type: ignore[attr-defined]
+            created_at=row.created_at,  # type: ignore[attr-defined]
+            updated_at=row.updated_at,  # type: ignore[attr-defined]
+            version=row.version,  # type: ignore[attr-defined]
         )
 
     def _row_to_item(self, row: object) -> Item:
@@ -129,6 +132,9 @@ class DjangoRepository:
             slug=row.slug,  # type: ignore[attr-defined]
             enabled=row.enabled,  # type: ignore[attr-defined]
             metadata=row.metadata,  # type: ignore[attr-defined]
+            created_at=row.created_at,  # type: ignore[attr-defined]
+            updated_at=row.updated_at,  # type: ignore[attr-defined]
+            version=row.version,  # type: ignore[attr-defined]
         )
 
     def _row_to_tag(self, row: object) -> Tag:
@@ -220,7 +226,9 @@ class DjangoRepository:
 
         try:
             with transaction.atomic(using=self._using):
-                self._CategoryModel.objects.using(self._using).update_or_create(
+                from django.db.models import F  # type: ignore[import-untyped]  # noqa: PLC0415
+
+                row, created = self._CategoryModel.objects.using(self._using).get_or_create(
                     category_id=category.category_id,
                     defaults={
                         "name": category.name,
@@ -229,8 +237,25 @@ class DjangoRepository:
                         "external_id": category.external_id,
                         "slug": category.slug,
                         "metadata": category.metadata,
+                        "created_at": category.created_at,
+                        "updated_at": category.updated_at,
+                        "version": 0,
                     },
                 )
+                if not created:
+                    self._CategoryModel.objects.using(self._using).filter(category_id=category.category_id).update(
+                        name=category.name,
+                        description=category.description,
+                        enabled=category.enabled,
+                        external_id=category.external_id,
+                        slug=category.slug,
+                        metadata=category.metadata,
+                        created_at=category.created_at,
+                        updated_at=category.updated_at,
+                        version=F("version") + 1,
+                    )
+                    row.refresh_from_db(using=self._using)
+                    category.version = row.version
         except IntegrityError as exc:
             raise TaxomeshExternalIdConflictError(
                 f"external_id {category.external_id!r} is already assigned to another category."
@@ -309,7 +334,9 @@ class DjangoRepository:
 
         try:
             with transaction.atomic(using=self._using):
-                self._ItemModel.objects.using(self._using).update_or_create(
+                from django.db.models import F  # noqa: PLC0415
+
+                row, created = self._ItemModel.objects.using(self._using).get_or_create(
                     item_id=item.item_id,
                     defaults={
                         "name": item.name,
@@ -317,8 +344,24 @@ class DjangoRepository:
                         "slug": item.slug,
                         "enabled": item.enabled,
                         "metadata": item.metadata,
+                        "created_at": item.created_at,
+                        "updated_at": item.updated_at,
+                        "version": 0,
                     },
                 )
+                if not created:
+                    self._ItemModel.objects.using(self._using).filter(item_id=item.item_id).update(
+                        name=item.name,
+                        external_id=item.external_id,
+                        slug=item.slug,
+                        enabled=item.enabled,
+                        metadata=item.metadata,
+                        created_at=item.created_at,
+                        updated_at=item.updated_at,
+                        version=F("version") + 1,
+                    )
+                    row.refresh_from_db(using=self._using)
+                    item.version = row.version
         except IntegrityError as exc:
             raise TaxomeshExternalIdConflictError(
                 f"external_id {item.external_id!r} is already assigned to another item."

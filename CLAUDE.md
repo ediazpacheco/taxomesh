@@ -300,6 +300,7 @@ Do NOT update README during implement — only after
 - Python 3.11 + Django ≥ 4.2 (admin inline framework), Pydantic v2 (domain models — via `TaxomeshService`) (047-admin-category-items)
 - Django ORM — `taxomesh_item_parent_link` table (existing; no migration) (047-admin-category-items)
 - N/A — no model or migration changes (048-remove-item-relations-inline)
+- Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (ORM adapter), pyyaml ≥ 6.0 (YAML adapter) (049-domain-audit-fields)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

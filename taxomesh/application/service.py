@@ -8,6 +8,7 @@ contains no storage logic itself.
 import heapq
 import tomllib
 from collections.abc import Callable, Collection
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar
 from uuid import UUID, uuid4
@@ -235,6 +236,7 @@ class TaxomeshService:
             existing = self._repo.get_category_by_slug(slug)
             if existing is not None:
                 raise TaxomeshDuplicateSlugError(f"Slug '{slug}' is already in use")
+        now = datetime.now(tz=UTC)
         category = Category(
             category_id=uuid4(),
             name=name,
@@ -242,6 +244,8 @@ class TaxomeshService:
             slug=slug,
             metadata=metadata if metadata is not None else {},
             external_id=external_id,
+            created_at=now,
+            updated_at=now,
         )
         self._repo.save_category(category)
         self._repo.save_category_parent_link(
@@ -408,6 +412,8 @@ class TaxomeshService:
             category.external_id = external_id
         if enabled is not None:
             category.enabled = enabled
+        now = datetime.now(tz=UTC)
+        category.updated_at = now
         self._repo.save_category(category)
         clear_all_caches()
         self._category_corpus = None
@@ -444,11 +450,14 @@ class TaxomeshService:
             existing = self._repo.get_item_by_slug(slug)
             if existing is not None:
                 raise TaxomeshDuplicateSlugError(f"Slug '{slug}' is already in use")
+        now = datetime.now(tz=UTC)
         item = Item(
             name=name,
             external_id=None if external_id is None else str(external_id),
             slug=slug,
             metadata=metadata if metadata is not None else {},
+            created_at=now,
+            updated_at=now,
         )
         self._repo.save_item(item)
         clear_all_caches()
@@ -611,6 +620,8 @@ class TaxomeshService:
             item.external_id = external_id
         if metadata is not None:
             item.metadata = metadata
+        now = datetime.now(tz=UTC)
+        item.updated_at = now
         self._repo.save_item(item)
         clear_all_caches()
         self._item_corpus = None

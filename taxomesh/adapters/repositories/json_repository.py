@@ -154,6 +154,8 @@ class JsonRepository:
                 record with a different category_id already holds the same external_id.
         """
         check_external_id_unique(category.category_id, category.external_id, self._categories, "category")
+        if category.category_id in self._categories:
+            category.version += 1
         self._categories[category.category_id] = category
         self._flush()
 
@@ -214,6 +216,8 @@ class JsonRepository:
                 record with a different item_id already holds the same external_id.
         """
         check_external_id_unique(item.item_id, item.external_id, self._items, "item")
+        if item.item_id in self._items:
+            item.version += 1
         self._items[item.item_id] = item
         self._flush()
 

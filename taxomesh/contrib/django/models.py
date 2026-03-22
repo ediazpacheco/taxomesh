@@ -18,6 +18,7 @@ from uuid import uuid4
 from django.db import models
 
 from taxomesh.domain.constants import (
+    AUDIT_EPOCH,
     DEFAULT_DESCRIPTION,
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
@@ -64,6 +65,9 @@ class CategoryModel(models.Model):
     )
     slug = models.CharField(max_length=MAX_SLUG_LENGTH, blank=True, default="", db_index=True)
     metadata = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(default=AUDIT_EPOCH)
+    updated_at = models.DateTimeField(default=AUDIT_EPOCH)
+    version = models.IntegerField(default=0)
 
     def __str__(self) -> str:
         """Return a human-readable label used in admin dropdowns."""
@@ -98,6 +102,9 @@ class ItemModel(models.Model):
     slug = models.CharField(max_length=MAX_SLUG_LENGTH, blank=True, default="", db_index=True)
     enabled = models.BooleanField(default=True)
     metadata = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(default=AUDIT_EPOCH)
+    updated_at = models.DateTimeField(default=AUDIT_EPOCH)
+    version = models.IntegerField(default=0)
 
     def __str__(self) -> str:
         slug_part = f"s: {self.slug} - " if self.slug else ""
@@ -229,6 +236,9 @@ class ItemRelationLinkModel(models.Model):
     relation_type = models.CharField(max_length=RELATION_TYPE_MAX_LENGTH)
     sort_index = models.IntegerField(default=0)
     metadata = models.JSONField(blank=True, default=dict)
+
+    def __str__(self) -> str:
+        return f"{self.source_item.slug} {self.relation_type} -> {self.target_item.slug} ({self.pk})"
 
     class Meta:
         app_label = APP_LABEL
