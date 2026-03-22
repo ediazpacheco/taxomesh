@@ -802,6 +802,54 @@ class ItemTagLinkInline(TaxomeshAdminMixin, admin.TabularInline):
         svc.remove_tag(obj.tag_id, obj.item_id)
 
 
+class CategoryItemLinkInline(TaxomeshAdminMixin, admin.TabularInline):
+    """Inline for managing item placements on the Category admin change page.
+
+    Displays all items currently assigned to the category and allows admins
+    to add or remove item–category links without leaving the category page.
+    """
+
+    model = ItemParentLinkModel
+    fk_name = "category"
+    extra = 0
+    verbose_name = "Item"
+    verbose_name_plural = "Items"
+    autocomplete_fields = ["item"]
+
+    def save_model(
+        self,
+        request: HttpRequest,
+        obj: ItemParentLinkModel,
+        form: forms.BaseModelForm,
+        change: bool,
+    ) -> None:
+        """Persist the item–category placement via the service layer.
+
+        Args:
+            request: The current HTTP request.
+            obj: The ItemParentLinkModel instance being saved.
+            form: The bound ModelForm.
+            change: True if updating an existing record; False if creating.
+        """
+        svc = self._make_service()
+        try:
+            svc.place_item_in_category(obj.item_id, obj.category_id, obj.sort_index)
+        except TaxomeshError as exc:
+            from django.contrib import messages  # noqa: PLC0415
+
+            self.message_user(request, str(exc), level=messages.ERROR)
+
+    def delete_model(self, request: HttpRequest, obj: ItemParentLinkModel) -> None:
+        """Remove the item–category placement via the service layer.
+
+        Args:
+            request: The current HTTP request.
+            obj: The ItemParentLinkModel instance being deleted.
+        """
+        svc = self._make_service()
+        svc.remove_item_from_category(obj.item_id, obj.category_id)
+
+
 # ---------------------------------------------------------------------------
 # Shared filters
 # ---------------------------------------------------------------------------
@@ -875,7 +923,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
     list_filter = ("enabled", HasSlugFilter, HasLinkedObjectListFilter)
     fields = ("name", "slug", "description", "enabled", ("external_id", "linked_object_url"), "metadata")
     readonly_fields = ("linked_object_url",)
-    inlines = [CategoryParentLinkInline, CategoryChildLinkInline]
+    inlines = [CategoryParentLinkInline, CategoryChildLinkInline, CategoryItemLinkInline]
     formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
 
     def linked_object_url(self, obj: Any) -> str:

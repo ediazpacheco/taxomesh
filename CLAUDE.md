@@ -297,6 +297,8 @@ Do NOT update README during implement — only after
 - All backends unchanged — `list_item_parent_links()` confirmed present in JsonRepository, YAMLRepository, DjangoRepository, and InMemoryRepository (045-item-categories-lookup)
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2, Typer ≥ 0.12, Rich ≥ 13.0, pyyaml ≥ 6.0, Django ≥ 4.2 (optional) (046-repo-enabled-filter)
 - JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM), InMemoryRepository (test fixture) (046-repo-enabled-filter)
+- Python 3.11 + Django ≥ 4.2 (admin inline framework), Pydantic v2 (domain models — via `TaxomeshService`) (047-admin-category-items)
+- Django ORM — `taxomesh_item_parent_link` table (existing; no migration) (047-admin-category-items)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
