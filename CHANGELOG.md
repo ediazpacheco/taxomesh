@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a38] — 2026-03-23
+
+### Added
+
+#### `list_related_items_for_sources()` — `skip_on_error` parameter
+
+`TaxomeshService.list_related_items_for_sources()` now accepts a keyword-only
+`skip_on_error: bool = True` parameter.
+
+When `True` (default), dangling links — where a `target_item_id` no longer exists
+in the repository — are **skipped** instead of raising an exception. Each skipped
+link emits a `WARNING`-level log message via the `taxomesh.application.service`
+logger, including `source_item_id`, `target_item_id`, and `relation_type` to aid
+database-level debugging.
+
+When `False`, the original `TaxomeshItemNotFoundError` is raised immediately
+(existing strict behaviour, preserved for callers that rely on it).
+
+The change is fully backwards-compatible: existing call sites require no modification.
+
+---
+
 ## [0.1.0a34] — 2026-03-21
 
 ### ⚠ BREAKING CHANGES

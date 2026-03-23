@@ -364,4 +364,4 @@ class TestListRelatedItemsForSources:
         service._repo.save_item_relation_link(orphan_link)
 
         with pytest.raises(TaxomeshItemNotFoundError):
-            service.list_related_items_for_sources([src.item_id])
+            service.list_related_items_for_sources([src.item_id], skip_on_error=False)
