@@ -202,6 +202,52 @@ To expose search in an HTTP endpoint, use the ready-made `SearchItemsRequest` /
 and the `items_to_list` / `categories_to_list` serializers from `taxomesh.contrib.api`.
 See [HTTP API integration — Search endpoints](https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md#search-endpoints) for examples.
 
+## Logging
+
+taxomesh uses Python's standard `logging` module and follows the recommended practice
+for public libraries: a `NullHandler` is registered on the `"taxomesh"` root logger at
+import time. **No output is produced by default** — the consuming application decides
+where logs go and at what level.
+
+### Logger hierarchy
+
+| Logger | Source |
+|---|---|
+| `taxomesh.application.service` | Service-layer warnings (e.g. dangling relation links) |
+| `taxomesh.contrib.django.admin` | Django admin integration warnings |
+
+### Capturing taxomesh logs
+
+```python
+import logging
+
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.getLogger("taxomesh").addHandler(handler)
+logging.getLogger("taxomesh").setLevel(logging.WARNING)
+```
+
+Timestamps are not embedded in message text — use `%(asctime)s` in your formatter.
+
+### Notable warnings
+
+**`taxomesh.application.service`** — emitted by `list_related_items_for_sources()` when
+`skip_on_error=True` and a relation link points to a target item that no longer exists:
+
+```
+list_related_items_for_sources: dangling relation skipped — source: 🏷️ "Track A" (id: fea7bd50-...), target: <orphaned item 6a273a4c-...>, relation_type: 'music_by'
+```
+
+**`taxomesh.contrib.django.admin`** — emitted when a required Django settings key is
+missing or URL resolution for a linked model fails.
+
+### Suppressing taxomesh logs
+
+```python
+logging.getLogger("taxomesh").setLevel(logging.ERROR)   # suppress WARNING; keep ERROR+
+logging.getLogger("taxomesh").disabled = True            # suppress everything
+```
+
 ## Why This Exists
 
 Taxonomy work is usually underestimated. A simple category table becomes more complex

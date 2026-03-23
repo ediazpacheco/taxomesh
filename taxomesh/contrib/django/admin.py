@@ -94,14 +94,14 @@ def _resolve_linked_url(external_id: str | None, setting_name: str = TAXOMESH_LI
 
         linked_model_label = getattr(django_settings, setting_name, None)
         if not linked_model_label:
-            logger.debug("_resolve_linked_url: setting %r is not configured", setting_name)
+            logger.warning("_resolve_linked_url: setting %r is not configured", setting_name)
             return None
         linked_model = django_apps.get_model(linked_model_label)
         app_label = linked_model._meta.app_label
         model_name = linked_model._meta.model_name
         return dj_reverse(f"admin:{app_label}_{model_name}_change", args=[external_id])
     except Exception as exc:
-        logger.debug("_resolve_linked_url(%r, %r) failed: %s", external_id, setting_name, exc)
+        logger.warning("_resolve_linked_url(%r, %r) failed: %s", external_id, setting_name, exc)
         return None
 
 

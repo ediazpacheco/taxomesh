@@ -1118,12 +1118,22 @@ class TaxomeshService:
         for link in links:
             if link.target_item_id not in item_map:
                 if skip_on_error:
-                    logger.warning(
-                        "Dangling item relation link skipped: source_item_id=%s target_item_id=%s relation_type=%r",
-                        link.source_item_id,
-                        link.target_item_id,
-                        link.relation_type,
-                    )
+                    if logger.isEnabledFor(logging.WARNING):
+                        source_item = item_map.get(link.source_item_id)
+                        if source_item is None:
+                            source_repr = f"<unknown source item {link.source_item_id}>"
+                        else:
+                            try:
+                                source_repr = str(source_item)
+                            except Exception:
+                                source_repr = f"<item {link.source_item_id} str() failed>"
+                        logger.warning(
+                            "list_related_items_for_sources: dangling relation skipped — "
+                            "source: %s, target: <orphaned item %s>, relation_type: %r",
+                            source_repr,
+                            link.target_item_id,
+                            link.relation_type,
+                        )
                     continue
                 raise TaxomeshItemNotFoundError(f"Item {link.target_item_id!r} referenced by relation not found")
             result.setdefault(link.source_item_id, {}).setdefault(link.relation_type, []).append(

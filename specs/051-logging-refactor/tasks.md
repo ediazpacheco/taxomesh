@@ -15,14 +15,14 @@
 
 > **Write tests FIRST — ensure they FAIL before implementation**
 
-- [ ] T001 [US2] Write `tests/test_logging.py` with three tests:
+- [x] T001 [US2] Write `tests/test_logging.py` with three tests:
   - `test_null_handler_registered`: assert `NullHandler` present after `import taxomesh`
   - `test_no_stderr_output_without_configuration`: smoke-check no last-resort output fires
   - `test_no_timestamp_in_message_text`: assert no ISO-8601 pattern in any taxomesh WARNING message text (use caplog + dangling-link scenario from conftest)
 
 ### Implementation for Phase 1
 
-- [ ] T002 [US2] Add `NullHandler` to `taxomesh/__init__.py`:
+- [x] T002 [US2] Add `NullHandler` to `taxomesh/__init__.py`:
   - `import logging` (top of file, after existing imports)
   - `logging.getLogger("taxomesh").addHandler(logging.NullHandler())`
   - Run `pytest tests/test_logging.py` → all 3 tests must pass
@@ -41,7 +41,7 @@
 
 > **Write tests FIRST — ensure they FAIL before implementation**
 
-- [ ] T003 [US1] Update `tests/service/test_service_list_related_resilience.py`:
+- [x] T003 [US1] Update `tests/service/test_service_list_related_resilience.py`:
   - In `test_single_dangling_link_no_exception`: add assertions for:
     - `"list_related_items_for_sources"` in message
     - source item name (e.g. `"Source"`) in message (via `str(source_item)`)
@@ -53,7 +53,7 @@
 
 ### Implementation for User Story 1
 
-- [ ] T004 [US1] Update dangling-link warning in `taxomesh/application/service.py`:
+- [x] T004 [US1] Update dangling-link warning in `taxomesh/application/service.py`:
   - At the `if link.target_item_id not in item_map:` / `skip_on_error` branch:
     1. `source_item = item_map.get(link.source_item_id)`
     2. Build `source_repr`: if `source_item` is not `None`, try `str(source_item)` except `Exception` → `f"<item {link.source_item_id} str() failed>"`. If `source_item` is `None` → `f"<unknown source item {link.source_item_id}>"`
@@ -74,7 +74,7 @@
 
 > **Write tests FIRST — ensure they FAIL before implementation**
 
-- [ ] T005 [US3] Create `tests/contrib/django/test_admin_logging.py`:
+- [x] T005 [US3] Create `tests/contrib/django/test_admin_logging.py`:
   - `test_missing_setting_key_emits_warning`: call `_resolve_linked_url("ext-1", "TAXOMESH_NONEXISTENT_SETTING")` with Django test settings that do not include that key; assert `caplog` captures one `WARNING` containing `"TAXOMESH_NONEXISTENT_SETTING"`.
   - `test_url_resolution_failure_emits_warning`: call `_resolve_linked_url("ext-1", setting_name)` where the setting is present but the model label causes `get_model()` or `reverse()` to raise; assert `caplog` captures one `WARNING` containing `"ext-1"`, the setting name, and the exception text.
   - `test_successful_resolution_no_warning`: call `_resolve_linked_url` with valid config; assert no `WARNING` emitted (result may be `None` or a URL — don't assert the value, just no WARNING).
@@ -82,7 +82,7 @@
 
 ### Implementation for Phase 3
 
-- [ ] T006 [US3] Change log level in `taxomesh/contrib/django/admin.py`:
+- [x] T006 [US3] Change log level in `taxomesh/contrib/django/admin.py`:
   - Line ~97: `logger.debug(...)` → `logger.warning(...)` (missing setting key case)
   - Line ~104: `logger.debug(...)` → `logger.warning(...)` (URL resolution failure case)
   - Run `pytest tests/contrib/django/test_admin_logging.py` → all tests must pass
@@ -95,7 +95,7 @@
 
 **Goal**: Confirm all `getLogger()` calls use `__name__`. This is a verification task, not a code change.
 
-- [ ] T007 [P] [US4] Audit logger initialisations:
+- [x] T007 [P] [US4] Audit logger initialisations:
   - `grep -rn "getLogger" taxomesh/` — verify every call uses `__name__`, not a hard-coded string
   - If any hard-coded names found: fix them (change to `__name__`)
   - Document result in a comment in `plan.md` or skip if no changes needed
@@ -107,7 +107,7 @@
 
 **Goal**: Publish the logging guide from `quickstart.md` into the project's public documentation.
 
-- [ ] T008 [US5] Update `README.md`:
+- [x] T008 [US5] Update `README.md`:
   - Add a "Logging" section based on `specs/051-logging-refactor/quickstart.md`
   - Include: logger hierarchy, NullHandler behaviour, how to capture/suppress, timestamp configuration, descriptions of the two warning messages
   - Keep the section concise (reference quickstart.md for full detail if README gets long)
@@ -118,7 +118,7 @@
 
 **Purpose**: Confirm all gates pass before proposing a commit.
 
-- [ ] T009 Run full quality gate suite:
+- [x] T009 Run full quality gate suite:
   ```bash
   ruff check .
   ruff format --check .
