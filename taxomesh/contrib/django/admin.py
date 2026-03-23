@@ -1545,6 +1545,21 @@ class ItemModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[type
             instances = formset.save(commit=False)
             for obj in instances:
                 try:
+                    if obj.pk is not None:
+                        try:
+                            original = ItemRelationLinkModel.objects.get(pk=obj.pk)
+                            if (
+                                original.source_item_id != obj.source_item_id
+                                or original.target_item_id != obj.target_item_id
+                                or original.relation_type != obj.relation_type
+                            ):
+                                svc.remove_item_relation(
+                                    original.source_item_id,
+                                    original.target_item_id,
+                                    original.relation_type,
+                                )
+                        except ItemRelationLinkModel.DoesNotExist:
+                            pass
                     svc.relate_items(
                         obj.source_item_id,
                         obj.target_item_id,
