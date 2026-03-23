@@ -238,7 +238,7 @@ class ItemRelationLinkModel(models.Model):
     metadata = models.JSONField(blank=True, default=dict)
 
     def __str__(self) -> str:
-        return f"{self.source_item.slug} {self.relation_type} -> {self.target_item.slug} ({self.pk})"
+        return f"{self.source_item.slug} {self.relation_type} → {self.target_item.slug} ({self.pk})"
 
     class Meta:
         app_label = APP_LABEL
