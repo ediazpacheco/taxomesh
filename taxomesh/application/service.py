@@ -6,6 +6,7 @@ contains no storage logic itself.
 """
 
 import heapq
+import logging
 import tomllib
 from collections.abc import Callable, Collection
 from datetime import UTC, datetime
@@ -31,6 +32,8 @@ from taxomesh.exceptions import (
 )
 from taxomesh.ports.repository import TaxomeshRepositoryBase
 from taxomesh.utils.memoize import clear_all_caches, memoize
+
+logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
@@ -1042,6 +1045,7 @@ class TaxomeshService:
         source_item_ids: Collection[UUID],
         *,
         relation_types: Collection[str] | None = None,
+        skip_on_error: bool = True,
     ) -> dict[UUID, dict[str, list[Item]]]:
         """Return related items grouped by source item ID and relation type.
 
@@ -1062,6 +1066,11 @@ class TaxomeshService:
             relation_types: Optional case-insensitive allow-list.
                 ``None`` or ``[]`` means no filter — all relation types are
                 included.
+            skip_on_error: When ``True`` (default), dangling links — where
+                ``target_item_id`` is not found in the repository — are skipped
+                and a ``WARNING`` is logged containing ``source_item_id``,
+                ``target_item_id``, and ``relation_type``.  When ``False``, the
+                original ``TaxomeshItemNotFoundError`` is raised immediately.
 
         Returns:
             Nested dict ``{source_item_id: {relation_type: [Item, ...]}}``
@@ -1071,7 +1080,8 @@ class TaxomeshService:
 
         Raises:
             TaxomeshItemNotFoundError: If a ``target_item_id`` referenced by
-                any matched link does not exist in the repository.
+                any matched link does not exist in the repository and
+                ``skip_on_error`` is ``False``.
 
         Example::
 
@@ -1107,6 +1117,14 @@ class TaxomeshService:
         result: dict[UUID, dict[str, list[Item]]] = {}
         for link in links:
             if link.target_item_id not in item_map:
+                if skip_on_error:
+                    logger.warning(
+                        "Dangling item relation link skipped: source_item_id=%s target_item_id=%s relation_type=%r",
+                        link.source_item_id,
+                        link.target_item_id,
+                        link.relation_type,
+                    )
+                    continue
                 raise TaxomeshItemNotFoundError(f"Item {link.target_item_id!r} referenced by relation not found")
             result.setdefault(link.source_item_id, {}).setdefault(link.relation_type, []).append(
                 item_map[link.target_item_id]
