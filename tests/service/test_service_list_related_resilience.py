@@ -1,6 +1,7 @@
 """Tests for list_related_items_for_sources() resilience: skip_on_error and warning logging."""
 
 import logging
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -45,7 +46,9 @@ def test_single_dangling_link_no_exception(caplog: pytest.LogCaptureFixture) -> 
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warning_records) == 1
     msg = warning_records[0].getMessage()
-    assert str(source.item_id) in msg
+    assert "list_related_items_for_sources" in msg
+    assert source.name in msg
+    assert "orphaned" in msg
     assert str(missing_target_id) in msg
     assert "related_to" in msg
 
@@ -184,3 +187,36 @@ def test_skip_on_error_false_valid_links_returns_normally() -> None:
 
     assert source.item_id in result
     assert target in result[source.item_id]["covers"]
+
+
+# ---------------------------------------------------------------------------
+# US1 — source item __str__ raises: warning still emits safely
+# ---------------------------------------------------------------------------
+
+
+def test_source_str_raises_warning_still_emits(caplog: pytest.LogCaptureFixture) -> None:
+    """WARNING emits safely even if the source item's __str__ raises an exception."""
+    source = Item(name="Broken Source")
+    missing_target_id = uuid4()
+    link = ItemRelationLink(
+        source_item_id=source.item_id,
+        target_item_id=missing_target_id,
+        relation_type="rel",
+    )
+    svc = _make_service_with_links([source], [link])
+
+    def _raise_str(self: Item) -> str:
+        raise RuntimeError("__str__ intentionally broken")
+
+    with (
+        caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER),
+        patch.object(Item, "__str__", _raise_str),
+    ):
+        result = svc.list_related_items_for_sources([source.item_id])
+
+    assert result == {}
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warning_records) == 1
+    msg = warning_records[0].getMessage()
+    assert str(missing_target_id) in msg
+    assert "str() failed" in msg
