@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.1.0a40] — 2026-03-24
 
 ### Added
 
@@ -56,6 +56,27 @@ results, consistent with `get_category_by_external_id`.
 
 **Caching**: both methods are TTL-cached via the same `@memoize` mechanism used by
 all other service read methods.
+
+---
+
+## [0.1.0a39] — 2026-03-23
+
+### Added
+
+#### Public-library logging best practices
+
+- `taxomesh` root logger now registers a `NullHandler` at import time, following
+  Python public-library conventions and preventing "No handlers could be found"
+  warnings in applications that do not configure logging.
+- Dangling-link warning in `list_related_items_for_sources()` now includes the
+  method name, `str(source_item_id)`, and an "orphaned" label for easier
+  debugging.
+- Warning log in `list_related_items_for_sources()` is guarded with
+  `isEnabledFor(WARNING)` to avoid unnecessary string interpolation when the
+  `WARNING` level is suppressed.
+- `_resolve_linked_url` calls in the Django admin module upgraded from `DEBUG`
+  to `WARNING` level so misconfigured URL lookups surface in standard production
+  log configurations.
 
 ---
 
