@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 from uuid import UUID
 
-from taxomesh.adapters.repositories._external_id import check_external_id_unique
+from taxomesh.adapters.repositories._external_id import bulk_lookup_by_external_id, check_external_id_unique
 from taxomesh.domain.models import (
     Category,
     CategoryParentLink,
@@ -563,6 +563,49 @@ class JsonRepository:
             The matching Category, or None if no category has this external_id.
         """
         return next((cat for cat in self._categories.values() if cat.external_id == external_id), None)
+
+    def get_items_by_external_ids(
+        self,
+        external_ids: Collection[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, Item]:
+        """Return items whose external_id is in external_ids.
+
+        Args:
+            external_ids: A collection of external ID strings to look up.
+                Pre-normalised: no blank strings, no duplicates expected.
+            enabled: ``True`` returns only enabled items; ``False`` only
+                disabled; ``None`` (default) returns all matching items.
+
+        Returns:
+            A dict mapping each found external_id to its Item. Missing IDs
+            are silently absent — no error is raised.
+        """
+        return bulk_lookup_by_external_id(self._items, external_ids, enabled)
+
+    def get_categories_by_external_ids(
+        self,
+        external_ids: Collection[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, Category]:
+        """Return categories whose external_id is in external_ids.
+
+        Root category exclusion is the service's responsibility, not the
+        adapter's.
+
+        Args:
+            external_ids: A collection of external ID strings to look up.
+                Pre-normalised: no blank strings, no duplicates expected.
+            enabled: ``True`` returns only enabled categories; ``False`` only
+                disabled; ``None`` (default) returns all matching categories.
+
+        Returns:
+            A dict mapping each found external_id to its Category. Missing
+            IDs are silently absent — no error is raised.
+        """
+        return bulk_lookup_by_external_id(self._categories, external_ids, enabled)
 
     def get_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given slug, or None.

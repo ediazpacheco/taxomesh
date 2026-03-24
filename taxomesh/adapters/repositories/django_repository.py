@@ -727,6 +727,75 @@ class DjangoRepository:
             raise TaxomeshRepositoryError(str(exc)) from exc
         return self._row_to_category(row) if row is not None else None
 
+    def get_items_by_external_ids(
+        self,
+        external_ids: Collection[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, "Item"]:
+        """Return items whose external_id is in external_ids.
+
+        Args:
+            external_ids: A collection of external ID strings to look up.
+                Pre-normalised: no blank strings, no duplicates expected.
+            enabled: ``True`` returns only enabled items; ``False`` only
+                disabled; ``None`` (default) returns all matching items.
+
+        Returns:
+            A dict mapping each found external_id to its Item. Missing IDs
+            are silently absent — no error is raised.
+
+        Raises:
+            TaxomeshRepositoryError: On database error.
+        """
+        from django.db import DatabaseError  # noqa: PLC0415
+
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+        try:
+            qs = self._ItemModel.objects.using(self._using).filter(external_id__in=external_ids)
+            if enabled is not None:
+                qs = qs.filter(enabled=enabled)
+            return {row.external_id: self._row_to_item(row) for row in qs if row.external_id}
+        except DatabaseError as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
+
+    def get_categories_by_external_ids(
+        self,
+        external_ids: Collection[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, "Category"]:
+        """Return categories whose external_id is in external_ids.
+
+        Root category exclusion is the service's responsibility, not the
+        adapter's.
+
+        Args:
+            external_ids: A collection of external ID strings to look up.
+                Pre-normalised: no blank strings, no duplicates expected.
+            enabled: ``True`` returns only enabled categories; ``False`` only
+                disabled; ``None`` (default) returns all matching categories.
+
+        Returns:
+            A dict mapping each found external_id to its Category. Missing
+            IDs are silently absent — no error is raised.
+
+        Raises:
+            TaxomeshRepositoryError: On database error.
+        """
+        from django.db import DatabaseError  # noqa: PLC0415
+
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+        try:
+            qs = self._CategoryModel.objects.using(self._using).filter(external_id__in=external_ids)
+            if enabled is not None:
+                qs = qs.filter(enabled=enabled)
+            return {row.external_id: self._row_to_category(row) for row in qs if row.external_id}
+        except DatabaseError as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
+
     def get_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given slug, or None.
 

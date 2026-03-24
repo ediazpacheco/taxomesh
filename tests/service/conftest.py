@@ -7,6 +7,7 @@ from uuid import UUID
 
 import pytest
 
+from taxomesh.adapters.repositories._external_id import bulk_lookup_by_external_id
 from taxomesh.adapters.repositories.json_repository import JsonRepository
 from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
 from taxomesh.application.service import TaxomeshService
@@ -181,6 +182,24 @@ class InMemoryRepository:
     def get_category_by_external_id(self, external_id: str) -> Category | None:
         """Return the category with the given external_id, or None."""
         return next((cat for cat in self._categories.values() if cat.external_id == external_id), None)
+
+    def get_items_by_external_ids(
+        self,
+        external_ids: Collection[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, Item]:
+        """Return items whose external_id is in external_ids."""
+        return bulk_lookup_by_external_id(self._items, external_ids, enabled)
+
+    def get_categories_by_external_ids(
+        self,
+        external_ids: Collection[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, Category]:
+        """Return categories whose external_id is in external_ids."""
+        return bulk_lookup_by_external_id(self._categories, external_ids, enabled)
 
     def get_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given slug, or None."""

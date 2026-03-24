@@ -1,11 +1,12 @@
-"""Shared external_id uniqueness helper for file-backed repositories.
+"""Shared external_id helpers for file-backed repositories.
 
 Used by JsonRepository and YAMLRepository to enforce the 1:1 constraint
-in-process. DjangoRepository uses a database UNIQUE constraint instead.
+in-process and to perform bulk lookups. DjangoRepository uses a database
+UNIQUE constraint instead.
 """
 
-from collections.abc import Mapping
-from typing import Protocol
+from collections.abc import Collection, Mapping
+from typing import Protocol, TypeVar
 from uuid import UUID
 
 from taxomesh.exceptions import TaxomeshExternalIdConflictError
@@ -13,6 +14,14 @@ from taxomesh.exceptions import TaxomeshExternalIdConflictError
 
 class _HasExternalId(Protocol):
     external_id: str | None
+
+
+class _HasExternalIdAndEnabled(Protocol):
+    external_id: str | None
+    enabled: bool
+
+
+_T = TypeVar("_T", bound=_HasExternalIdAndEnabled)
 
 
 def check_external_id_unique(
@@ -40,3 +49,29 @@ def check_external_id_unique(
             raise TaxomeshExternalIdConflictError(
                 f"external_id {external_id!r} is already assigned to another {entity_name}."
             )
+
+
+def bulk_lookup_by_external_id(
+    collection: Mapping[UUID, _T],
+    external_ids: Collection[str],
+    enabled: bool | None,
+) -> dict[str, _T]:
+    """Return entities from *collection* whose external_id is in *external_ids*.
+
+    Args:
+        collection: All existing records keyed by primary key UUID.
+        external_ids: A collection of external ID strings to look up.
+            Pre-normalised: no blank strings, no duplicates expected.
+        enabled: ``True`` returns only enabled entities; ``False`` only
+            disabled; ``None`` returns all matching entities.
+
+    Returns:
+        A dict mapping each found external_id to its entity.
+    """
+    target = set(external_ids)
+    result: dict[str, _T] = {}
+    for entity in collection.values():
+        if entity.external_id in target and (enabled is None or entity.enabled == enabled):
+            assert entity.external_id is not None
+            result[entity.external_id] = entity
+    return result
