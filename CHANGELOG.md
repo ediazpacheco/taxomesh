@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+#### `get_items_by_external_ids()` and `get_categories_by_external_ids()` — bulk external ID lookup
+
+`TaxomeshService` now exposes two bulk resolution methods:
+
+```python
+service.get_items_by_external_ids(
+    external_ids: Iterable[str],
+    *,
+    enabled: bool | None = None,
+) -> dict[str, Item]
+
+service.get_categories_by_external_ids(
+    external_ids: Iterable[str],
+    *,
+    enabled: bool | None = None,
+) -> dict[str, Category]
+```
+
+Both methods resolve multiple domain objects by `external_id` in a **single bulk
+operation**, replacing the N+1 pattern that resulted from looping over
+`get_item_by_external_id` / `get_category_by_external_id`.
+
+**Input handling**:
+- Each value is normalised with `str(value).strip()`.
+- Blank / whitespace-only values are silently ignored.
+- Duplicate IDs are deduplicated before the query.
+- Missing IDs are silently omitted from the result — no exception is raised.
+
+**`enabled` filter** (`bool | None`, default `None`):
+- `True` — return only enabled items/categories.
+- `False` — return only disabled items/categories.
+- `None` (default) — return all matching regardless of enabled state.
+
+A disabled item/category whose ID is supplied is included when `enabled=None`,
+and excluded (silently omitted, not an error) when `enabled=True`.
+
+**`get_categories_by_external_ids` note**: the root category is always excluded from
+results, consistent with `get_category_by_external_id`.
+
+**Adapter support**: all three repository backends implement the bulk query natively —
+`JsonRepository` and `YAMLRepository` scan their in-memory store once per call;
+`DjangoRepository` issues a single `WHERE external_id IN (...)` SQL query.
+
+**Caching**: both methods are TTL-cached via the same `@memoize` mechanism used by
+all other service read methods.
+
 ---
 
 ## [0.1.0a38] — 2026-03-23

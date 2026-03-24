@@ -273,6 +273,65 @@ class TaxomeshRepositoryBase(Protocol):
         Raises:
             TaxomeshRepositoryError: On storage failure.
         """
+
+    def get_items_by_external_ids(
+        self,
+        external_ids: Collection[str],
+        *,
+        enabled: bool | None = None,
+    ) -> "dict[str, Item]":
+        """Return items whose external_id matches any value in external_ids.
+
+        The input is pre-normalised: blank strings and duplicates have already
+        been removed by the caller (e.g. ``TaxomeshService``). The adapter
+        MUST NOT perform any further normalisation.
+
+        Args:
+            external_ids: A collection of external ID strings to look up.
+                Guaranteed to contain no blank strings and no duplicates.
+            enabled: ``True`` returns only enabled items; ``False`` only
+                disabled; ``None`` (default) returns all matching items
+                regardless of enabled state.
+
+        Returns:
+            A dict mapping each found external_id to its Item. Missing IDs
+            are silently absent from the result — no error is raised.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
+        """
+        ...
+
+    def get_categories_by_external_ids(
+        self,
+        external_ids: Collection[str],
+        *,
+        enabled: bool | None = None,
+    ) -> "dict[str, Category]":
+        """Return categories whose external_id matches any value in external_ids.
+
+        The input is pre-normalised: blank strings and duplicates have already
+        been removed by the caller (e.g. ``TaxomeshService``). The adapter
+        MUST NOT perform any further normalisation.
+
+        Root category exclusion is the service's responsibility, not the
+        adapter's. The adapter returns the raw result including the root
+        category if its external_id matches.
+
+        Args:
+            external_ids: A collection of external ID strings to look up.
+                Guaranteed to contain no blank strings and no duplicates.
+            enabled: ``True`` returns only enabled categories; ``False`` only
+                disabled; ``None`` (default) returns all matching categories
+                regardless of enabled state.
+
+        Returns:
+            A dict mapping each found external_id to its Category. Missing IDs
+            are silently absent from the result — no error is raised.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
+        """
         ...
 
     def get_item_by_slug(self, slug: str) -> Item | None:
@@ -414,7 +473,7 @@ class TaxomeshRepositoryBase(Protocol):
             in deterministic order; empty list if *source_item_ids* is empty or no
             links match.
 
-        Example::
+        Example:
 
             # items: song_a (UUID a), song_b (UUID b), artist_x (UUID x), label_y (UUID y)
             # links: song_a --(performed_by)--> artist_x

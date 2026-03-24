@@ -8,7 +8,7 @@ contains no storage logic itself.
 import heapq
 import logging
 import tomllib
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar
@@ -46,6 +46,11 @@ class _UnsetType:
 
 
 _UNSET: Final[_UnsetType] = _UnsetType()
+
+
+def _normalise_external_ids(external_ids: Iterable[str]) -> frozenset[str]:
+    """Strip and deduplicate external IDs, dropping blanks."""
+    return frozenset(str(v).strip() for v in external_ids if str(v).strip())
 
 
 class TaxomeshService:
@@ -533,7 +538,7 @@ class TaxomeshService:
         Raises:
             TaxomeshItemNotFoundError: If no item with the given item_id exists.
 
-        Example::
+        Example:
 
             cats = svc.list_categories_by_item(album.item_id)
             # [Category(name="Jazz", ...), Category(name="Music", ...)]
@@ -928,6 +933,85 @@ class TaxomeshService:
             return None
         return cat
 
+    def get_items_by_external_ids(
+        self,
+        external_ids: Iterable[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, Item]:
+        """Resolve multiple items by their external_id in a single bulk operation.
+
+        Normalises each input with ``str(value).strip()``, ignores blank values,
+        deduplicates into a ``frozenset``, then delegates to the memoized
+        implementation. Returns only found items; missing or disabled IDs are
+        silently omitted.
+
+        Args:
+            external_ids: An iterable of external ID strings. Generators supported.
+            enabled: ``True`` returns only enabled items; ``False`` only disabled;
+                ``None`` (default) returns all matching items regardless of enabled state.
+
+        Returns:
+            A dict mapping each found external_id (after normalisation) to its Item.
+
+        Raises:
+            TaxomeshRepositoryError: If the underlying repository raises it.
+        """
+        normalised = _normalise_external_ids(external_ids)
+        if not normalised:
+            return {}
+        return self._fetch_items_by_external_ids(normalised, enabled=enabled)
+
+    @memoize(DEFAULT_CACHE_TTL)
+    def _fetch_items_by_external_ids(
+        self,
+        external_ids: frozenset[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, Item]:
+        """Memoized bulk repository call. frozenset arg → hashable cache key."""
+        return self._repo.get_items_by_external_ids(external_ids, enabled=enabled)
+
+    def get_categories_by_external_ids(
+        self,
+        external_ids: Iterable[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, Category]:
+        """Resolve multiple categories by their external_id in a single bulk operation.
+
+        Normalises each input with ``str(value).strip()``, ignores blank values,
+        deduplicates into a ``frozenset``, then delegates to the memoized
+        implementation. The root category is always excluded from results.
+
+        Args:
+            external_ids: An iterable of external ID strings. Generators supported.
+            enabled: ``True`` returns only enabled categories; ``False`` only disabled;
+                ``None`` (default) returns all matching categories regardless of enabled state.
+
+        Returns:
+            A dict mapping each found external_id (after normalisation) to its Category.
+            The root category is never included even if its external_id matches.
+
+        Raises:
+            TaxomeshRepositoryError: If the underlying repository raises it.
+        """
+        normalised = _normalise_external_ids(external_ids)
+        if not normalised:
+            return {}
+        result = self._fetch_categories_by_external_ids(normalised, enabled=enabled)
+        return {k: v for k, v in result.items() if v.category_id != self._root_id}
+
+    @memoize(DEFAULT_CACHE_TTL)
+    def _fetch_categories_by_external_ids(
+        self,
+        external_ids: frozenset[str],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[str, Category]:
+        """Memoized bulk repository call. frozenset arg → hashable cache key."""
+        return self._repo.get_categories_by_external_ids(external_ids, enabled=enabled)
+
     def remove_category_parent(self, category_id: UUID, parent_id: UUID) -> None:
         """Remove a parent relationship from a category. No-op if the link does not exist.
 
@@ -1083,7 +1167,7 @@ class TaxomeshService:
                 any matched link does not exist in the repository and
                 ``skip_on_error`` is ``False``.
 
-        Example::
+        Example:
 
             song_a = service.create_item(name="Song A")
             song_b = service.create_item(name="Song B")

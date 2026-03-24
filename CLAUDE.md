@@ -303,6 +303,7 @@ Do NOT update README during implement — only after
 - Python 3.11 + Pydantic v2 (domain models), Django ≥ 4.2 (ORM adapter), pyyaml ≥ 6.0 (YAML adapter) (049-domain-audit-fields)
 - Python 3.11 + stdlib `logging` (new usage); Pydantic v2 (existing) (050-related-items-resilience)
 - Python 3.11 + stdlib `logging` only — no new runtime deps (051-logging-refactor)
+- Python 3.11 + Pydantic v2 (domain models), stdlib `collections.abc` (052-bulk-external-id-lookup)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
