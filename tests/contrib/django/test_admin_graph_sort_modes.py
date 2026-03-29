@@ -239,9 +239,12 @@ def test_graph_children_sort_propagated(admin_client: object) -> None:
     svc = TaxomeshService(repository=repo)
 
     parent = svc.create_category(name="ParentSortTest")
-    child_a = svc.create_category(name="ChildA", parent_id=parent.category_id)
-    child_b = svc.create_category(name="ChildB", parent_id=parent.category_id)
-    child_c = svc.create_category(name="ChildC", parent_id=parent.category_id)
+    child_a = svc.create_category(name="ChildA")
+    child_b = svc.create_category(name="ChildB")
+    child_c = svc.create_category(name="ChildC")
+    svc.add_category_parent(child_a.category_id, parent.category_id)
+    svc.add_category_parent(child_b.category_id, parent.category_id)
+    svc.add_category_parent(child_c.category_id, parent.category_id)
 
     # Assign deterministic sort_index values
     CategoryParentLinkModel.objects.filter(
