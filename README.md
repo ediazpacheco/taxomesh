@@ -202,6 +202,47 @@ To expose search in an HTTP endpoint, use the ready-made `SearchItemsRequest` /
 and the `items_to_list` / `categories_to_list` serializers from `taxomesh.contrib.api`.
 See [HTTP API integration — Search endpoints](https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md#search-endpoints) for examples.
 
+## Django admin — graph sort modes
+
+The admin graph view ships with a sort selector toolbar. Two built-in modes are provided:
+
+| Key | Label | Behaviour |
+|---|---|---|
+| `sort_index_asc` | Sort index ↑ | Ascending by `sort_index` (default) |
+| `sort_index_desc` | Sort index ↓ | Descending by `sort_index` |
+
+### Registering a custom sort mode
+
+Define a callable that receives and returns `list[GraphEntry]`, then append a
+`(key, label, callable)` 3-tuple to `sort_modes` on your admin subclass:
+
+```python
+# myproject/admin.py
+from taxomesh.contrib.django.admin import TaxomeshCategoryAdmin
+from taxomesh.contrib.django.graph_sort import DEFAULT_SORT_MODES, SortMode
+from taxomesh.contrib.django.graph_types import GraphEntry
+
+def sort_by_relevance(entries: list[GraphEntry]) -> list[GraphEntry]:
+    scores = fetch_my_relevance_scores([e["uuid"] for e in entries])
+    return sorted(entries, key=lambda e: scores.get(e["uuid"], 0), reverse=True)
+
+class MyCategoryAdmin(TaxomeshCategoryAdmin):
+    sort_modes: list[SortMode] = [
+        *DEFAULT_SORT_MODES,
+        ("content_relevance", "Content relevance", sort_by_relevance),
+    ]
+```
+
+The "Content relevance" option appears in the sort selector on the graph page.
+The sort mode is preserved when expanding lazy-loaded children via the AJAX endpoint.
+
+taxomesh is fully agnostic — it calls your function with the entries already built
+for that view level and expects the sorted list in return. Any domain knowledge
+(scores, external data, request context) lives entirely in your callable.
+
+> **Note**: use `[*DEFAULT_SORT_MODES, ...]` rather than mutating the list in place
+> to avoid sharing state between subclasses.
+
 ## Logging
 
 taxomesh uses Python's standard `logging` module and follows the recommended practice
