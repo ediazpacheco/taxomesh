@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a41] — 2026-03-29
+
+### Added
+
+#### Pluggable graph sort modes (`taxomesh.contrib.django`)
+
+The Django admin graph view now supports a configurable sort order via a
+`<select>` toolbar. taxomesh ships two built-in sort modes and consumers can
+register any number of additional modes by subclassing their admin class.
+
+**Built-in modes**
+
+| Key | Label | Behaviour |
+|---|---|---|
+| `sort_index_asc` | Sort index ↑ | Ascending by `sort_index` (default — no behaviour change) |
+| `sort_index_desc` | Sort index ↓ | Descending by `sort_index` |
+
+**Consumer extension**
+
+```python
+# myproject/admin.py
+from taxomesh.contrib.django.admin import TaxomeshCategoryAdmin
+from taxomesh.contrib.django.graph_sort import DEFAULT_SORT_MODES, SortMode
+from taxomesh.contrib.django.graph_types import GraphEntry
+
+def sort_by_relevance(entries: list[GraphEntry]) -> list[GraphEntry]:
+    scores = fetch_my_relevance_scores([e["uuid"] for e in entries])
+    return sorted(entries, key=lambda e: scores.get(e["uuid"], 0), reverse=True)
+
+class MyCategoryAdmin(TaxomeshCategoryAdmin):
+    sort_modes: list[SortMode] = [
+        *DEFAULT_SORT_MODES,
+        ("content_relevance", "Content relevance", sort_by_relevance),
+    ]
+```
+
+The custom mode appears in the sort selector on the graph page. taxomesh
+calls the callable with `list[GraphEntry]` — the entries already built for
+that view level — and expects the sorted list in return.
+
+**Type exports** (`taxomesh.contrib.django.graph_sort`)
+
+```python
+SortModeFn: TypeAlias = Callable[[list[GraphEntry]], list[GraphEntry]]
+SortMode:   TypeAlias = tuple[str, str, SortModeFn]   # (key, label, callable)
+DEFAULT_SORT_MODE:  Final[str]        = "sort_index_asc"
+DEFAULT_SORT_MODES: Final[list[SortMode]]
+```
+
+**`GraphEntry` and `RelationEntry`** are now also importable directly from
+`taxomesh.contrib.django.graph_types` (in addition to the existing
+`taxomesh.contrib.django.admin` re-export).
+
+**No migration required. No behaviour change for existing consumers.**
+
+---
+
 ## [0.1.0a40] — 2026-03-24
 
 ### Added

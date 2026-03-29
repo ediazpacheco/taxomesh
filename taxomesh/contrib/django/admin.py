@@ -1,7 +1,7 @@
 """Django admin registrations for taxomesh ORM models."""
 
 import logging
-from typing import Any, Final, TypedDict
+from typing import Any, Final
 from uuid import UUID
 
 from django import forms
@@ -14,6 +14,8 @@ from django.utils.html import format_html
 
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.django_repository import DjangoRepository
+from taxomesh.contrib.django.graph_sort import DEFAULT_SORT_MODE, DEFAULT_SORT_MODES, SortMode, SortModeFn
+from taxomesh.contrib.django.graph_types import GraphEntry, RelationEntry
 from taxomesh.contrib.django.models import (
     CategoryGraphProxy,
     CategoryModel,
@@ -31,31 +33,6 @@ from taxomesh.domain.dag import check_no_cycle
 from taxomesh.exceptions import TaxomeshCyclicDependencyError, TaxomeshError, TaxomeshValidationError
 
 logger = logging.getLogger(__name__)
-
-
-class GraphEntry(TypedDict):
-    """A single flattened entry for template rendering."""
-
-    depth: int
-    kind: str
-    name: str
-    uuid: str
-    enabled: bool
-    external_id: str | None
-    linked_url: str | None
-    has_descendants: bool
-    depth_limited: bool
-    initially_collapsed: bool
-    sort_index: int
-    parent_uuid: str
-
-
-class RelationEntry(TypedDict):
-    """A single outgoing item relation for template rendering."""
-
-    relation_type: str
-    target_name: str
-    target_uuid: str
 
 
 TAXOMESH_LINKED_MODEL_SETTING: Final[str] = "TAXOMESH_LINKED_MODEL"
@@ -248,6 +225,22 @@ class TaxomeshAdminMixin:
 
     external_id_with_link.short_description = "External id"  # type: ignore[attr-defined]
     external_id_with_link.admin_order_field = "external_id"  # type: ignore[attr-defined]
+
+    sort_modes: list[SortMode] = list(DEFAULT_SORT_MODES)
+
+    def _resolve_sort_fn(self, sort_by: str) -> SortModeFn:
+        """Return the callable for sort_by key, falling back to the first registered mode.
+
+        Args:
+            sort_by: The sort mode key from the query string.
+
+        Returns:
+            The SortModeFn callable for the given key, or the first mode's callable as fallback.
+        """
+        for key, _label, fn in self.sort_modes:
+            if key == sort_by:
+                return fn
+        return self.sort_modes[0][2]
 
 
 # ---------------------------------------------------------------------------
@@ -1101,6 +1094,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
         error: str | None = None
         entries: list[GraphEntry] = []
         has_entries = False
+        sort_by = request.GET.get("sort_by", DEFAULT_SORT_MODE)
 
         try:
             repo = DjangoRepository()
@@ -1156,6 +1150,8 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
         except TaxomeshError as exc:
             error = str(exc)
 
+        entries = self._resolve_sort_fn(sort_by)(entries)
+
         for entry in entries:
             entry["linked_url"] = _resolve_linked_url(entry.get("external_id", "") or "")
 
@@ -1168,6 +1164,8 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
             "error": error,
             "item_relations": {},
             "children_url": children_url,
+            "sort_by": sort_by,
+            "sort_mode_options": [{"key": k, "label": lbl} for k, lbl, _ in self.sort_modes],
             "opts": self.model._meta,
         }
         return TemplateResponse(request, "admin/taxomesh_contrib_django/graph.html", context)
@@ -1176,6 +1174,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
         """Return an HTML fragment with the direct children of a category node."""
         from django.urls import reverse as dj_reverse  # noqa: PLC0415
 
+        sort_by = request.GET.get("sort_by", DEFAULT_SORT_MODE)
         try:
             parent_uuid = UUID(request.GET["parent_uuid"])
             depth = int(request.GET.get("depth", 1))
@@ -1239,6 +1238,8 @@ class CategoryModelAdmin(TaxomeshAdminMixin, admin.ModelAdmin):  # type: ignore[
 
         except TaxomeshError as exc:
             return HttpResponse(str(exc), status=500)
+
+        entries = self._resolve_sort_fn(sort_by)(entries)
 
         for entry in entries:
             entry["linked_url"] = _resolve_linked_url(entry.get("external_id", "") or "")

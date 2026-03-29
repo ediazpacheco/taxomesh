@@ -90,7 +90,17 @@
   <p>No categories found. Add one to get started.</p>
 {% else %}
   <div id="taxomesh-dnd-error" class="taxomesh-dnd-error"></div>
-  <div id="taxomesh-graph">
+  <form method="get" style="margin-bottom: 0.75rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+    <label for="taxomesh-sort-select" style="font-size: 0.875rem;">Sort:</label>
+    <select id="taxomesh-sort-select" name="sort_by"
+            onchange="this.form.submit()"
+            style="font-size: 0.875rem;">
+      {% for mode in sort_mode_options %}
+        <option value="{{ mode.key }}"{% if mode.key == sort_by %} selected{% endif %}>{{ mode.label }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  <div id="taxomesh-graph" data-sort-by="{{ sort_by }}">
     {% include "admin/taxomesh_contrib_django/_graph_entry_list.html" with entries=entries item_relations=item_relations children_url=children_url %}
   </div>
 {% endif %}
@@ -182,7 +192,9 @@
       var prevText = toggle.textContent;
       toggle.textContent = "\u2026";
       toggle.disabled = true;
-      fetch(CHILDREN_URL + "?parent_uuid=" + encodeURIComponent(uuid) + "&depth=" + (depth + 1))
+      var sortBy = graph.dataset.sortBy || "";
+      fetch(CHILDREN_URL + "?parent_uuid=" + encodeURIComponent(uuid) + "&depth=" + (depth + 1)
+            + (sortBy ? "&sort_by=" + encodeURIComponent(sortBy) : ""))
         .then(function (r) { return r.text(); })
         .then(function (html) {
           insertAfterEntry(entry, html);
