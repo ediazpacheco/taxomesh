@@ -571,21 +571,41 @@ class TaxomeshService:
 
     @memoize(DEFAULT_CACHE_TTL)
     def get_item_by_slug(self, slug: str) -> Item:
-        """Retrieve an item by its slug.
+        """Retrieve an enabled item by its canonical slug or unique slug alias.
 
         Args:
-            slug: The URL-friendly identifier of the item.
+            slug: The URL-friendly identifier of the item. Exact canonical
+                slugs take precedence over aliases stored in
+                ``metadata["slug_aliases"]``.
 
         Returns:
             The matching Item.
 
         Raises:
-            TaxomeshItemNotFoundError: If no item with the given slug exists.
+            TaxomeshItemNotFoundError: If no enabled item with the given slug
+                or alias exists.
+            TaxomeshDuplicateSlugError: If multiple enabled items declare the
+                slug as an alias.
         """
         result = self._repo.get_item_by_slug(slug)
-        if result is None:
+        if result is not None:
+            if result.enabled:
+                return result
             raise TaxomeshItemNotFoundError(f"Item not found for slug: {slug!r}")
-        return result
+
+        alias_matches: list[Item] = []
+        for item in self._repo.list_items(enabled=True):
+            aliases = item.metadata.get("slug_aliases") if isinstance(item.metadata, dict) else None
+            if not isinstance(aliases, list):
+                continue
+            if slug in {str(alias).strip() for alias in aliases if str(alias).strip()}:
+                alias_matches.append(item)
+
+        if len(alias_matches) == 1:
+            return alias_matches[0]
+        if len(alias_matches) > 1:
+            raise TaxomeshDuplicateSlugError(f"Slug alias '{slug}' is used by multiple items")
+        raise TaxomeshItemNotFoundError(f"Item not found for slug: {slug!r}")
 
     def update_item(
         self,

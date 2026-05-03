@@ -90,6 +90,17 @@ class TestGetItemBySlug:
         assert result.item_id == item.item_id
         assert result.slug == "widget"
 
+    def test_get_item_by_slug_returns_unique_alias_match(self, service: TaxomeshService) -> None:
+        item = service.create_item(
+            name="Widget",
+            external_id="w-001",
+            slug="widget",
+            metadata={"slug_aliases": ["old-widget"]},
+        )
+        result = service.get_item_by_slug("old-widget")
+        assert result.item_id == item.item_id
+        assert result.slug == "widget"
+
     def test_get_item_by_slug_not_found_raises(self, service: TaxomeshService) -> None:
         with pytest.raises(TaxomeshItemNotFoundError):
             service.get_item_by_slug("does-not-exist")
@@ -97,6 +108,66 @@ class TestGetItemBySlug:
     def test_get_item_by_slug_empty_slug_raises(self, service: TaxomeshService) -> None:
         with pytest.raises(TaxomeshItemNotFoundError):
             service.get_item_by_slug("")
+
+    def test_get_item_by_slug_missing_alias_raises(self, service: TaxomeshService) -> None:
+        service.create_item(
+            name="Widget",
+            external_id="w-001",
+            slug="widget",
+            metadata={"slug_aliases": ["old-widget"]},
+        )
+
+        with pytest.raises(TaxomeshItemNotFoundError):
+            service.get_item_by_slug("other-widget")
+
+    def test_get_item_by_slug_duplicate_alias_raises(self, service: TaxomeshService) -> None:
+        service.create_item(
+            name="Widget",
+            external_id="w-001",
+            slug="widget",
+            metadata={"slug_aliases": ["old-widget"]},
+        )
+        service.create_item(
+            name="Gadget",
+            external_id="g-001",
+            slug="gadget",
+            metadata={"slug_aliases": ["old-widget"]},
+        )
+
+        with pytest.raises(TaxomeshDuplicateSlugError):
+            service.get_item_by_slug("old-widget")
+
+    def test_get_item_by_slug_exact_slug_takes_precedence_over_alias(self, service: TaxomeshService) -> None:
+        exact = service.create_item(name="Exact", external_id="exact-001", slug="old-widget")
+        service.create_item(
+            name="Widget",
+            external_id="w-001",
+            slug="widget",
+            metadata={"slug_aliases": ["old-widget"]},
+        )
+
+        result = service.get_item_by_slug("old-widget")
+
+        assert result.item_id == exact.item_id
+
+    def test_get_item_by_slug_does_not_resolve_disabled_exact_item(self, service: TaxomeshService) -> None:
+        item = service.create_item(name="Widget", external_id="w-001", slug="widget")
+        service.update_item(item.item_id, enabled=False)
+
+        with pytest.raises(TaxomeshItemNotFoundError):
+            service.get_item_by_slug("widget")
+
+    def test_get_item_by_slug_does_not_resolve_disabled_alias_item(self, service: TaxomeshService) -> None:
+        item = service.create_item(
+            name="Widget",
+            external_id="w-001",
+            slug="widget",
+            metadata={"slug_aliases": ["old-widget"]},
+        )
+        service.update_item(item.item_id, enabled=False)
+
+        with pytest.raises(TaxomeshItemNotFoundError):
+            service.get_item_by_slug("old-widget")
 
 
 class TestUpdateItemWithSlug:
