@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a42] — 2026-06-05
+
+### Performance
+
+#### Repository-level filtered lookups — full-table scans eliminated (054)
+
+Four `TaxomeshService` read paths previously loaded an **entire** repository
+collection (all items, or all item→category placement links) and filtered it
+in Python. On consumer-scale datasets (~7,300 items / ~14,000 links) this
+dominated cold detail-page render time. All four now issue filtered
+repository queries — repository work scales with the number of matched
+records, not table size:
+
+| Read path | Before | After |
+|---|---|---|
+| `list_related_items_for_sources` | full `list_items()` map | bulk fetch of only the items referenced by matched relation links |
+| `list_categories_by_item` | full link scan | `list_item_parent_links(item_id=…)` |
+| `search_items(…, recursive=True)` candidates | full item map + full link scan | `list_item_parent_links(category_ids=…)` + bulk item fetch |
+| `list_items(category_id=…)` | full link scan | `list_item_parent_links(category_ids=[…])` |
+
+In `DjangoRepository` the filters are pushed into the database query
+(`item_id=` / `category_id__in=` / `item_id__in=`); the file-backed adapters
+filter in memory before sorting.
+
+**No observable behavior change**: identical results, ordering, exceptions,
+`skip_on_error` / dangling-link semantics, and enabled-state filtering at
+every call site, verified by parity tests across all four backends.
+
+### Added
+
+#### New repository port methods (custom-backend authors)
+
+`TaxomeshRepositoryBase` (structural Protocol) gained:
+
+```python
+def get_items_by_ids(
+    self, item_ids: Collection[UUID], *, enabled: bool | None = None
+) -> dict[UUID, Item]:
+    """Bulk fetch by internal ID — the internal-ID twin of 052's
+    get_items_by_external_ids. Missing IDs silently absent."""
+
+def list_item_parent_links(
+    self, *, item_id: UUID | None = None, category_ids: Collection[UUID] | None = None
+) -> list[ItemParentLink]:
+    """Existing method, now with optional keyword filters. None = unfiltered
+    (backward compatible); empty category_ids collection returns [] (NOT a
+    full listing); both filters apply AND semantics. Ordering contract
+    (category_id ASC, sort_index ASC, item_id ASC) unchanged."""
+```
+
+Custom repositories must implement `get_items_by_ids` and accept the new
+keyword-only filter parameters on `list_item_parent_links`; `mypy --strict`
+flags non-compliant repositories at the `TaxomeshService(...)` construction
+site.
+
+---
+
 ## [0.1.0a41] — 2026-03-29
 
 ### Added

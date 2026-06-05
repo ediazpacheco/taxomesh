@@ -410,15 +410,32 @@ class YAMLRepository:
         self._item_parent_links.append(link)
         self._flush()
 
-    def list_item_parent_links(self) -> list[ItemParentLink]:
-        """Return all item→category placements grouped by category then sort_index.
+    def list_item_parent_links(
+        self,
+        *,
+        item_id: UUID | None = None,
+        category_ids: Collection[UUID] | None = None,
+    ) -> list[ItemParentLink]:
+        """Return item→category placements grouped by category then sort_index, optionally filtered.
+
+        Args:
+            item_id: When given, only links whose ``item_id`` equals it.
+            category_ids: When given, only links whose ``category_id`` is a
+                member; an empty collection returns ``[]`` (not "no filter").
+                Both filters together apply AND semantics.
 
         Returns:
-            List of all ItemParentLink records ordered by
+            List of matching ItemParentLink records ordered by
             ``(category_id ASC, sort_index ASC, item_id ASC)``.
         """
+        links: list[ItemParentLink] = self._item_parent_links
+        if item_id is not None:
+            links = [lnk for lnk in links if lnk.item_id == item_id]
+        if category_ids is not None:
+            wanted = set(category_ids)
+            links = [lnk for lnk in links if lnk.category_id in wanted]
         return sorted(
-            self._item_parent_links,
+            links,
             key=lambda lnk: (str(lnk.category_id), lnk.sort_index, str(lnk.item_id)),
         )
 
@@ -587,6 +604,31 @@ class YAMLRepository:
             The matching Category, or None if no category has this external_id.
         """
         return next((cat for cat in self._categories.values() if cat.external_id == external_id), None)
+
+    def get_items_by_ids(
+        self,
+        item_ids: Collection[UUID],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[UUID, Item]:
+        """Return items whose item_id is in item_ids.
+
+        Args:
+            item_ids: A collection of internal item UUIDs to look up.
+                Pre-normalised: no duplicates expected.
+            enabled: ``True`` returns only enabled items; ``False`` only
+                disabled; ``None`` (default) returns all matching items.
+
+        Returns:
+            A dict mapping each found item_id to its Item. Missing IDs are
+            silently absent — no error is raised.
+        """
+        result: dict[UUID, Item] = {}
+        for item_id in item_ids:
+            item = self._items.get(item_id)
+            if item is not None and (enabled is None or item.enabled == enabled):
+                result[item_id] = item
+        return result
 
     def get_items_by_external_ids(
         self,

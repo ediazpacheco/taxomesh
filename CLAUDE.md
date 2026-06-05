@@ -305,6 +305,7 @@ Do NOT update README during implement — only after
 - Python 3.11 + stdlib `logging` only — no new runtime deps (051-logging-refactor)
 - Python 3.11 + Pydantic v2 (domain models), stdlib `collections.abc` (052-bulk-external-id-lookup)
 - Python 3.11 + Django ≥ 4.2 (admin framework), Pydantic v2 (domain models — unchanged), Typer ≥ 0.12 (CLI — unchanged) (053-graph-sort-modes)
+- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models), Django ≥ 4.2 (optional adapter), pyyaml ≥ 6.0 — no new dependencies (054-repo-filtered-lookups)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

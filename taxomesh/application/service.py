@@ -510,7 +510,7 @@ class TaxomeshService:
             return self._repo.list_items(enabled=enabled)
         self.get_category(category_id)
         links = sorted(
-            [lnk for lnk in self._repo.list_item_parent_links() if lnk.category_id == category_id],
+            self._repo.list_item_parent_links(category_ids=[category_id]),
             key=lambda lnk: lnk.sort_index,
         )
         items = [self.get_item(lnk.item_id) for lnk in links]
@@ -546,7 +546,7 @@ class TaxomeshService:
         """
         self.get_item(item_id)
         links = sorted(
-            [lnk for lnk in self._repo.list_item_parent_links() if lnk.item_id == item_id],
+            self._repo.list_item_parent_links(item_id=item_id),
             key=lambda lnk: lnk.sort_index,
         )
         cats = [self.get_category(lnk.category_id) for lnk in links]
@@ -1134,7 +1134,8 @@ class TaxomeshService:
         """Return related items grouped by source item ID and relation type.
 
         Resolves all outgoing relations for every item in *source_item_ids* in
-        **two repository calls** (one batch link query + one ``list_items``),
+        **two repository calls** (one batch link query + one bulk item lookup
+        restricted to the source and target IDs of the matched links),
         eliminating the N+1 pattern of calling :meth:`list_related_items` in a
         loop.  Relation type strings are normalised to lower-case before
         filtering so callers may pass ``"Covers"`` or ``"COVERS"`` freely.
@@ -1196,8 +1197,8 @@ class TaxomeshService:
         links = self._repo.list_item_relation_links_for_sources(unique_ids, relation_types=normalised_types)
         if not links:
             return {}
-        all_items = self._repo.list_items()
-        item_map: dict[UUID, Item] = {item.item_id: item for item in all_items}
+        needed_ids = {lnk.source_item_id for lnk in links} | {lnk.target_item_id for lnk in links}
+        item_map: dict[UUID, Item] = self._repo.get_items_by_ids(needed_ids, enabled=True)
         result: dict[UUID, dict[str, list[Item]]] = {}
         for link in links:
             if link.target_item_id not in item_map:
@@ -1758,13 +1759,8 @@ class TaxomeshService:
         self.get_category(category_id)
         all_category_ids = {category_id} | self._collect_descendant_ids(category_id)
 
-        item_map = {item.item_id: item for item in self._repo.list_items()}
-        seen: set[UUID] = set()
-        items: list[Item] = []
-        for lnk in self._repo.list_item_parent_links():
-            if lnk.category_id in all_category_ids and lnk.item_id not in seen:
-                seen.add(lnk.item_id)
-                item = item_map.get(lnk.item_id)
-                if item is not None:
-                    items.append(item)
-        return items
+        links = self._repo.list_item_parent_links(category_ids=all_category_ids)
+        # Ordered dedup: first link wins per item (dict preserves insertion order)
+        matched_ids = list(dict.fromkeys(lnk.item_id for lnk in links))
+        item_map = self._repo.get_items_by_ids(matched_ids, enabled=True)
+        return [item_map[item_id] for item_id in matched_ids if item_id in item_map]
