@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a43] — 2026-06-05
+
+### Documentation
+
+#### README / PyPI page rework — capability synthesis
+
+The project front page (README, rendered on PyPI) was restructured to follow
+established library conventions, with no behavior changes:
+
+- New **Highlights** list and **Capabilities** tour covering the full public API
+  surface — including bulk external-ID lookups, reorder/reparent operations,
+  incoming relation traversal, and the HTTP API building blocks, which were
+  previously undocumented on the front page
+- Verified, signature-accurate micro-examples for every capability
+- New **Architecture** diagram and **Stability and versioning** section
+- Deep implementation detail (search cache internals, admin sort-mode
+  registration, logging warning catalog) moved off the front page to the
+  linked docs
+
+### Fixed
+
+- `taxomesh.__version__` was stale (`0.1.0a40`) and out of sync with the
+  package version since 0.1.0a41; now synced (`0.1.0a43`)
+
 ## [0.1.0a42] — 2026-06-05
 
 ### Performance
