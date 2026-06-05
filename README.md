@@ -1,63 +1,31 @@
 # taxomesh
 
-Reusable taxonomy engine for products, content, media, or any domain object you
-already have.
-
-`taxomesh` lets you attach categories, tags, and item relationships to existing
-entities without baking taxonomy logic into your core models or re-implementing
-the same validation, admin, and API workflows in every project.
-
-Use it when "we just need categories" stops being simple:
-
-- categories can have more than one parent
-- the same item must appear in multiple branches
-- ordering depends on the parent category
-- your real entities already live in another system or model
-- the same taxonomy rules must work from Python, CLI, Django admin, or your own API
-
-What you get:
-
-- multi-parent category DAGs
-- per-parent sort ordering
-- free-form item tags
-- typed item-to-item relations
-- pluggable storage backends (YAML, JSON, Django)
-- one service layer with optional CLI, HTTP, and Django integrations
-- typo-tolerant fuzzy search over items and categories
+**A reusable taxonomy engine for entities you already have — multi-parent category DAGs, ordered placements, tags, typed relations, and fuzzy search, behind one typed service API with pluggable storage.**
 
 [![CI](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml/badge.svg)](https://github.com/ediazpacheco/taxomesh/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/taxomesh.svg)](https://pypi.org/project/taxomesh/)
 [![Python versions](https://img.shields.io/pypi/pyversions/taxomesh.svg)](https://pypi.org/project/taxomesh/)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Status: Pre-Alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)
+[![Typed](https://img.shields.io/badge/types-mypy--strict-blue.svg)](https://github.com/ediazpacheco/taxomesh)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ediazpacheco/taxomesh/blob/main/LICENSE)
 
-## What Taxomesh Does
+`taxomesh` adds a serious taxonomy layer on top of business objects that already
+live elsewhere — products, articles, tracks, assets. Your entities stay in your
+system and are referenced by a unique `external_id`; `taxomesh` owns the structure
+around them: category graphs, placement, ordering, tags, relations, and traversal.
+The same rules and errors apply whether you reach it from Python, the CLI, the
+Django admin, or your own HTTP API.
 
-At a high level, `taxomesh` is a reusable taxonomy layer.
+## Highlights
 
-It stores and validates the structure around your entities:
-
-- categories and subcategories
-- item placement inside one or more categories
-- tags
-- typed relations between items
-- slugs, metadata, and external IDs for integration
-
-Your actual business objects can stay where they already are. In many projects,
-`taxomesh` is the missing layer between "our app already has products/articles/assets"
-and "we need a serious taxonomy on top of them."
-
-## Typical Use Cases
-
-- Ecommerce catalogs where a product appears in several navigation paths
-- Editorial or CMS systems with sections, topics, and reusable tagging
-- Media catalogs with genre, format, collection, and related-item links
-- Internal content or knowledge systems that need taxonomy without custom admin work
-
-## Status
-
-`taxomesh` is currently **pre-alpha** (`0.1.x`).
-API and behavior can still change between releases.
+- **Multi-parent category DAGs** — categories form a directed acyclic graph, not a strict tree; cycle creation is rejected with a typed error
+- **Per-parent ordering** — every category-to-parent and item-to-category link carries its own `sort_index`; reorder and reparent operations are first-class
+- **External-ID binding** — link records 1:1 to your existing entities; point and bulk lookups; uniqueness enforced across all backends
+- **Tags and typed item relations** — free-form tags plus directed, typed item-to-item links (`covers`, `version_of`, …) with incoming/outgoing traversal
+- **Fuzzy search** — typo-tolerant, accent-insensitive, ranked search over names, slugs, and external IDs; no extra infrastructure
+- **Graph snapshots** — `get_graph()` returns an immutable, ordered view of the whole taxonomy for rendering and traversal
+- **Pluggable storage** — YAML, JSON, and Django ORM backends behind one repository interface; bring your own by implementing the same port
+- **Batteries-included integrations** — `taxomesh` CLI, Django admin (interactive graph view, drag-and-drop ordering), and framework-agnostic HTTP handlers/schemas
+- **Typed everywhere** — Pydantic v2 domain models, a complete exception hierarchy rooted at `TaxomeshError`, `mypy --strict` clean, `py.typed` shipped
 
 ## Installation
 
@@ -67,290 +35,289 @@ Requires **Python 3.11+**.
 pip install taxomesh
 ```
 
-Optional Django integration:
+With the optional Django integration (ORM backend + admin):
 
 ```bash
 pip install "taxomesh[django]"
 ```
 
-## Quick Start
-
-Example: your application already has a product, track, or article identified by
-an external ID, and you want to place it in a reusable taxonomy.
-
-With no explicit repository configured, `TaxomeshService()` auto-discovers
-`taxomesh.toml`; otherwise it falls back to the default YAML backend.
+## Quick start
 
 ```python
 from taxomesh import TaxomeshService
 
-svc = TaxomeshService()
+svc = TaxomeshService()  # auto-discovers taxomesh.toml; defaults to a YAML file backend
 
+# Build a category DAG — "Jazz" sits under both "Music" and "Genres"
 music = svc.create_category(name="Music")
+genres = svc.create_category(name="Genres")
 jazz = svc.create_category(name="Jazz")
-formats = svc.create_category(name="Formats")
-vinyl = svc.create_category(name="Vinyl")
-
 svc.add_category_parent(jazz.category_id, music.category_id, sort_index=10)
-svc.add_category_parent(vinyl.category_id, formats.category_id, sort_index=20)
+svc.add_category_parent(jazz.category_id, genres.category_id, sort_index=5)
 
-album = svc.create_item(
-    external_id="catalog:42",
-    name="Kind of Blue",
-    slug="kind-of-blue",
-)
-
+# Reference an entity that lives in your own system
+album = svc.create_item(name="Kind of Blue", external_id="catalog:42", slug="kind-of-blue")
 svc.place_item_in_category(album.item_id, jazz.category_id, sort_index=1)
-svc.place_item_in_category(album.item_id, vinyl.category_id, sort_index=3)
 
+# Tag it
 featured = svc.create_tag(name="featured")
 svc.assign_tag(featured.tag_id, album.item_id)
 
-print(album.external_id)  # "catalog:42"
-print([node.category.name for node in svc.get_graph().roots])  # ["Music", "Formats"]
+# Traverse
+print([node.category.name for node in svc.get_graph().roots])
+# ['Music', 'Genres']
+print([c.name for c in svc.list_categories_by_item(album.item_id)])
+# ['Jazz']
 ```
 
-The item still belongs to your application. `taxomesh` manages the taxonomy layer
-around it: placement, ordering, tags, relations, slugs, and traversal.
+Your entity remains the source of truth in your application. `taxomesh` manages
+the taxonomy around it and hands it back to you by `external_id`.
 
-### Resolving which categories an item belongs to
+## Capabilities
 
-`list_categories_by_item()` is the inverse of `list_items(category_id=...)` — it answers
-*"which categories does this item belong to?"*, ordered by sort position:
+### Multi-parent categories with per-parent ordering
+
+A category may have any number of parents, and its position is independent per
+parent. Cycles are rejected at write time.
 
 ```python
-cats = svc.list_categories_by_item(album.item_id)
-# [Category(name="Jazz", ...), Category(name="Vinyl", ...)]
-# — ordered by the sort_index set when the item was placed
+from taxomesh import TaxomeshCyclicDependencyError
+
+svc.add_category_parent(jazz.category_id, music.category_id, sort_index=10)
+
+try:
+    svc.add_category_parent(music.category_id, jazz.category_id)
+except TaxomeshCyclicDependencyError:
+    ...  # the DAG invariant is enforced, not assumed
 ```
 
-If the item has no placements, an empty list is returned. Only enabled categories
-are returned by default; pass `enabled=None` to include disabled ones.
-Raises `TaxomeshItemNotFoundError` when the item does not exist.
-
-### Resolving items and categories by external_id
-
-`external_id` is a **unique** identifier (`str | None`). Each record can have at most
-one `external_id`; the same value cannot be assigned to two items (or two categories)
-simultaneously. `None` means no external reference — multiple records may have `None`.
-
-Use the dedicated lookup methods for point lookups:
+Ordering is mutable after the fact:
 
 ```python
-item = svc.get_item_by_external_id("catalog:42")    # Item | None
-cat  = svc.get_category_by_external_id("solo")      # Category | None
+svc.reorder_subcategories(music.category_id, [jazz.category_id, blues.category_id])
+svc.reorder_items_in_category(jazz.category_id, [album_b.item_id, album_a.item_id])
 ```
 
-Both methods return `None` when no record matches or when `None` is passed as input.
+### Binding to your entities via `external_id`
 
-Attempting to save two records with the same non-`None` `external_id` raises
-`TaxomeshExternalIdConflictError` (a subclass of `TaxomeshValidationError`):
+`external_id` is unique per record (`str | None`); it is the bridge between a
+taxomesh record and the entity it represents in your system.
+
+```python
+item = svc.get_item_by_external_id("catalog:42")          # Item | None
+found = svc.get_items_by_external_ids(["catalog:42", "catalog:7"])
+# {'catalog:42': Item(...), 'catalog:7': Item(...)} — missing IDs are simply absent
+```
+
+Conflicts are typed errors, not silent overwrites:
 
 ```python
 from taxomesh import TaxomeshExternalIdConflictError
 
 try:
-    svc.create_item(name="B", external_id="catalog:42")
-except TaxomeshExternalIdConflictError as exc:
-    print(exc)  # external_id 'catalog:42' is already assigned to another item.
+    svc.create_item(name="Duplicate", external_id="catalog:42")
+except TaxomeshExternalIdConflictError:
+    ...
 ```
 
-## Fuzzy Search
+### Typed item-to-item relations
 
-`search_items()` and `search_categories()` find matches by name, slug, and external ID
-with typo tolerance, accent-insensitivity, and ranked results — no extra infrastructure
-required.
+Directed, typed links between items, traversable in both directions:
 
 ```python
-# Typo-tolerant: finds "Piazzolla" even with a misspelling
-results = svc.search_items("piazola")
+svc.relate_items(cover.item_id, original.item_id, relation_type="covers")
 
-# Accent-insensitive: finds "Agustín Magaldi" without the accent
-results = svc.search_items("agustin magaldi")
-
-# Scoped to a subtree
-results = svc.search_items("tango", category_id=cat.category_id, recursive=True)
-
-# Category search, children of a specific parent only
-results = svc.search_categories("orkesta tipika", parent_id=parent.category_id)
+svc.list_related_items(cover.item_id, relation_type="covers")
+# [Item(name='Original', ...)]                      — outgoing by default
+svc.list_related_items(original.item_id, direction="incoming")
+# [Item(name='Cover', ...)]                          — who points at me?
 ```
 
-Results are sorted by match quality: exact matches first, then prefix, substring, and
-fuzzy matches. Pass `fuzzy=False` to restrict to exact/prefix/substring matching only.
-Pass `enabled=False` to include only disabled items and categories, or `enabled=None` for all.
+### Fuzzy search
 
-Both methods are optimized for repeated and per-keystroke (autocomplete) usage:
-
-- **Corpus cache**: on the first unfiltered search, all candidate fields (name, slug,
-  external ID) are normalized and stored in an internal cache. Subsequent searches
-  reuse the pre-normalized corpus — no repository reload, no re-normalization.
-- **Automatic invalidation**: the cache is reset whenever an item or category write
-  operation (`create_*`, `update_*`, `delete_*`) is performed, so results are always
-  consistent with the current state of the catalog.
-- **Heap-based top-k**: when `limit` is smaller than the number of matches,
-  `heapq.nsmallest` is used instead of a full sort (O(N log k) vs O(N log N)).
-- **Category-filtered and recursive searches** bypass the corpus and load candidates
-  directly, so subtree scoping is always precise.
-
-No configuration is required — the optimization is fully automatic and applies to
-all repository backends (Django, YAML, JSON).
-
-See [Python API — Fuzzy Search](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md#fuzzy-search) for the full parameter reference.
-
-To expose search in an HTTP endpoint, use the ready-made `SearchItemsRequest` /
-`SearchCategoriesRequest` schemas with `handlers.search_items` / `handlers.search_categories`
-and the `items_to_list` / `categories_to_list` serializers from `taxomesh.contrib.api`.
-See [HTTP API integration — Search endpoints](https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md#search-endpoints) for examples.
-
-## Django admin — graph sort modes
-
-The admin graph view ships with a sort selector toolbar. Two built-in modes are provided:
-
-| Key | Label | Behaviour |
-|---|---|---|
-| `sort_index_asc` | Sort index ↑ | Ascending by `sort_index` (default) |
-| `sort_index_desc` | Sort index ↓ | Descending by `sort_index` |
-
-### Registering a custom sort mode
-
-Define a callable that receives and returns `list[GraphEntry]`, then append a
-`(key, label, callable)` 3-tuple to `sort_modes` on your admin subclass:
+Typo-tolerant, accent-insensitive, ranked (exact > prefix > substring > fuzzy).
+Optimized for per-keystroke autocomplete usage out of the box.
 
 ```python
-# myproject/admin.py
-from taxomesh.contrib.django.admin import TaxomeshCategoryAdmin
-from taxomesh.contrib.django.graph_sort import DEFAULT_SORT_MODES, SortMode
-from taxomesh.contrib.django.graph_types import GraphEntry
-
-def sort_by_relevance(entries: list[GraphEntry]) -> list[GraphEntry]:
-    scores = fetch_my_relevance_scores([e["uuid"] for e in entries])
-    return sorted(entries, key=lambda e: scores.get(e["uuid"], 0), reverse=True)
-
-class MyCategoryAdmin(TaxomeshCategoryAdmin):
-    sort_modes: list[SortMode] = [
-        *DEFAULT_SORT_MODES,
-        ("content_relevance", "Content relevance", sort_by_relevance),
-    ]
+svc.search_items("piazola")                    # finds "Piazzolla"
+svc.search_items("agustin magaldi")            # finds "Agustín Magaldi"
+svc.search_items("tango", category_id=cat.category_id, recursive=True)  # subtree-scoped
+svc.search_categories("orquesta", parent_id=parent.category_id)         # children of one parent
 ```
 
-The "Content relevance" option appears in the sort selector on the graph page.
-The sort mode is preserved when expanding lazy-loaded children via the AJAX endpoint.
+Pass `fuzzy=False` for exact/prefix/substring only. See
+[Python API — Fuzzy Search](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md#fuzzy-search)
+for the full parameter reference and caching behavior.
 
-taxomesh is fully agnostic — it calls your function with the entries already built
-for that view level and expects the sorted list in return. Any domain knowledge
-(scores, external data, request context) lives entirely in your callable.
+### Graph snapshots
 
-> **Note**: use `[*DEFAULT_SORT_MODES, ...]` rather than mutating the list in place
-> to avoid sharing state between subclasses.
+`get_graph()` returns a `TaxomeshGraph` — an ordered, read-only view of the
+entire taxonomy, ready for rendering or serialization:
 
-## Logging
+```python
+graph = svc.get_graph()           # enabled records only; pass enabled=None for all
+for root in graph.roots:          # roots and children are sorted by sort_index
+    print(root.category.name, [child.category.name for child in root.children])
+```
 
-taxomesh uses Python's standard `logging` module and follows the recommended practice
-for public libraries: a `NullHandler` is registered on the `"taxomesh"` root logger at
-import time. **No output is produced by default** — the consuming application decides
-where logs go and at what level.
+### Pluggable storage
 
-### Logger hierarchy
+All backends implement the same repository port; service behavior, validation,
+and errors are identical across them.
 
-| Logger | Source |
-|---|---|
-| `taxomesh.application.service` | Service-layer warnings (e.g. dangling relation links) |
-| `taxomesh.contrib.django.admin` | Django admin integration warnings |
+```python
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+from taxomesh.adapters.repositories.json_repository import JsonRepository
 
-### Capturing taxomesh logs
+svc = TaxomeshService(YAMLRepository("data/catalog.yaml"))   # single YAML file, atomic writes
+svc = TaxomeshService(JsonRepository("data/catalog.json"))   # single JSON file, atomic writes
+```
+
+With the `django` extra, `DjangoRepository` stores everything in the Django ORM
+(SQLite/PostgreSQL). Custom backends implement `TaxomeshRepositoryBase`. Backend
+selection can also be driven by a `taxomesh.toml` file — see
+[Configuration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/configuration.md).
+
+### Command-line interface
+
+The `taxomesh` CLI exposes the same service against the configured backend:
+
+```bash
+taxomesh category add "Music"
+taxomesh item add "Kind of Blue" --external-id catalog:42
+taxomesh item add-to-category <item-uuid> <category-uuid>
+taxomesh item relation add <source-uuid> <target-uuid> covers
+taxomesh graph        # Rich-rendered taxonomy tree
+```
+
+See the [CLI reference](https://github.com/ediazpacheco/taxomesh/blob/main/docs/cli.md).
+
+### Django admin
+
+The optional Django integration ships a full admin: category/item/tag management,
+an interactive graph view with drag-and-drop reordering and reparenting, lazy
+child loading, pluggable sort modes, autocomplete foreign keys, and a JSON editor
+for metadata fields.
+
+See [Django integration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/django-integration.md).
+
+### HTTP API building blocks
+
+`taxomesh.contrib.api` provides framework-agnostic request schemas (Pydantic),
+handler functions, serializers, and error-to-status mapping, so the taxonomy can
+be exposed from FastAPI, Django views, or any other stack without re-implementing
+validation:
+
+```python
+from taxomesh.contrib.api import handlers, schemas, serializers
+
+body = schemas.CreateCategoryRequest(name="Music")
+category = handlers.create_category(svc, body)
+payload = serializers.categories_to_list([category])
+```
+
+See [HTTP API integration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md).
+
+### Typed errors
+
+Every failure mode is a typed exception rooted at `TaxomeshError`, importable
+from the package root:
+
+```python
+from taxomesh import (
+    TaxomeshError,                    # root
+    TaxomeshNotFoundError,            #   ├─ Category / Item / Tag NotFound variants
+    TaxomeshValidationError,          #   ├─ DuplicateSlug, ExternalIdConflict, CyclicDependency
+    TaxomeshRelationError,            #   ├─ invalid item relations
+    TaxomeshRepositoryError,          #   ├─ storage-level failures
+    TaxomeshConfigError,              #   └─ configuration problems
+)
+```
+
+### Logging
+
+Standard library `logging` under the `"taxomesh"` logger with a `NullHandler`
+registered at import — silent by default, fully controllable by the host
+application:
 
 ```python
 import logging
-
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-logging.getLogger("taxomesh").addHandler(handler)
 logging.getLogger("taxomesh").setLevel(logging.WARNING)
+logging.getLogger("taxomesh").addHandler(logging.StreamHandler())
 ```
 
-Timestamps are not embedded in message text — use `%(asctime)s` in your formatter.
+## Core concepts
 
-### Notable warnings
+| Concept | Description |
+|---|---|
+| **Item** | A taxonomy entity, usually bound to a business object via unique `external_id` |
+| **Category** | A taxonomy node — `name`, unique `slug`, `description`, `metadata`, `external_id`, `enabled` |
+| **Tag** | A free-form label assignable to items |
+| **CategoryParentLink** | A category-to-parent edge carrying `sort_index` |
+| **ItemParentLink** | An item-to-category placement carrying `sort_index` |
+| **ItemRelationLink** | A directed, typed item-to-item edge (e.g. `covers`, `version_of`) |
+| **TaxomeshGraph** | An ordered, read-only snapshot returned by `get_graph()` |
+| **Repository** | The storage backend behind `TaxomeshService` (YAML, JSON, Django, or custom) |
 
-**`taxomesh.application.service`** — emitted by `list_related_items_for_sources()` when
-`skip_on_error=True` and a relation link points to a target item that no longer exists:
+## Architecture
 
 ```
-list_related_items_for_sources: dangling relation skipped — source: 🏷️ "Track A" (id: fea7bd50-...), target: <orphaned item 6a273a4c-...>, relation_type: 'music_by'
+your application ──┐
+       CLI ────────┤
+  Django admin ────┼──▶  TaxomeshService  ──▶  domain rules  ──▶  Repository port
+  HTTP handlers ───┘     (single entry      (DAG constraints,     ├─ YAMLRepository
+                          point, typed)      typed errors)        ├─ JsonRepository
+                                                                  ├─ DjangoRepository
+                                                                  └─ your backend
 ```
 
-**`taxomesh.contrib.django.admin`** — emitted when a required Django settings key is
-missing or URL resolution for a linked model fails.
+- **Service layer** — `TaxomeshService` is the only entry point application code needs
+- **Domain rules** — validation, DAG constraints, and the typed error hierarchy live in one place
+- **Repositories** — storage varies behind a stable port; behavior does not
+- **Adapters** — CLI, Django admin/ORM, and HTTP helpers are optional and additive
 
-### Suppressing taxomesh logs
+## Stability and versioning
 
-```python
-logging.getLogger("taxomesh").setLevel(logging.ERROR)   # suppress WARNING; keep ERROR+
-logging.getLogger("taxomesh").disabled = True            # suppress everything
-```
+`taxomesh` follows [Semantic Versioning](https://semver.org/). As of **1.0.0**:
 
-## Why This Exists
-
-Taxonomy work is usually underestimated. A simple category table becomes more complex
-once you need:
-
-- multiple parents instead of a strict tree
-- branch-specific ordering
-- items linked to existing models by external ID
-- reusable validation and errors across app code, CLI, admin, and APIs
-- storage that fits both local development and production integration
-
-`taxomesh` packages those concerns into a single component so they do not have to be
-re-solved in each codebase.
-
-## Core Concepts
-
-- **Item**: an entity in your taxonomy, usually linked to a business object through `external_id`
-- **Category**: a taxonomy node with optional `name`, `description`, `metadata`, `external_id`, `enabled`, and unique `slug`
-- **Tag**: a free-form label assigned to items
-- **ItemRelationLink**: a directed, typed relation between two items such as `covers`, `version_of`, or `performed_by`
-- **CategoryParentLink**: the link from a category to one of its parents, including `sort_index`
-- **ItemParentLink**: the link from an item to a category, including `sort_index`
-- **TaxomeshGraph**: a read snapshot returned by `get_graph()` for traversal
-- **Repository**: the storage backend used by `TaxomeshService`
+- The public API — everything importable from `taxomesh`, `taxomesh.contrib.api`,
+  and `taxomesh.contrib.django`, plus the repository port — is stable; breaking
+  changes only occur in major releases.
+- Deprecations are announced at least one minor release before removal, with
+  runtime `DeprecationWarning`s.
+- Supported Python versions: 3.11, 3.12, 3.13. Django integration supports
+  Django ≥ 4.2.
+- Every release passes `ruff`, `mypy --strict`, and the full test suite with
+  ≥ 80% coverage.
 
 ## Documentation
 
 | Topic | Description |
 |-------|-------------|
-| [What Taxomesh Solves](https://github.com/ediazpacheco/taxomesh/blob/main/docs/what-is-taxomesh.md) | Product overview, common use cases, and why taxonomy gets complex |
-| [Python API](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md) | Categories, Items, Tags, Graph, slug and external-ID lookups |
-| [Django integration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/django-integration.md) | Django ORM + admin setup, model bridging |
-| [HTTP API integration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md) | Reuse request models, handlers, and error mapping in your existing web app |
-| [Repositories](https://github.com/ediazpacheco/taxomesh/blob/main/docs/repositories.md) | YAML, JSON, and Django storage backends; custom backends |
+| [What Taxomesh Solves](https://github.com/ediazpacheco/taxomesh/blob/main/docs/what-is-taxomesh.md) | Product overview, use cases, and why taxonomy gets complex |
+| [Python API](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md) | Categories, items, tags, relations, graph, lookups, search |
+| [Repositories](https://github.com/ediazpacheco/taxomesh/blob/main/docs/repositories.md) | YAML, JSON, and Django backends; writing custom backends |
 | [Configuration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/configuration.md) | `taxomesh.toml` reference |
-| [CLI reference](https://github.com/ediazpacheco/taxomesh/blob/main/docs/cli.md) | Command-line interface for categories, items, tags, and graph |
-| [Changelog](https://github.com/ediazpacheco/taxomesh/blob/main/CHANGELOG.md) | Release history and new API methods |
-
-## Design
-
-`taxomesh` keeps a stable application-facing shape while letting storage and integration
-details vary:
-
-- **Service layer**: `TaxomeshService` is the main entry point for application code
-- **Domain rules**: taxonomy validation, including DAG constraints and typed errors
-- **Repositories**: YAML, JSON, Django, or a custom backend behind the same service API
-- **Optional integrations**: CLI, Django admin + ORM, and framework-agnostic HTTP helpers
+| [CLI reference](https://github.com/ediazpacheco/taxomesh/blob/main/docs/cli.md) | Command-line interface |
+| [Django integration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/django-integration.md) | ORM backend, admin setup, model bridging |
+| [HTTP API integration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md) | Request schemas, handlers, serializers, error mapping |
+| [Changelog](https://github.com/ediazpacheco/taxomesh/blob/main/CHANGELOG.md) | Release history |
 
 ## Development
 
 ```bash
-uv sync --dev
+uv sync --extra dev --extra django
 uv run pytest
 uv run ruff check .
-uv run mypy .
+uv run mypy --strict .
 ```
 
 ## Contributing
 
-Contributions are welcome.
-This project follows a spec-first workflow. Please align implementation PRs with the `specs/` directory.
+Contributions are welcome. The project follows a spec-first workflow — please
+align implementation PRs with the `specs/` directory.
 
 ## License
 
-MIT.
+[MIT](https://github.com/ediazpacheco/taxomesh/blob/main/LICENSE)
