@@ -151,9 +151,28 @@ class InMemoryRepository:
                 return
         self._item_parent_links.append(link)
 
-    def list_item_parent_links(self) -> list[ItemParentLink]:
-        """Return all item→category placement records."""
-        return list(self._item_parent_links)
+    def list_item_parent_links(
+        self,
+        *,
+        item_id: UUID | None = None,
+        category_ids: Collection[UUID] | None = None,
+    ) -> list[ItemParentLink]:
+        """Return item→category placements in contract order, optionally filtered.
+
+        Ordering follows the port contract: ``(category_id ASC, sort_index ASC,
+        item_id ASC)``. An empty ``category_ids`` collection returns ``[]``;
+        both filters together apply AND semantics.
+        """
+        links: list[ItemParentLink] = self._item_parent_links
+        if item_id is not None:
+            links = [lnk for lnk in links if lnk.item_id == item_id]
+        if category_ids is not None:
+            wanted = set(category_ids)
+            links = [lnk for lnk in links if lnk.category_id in wanted]
+        return sorted(
+            links,
+            key=lambda lnk: (str(lnk.category_id), lnk.sort_index, str(lnk.item_id)),
+        )
 
     def delete_category_parent_link(self, category_id: UUID, parent_category_id: UUID) -> bool:
         """Delete a category→parent relationship; return True if found."""
@@ -182,6 +201,20 @@ class InMemoryRepository:
     def get_category_by_external_id(self, external_id: str) -> Category | None:
         """Return the category with the given external_id, or None."""
         return next((cat for cat in self._categories.values() if cat.external_id == external_id), None)
+
+    def get_items_by_ids(
+        self,
+        item_ids: Collection[UUID],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[UUID, Item]:
+        """Return items whose item_id is in item_ids; missing IDs silently absent."""
+        result: dict[UUID, Item] = {}
+        for item_id in item_ids:
+            item = self._items.get(item_id)
+            if item is not None and (enabled is None or item.enabled == enabled):
+                result[item_id] = item
+        return result
 
     def get_items_by_external_ids(
         self,

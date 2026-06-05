@@ -125,3 +125,23 @@ learnable and lets tests be adapted from 052's suite.
 under a "Performance" heading referencing the four read paths and the two
 port additions. Follows the repo's established alpha-increment pattern
 (see 053's `0.1.0a41` bump commit).
+
+## R8 — Adjacent contract-alignment fixes surfaced during implementation
+
+**Decision**: Two pre-existing deviations from the port contract, surfaced by
+the new contract tests, were fixed in place rather than worked around:
+
+1. `InMemoryRepository.list_item_parent_links` (tests/service/conftest.py)
+   returned **insertion order**, violating the documented
+   ``(category_id ASC, sort_index ASC, item_id ASC)`` contract. It now sorts
+   like the production adapters. Masked historically because every service
+   call site re-sorts by ``sort_index``; the full suite confirmed no test
+   depended on insertion order.
+2. `DjangoRepository.list_item_parent_links` leaked raw ``DatabaseError`` on
+   storage failure instead of wrapping in ``TaxomeshRepositoryError``. It now
+   wraps, matching every other method in that adapter, the port docstring,
+   the spec's "Storage failure" edge case, and Constitution V.
+
+**Rationale**: Both are exactly the "adjacent, clearly broken, trivially
+fixable" category; leaving them would have forced the new contract tests to
+encode per-backend exceptions to the documented contract.

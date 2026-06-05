@@ -82,7 +82,7 @@ compiles and behaves identically.
 | `JsonRepository` | dict-lookup loop over `self._items` | in-memory comprehension before existing sort |
 | `YAMLRepository` | dict-lookup loop over `self._items` | in-memory comprehension before existing sort |
 | `DjangoRepository` | `filter(item_id__in=…)` (+ `enabled=…` when not `None`) — **DB-side** | `filter(item_id=…)` / `filter(category_id__in=…)` chained onto existing `order_by` — **DB-side** |
-| `InMemoryRepository` (tests/service/conftest.py) | dict/list lookup | in-memory comprehension before existing sort |
+| `InMemoryRepository` (tests/service/conftest.py) | dict/list lookup | in-memory comprehension + contract sort (the fixture previously returned insertion order, violating the documented ordering contract — aligned as part of this feature; see research.md R8) |
 
 ## Service consumer contract (call-site rewiring)
 

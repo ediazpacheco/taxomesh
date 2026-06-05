@@ -207,7 +207,11 @@ code changes land.
   filtering MUST be unchanged.
 - **FR-008**: No observable behavior change at any of the four call sites:
   identical results, identical ordering, identical exceptions and messages,
-  identical logging semantics, for all repository backends.
+  identical logging semantics, for all repository backends. "Identical
+  exceptions" refers to the domain exceptions raised at the service call
+  sites; on storage-failure paths the new and extended repository methods
+  follow the "Storage failure" edge case (`TaxomeshRepositoryError`), which
+  takes precedence where an adapter previously leaked a raw backend error.
 - **FR-009**: The package version MUST be bumped (from `0.1.0a41`) and the
   CHANGELOG MUST gain an entry describing the change, so the consumer can
   update its dependency pin.

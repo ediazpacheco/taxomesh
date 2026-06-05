@@ -41,8 +41,13 @@ construction site.
 ## Verifying locally
 
 ```bash
-pytest tests/service/test_repo_filtered_lookups.py   # port contract, 4 backends
-pytest tests/service/test_service_no_full_scan.py    # spy-repo: no full scans in the 4 paths
+# Contract tests, 4 backends. test_parity_fixture.py must be included: running a
+# django-param file standalone hits a pre-existing pytest-django quirk where
+# getfixturevalue("db") alone does not create the test database — a
+# @pytest.mark.django_db test (the parity smoke) must run first.
+pytest tests/service/test_parity_fixture.py tests/service/test_repo_filtered_lookups.py
+
+pytest tests/service/test_service_no_full_scan.py    # spy-repo: no full scans in the 4 paths (InMemory-backed, standalone-safe)
 pytest                                                # full parity suite
 ruff check . && ruff format --check . && mypy --strict .
 pytest --cov=taxomesh --cov-fail-under=80

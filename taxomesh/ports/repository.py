@@ -228,19 +228,38 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
-    def list_item_parent_links(self) -> list[ItemParentLink]:
-        """Return all item→category placements grouped by category then sort_index.
+    def list_item_parent_links(
+        self,
+        *,
+        item_id: UUID | None = None,
+        category_ids: Collection[UUID] | None = None,
+    ) -> list[ItemParentLink]:
+        """Return item→category placements grouped by category then sort_index, optionally filtered.
 
         Results are ordered by ``(category_id ASC, sort_index ASC, item_id
         ASC)``.  Links are grouped so that all items in the same category appear
         together, ordered by their ``sort_index`` within that group.  When two
         links share the same category and ``sort_index``, they are further
-        ordered by ``item_id`` for deterministic output.
+        ordered by ``item_id`` for deterministic output.  The ordering contract
+        holds under every filter combination.
+
+        Args:
+            item_id: When given, only links whose ``item_id`` equals it are
+                returned. ``None`` (default) applies no item filter.
+            category_ids: When given, only links whose ``category_id`` is a
+                member are returned. An EMPTY collection returns ``[]`` — it
+                is NOT treated as "no filter". ``None`` (default) applies no
+                category filter. When both filters are given, AND semantics
+                apply.
 
         Returns:
-            List of all ItemParentLink records ordered by
+            List of matching ItemParentLink records ordered by
             ``(category_id ASC, sort_index ASC, item_id ASC)``; empty list if
-            none exist.
+            none match. With both filters ``None`` the result is identical to
+            the previous unfiltered behavior.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
         """
         ...
 
@@ -273,6 +292,35 @@ class TaxomeshRepositoryBase(Protocol):
         Raises:
             TaxomeshRepositoryError: On storage failure.
         """
+
+    def get_items_by_ids(
+        self,
+        item_ids: Collection[UUID],
+        *,
+        enabled: bool | None = None,
+    ) -> "dict[UUID, Item]":
+        """Return items whose item_id matches any value in item_ids.
+
+        The input is pre-normalised: duplicates have already been removed by
+        the caller (e.g. ``TaxomeshService``). The adapter MUST NOT perform
+        any further normalisation.
+
+        Args:
+            item_ids: A collection of internal item UUIDs to look up.
+                Guaranteed to contain no duplicates. An empty collection
+                returns an empty dict.
+            enabled: ``True`` returns only enabled items; ``False`` only
+                disabled; ``None`` (default) returns all matching items
+                regardless of enabled state.
+
+        Returns:
+            A dict mapping each found item_id to its Item. Missing IDs are
+            silently absent from the result — no error is raised.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
+        """
+        ...
 
     def get_items_by_external_ids(
         self,
