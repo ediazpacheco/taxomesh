@@ -1110,6 +1110,10 @@ class TaxomeshService:
     ) -> list[Item]:
         """Return the items reachable via relations from/to the given item.
 
+        Related items are resolved through one bulk repository lookup (not one
+        query per link), regardless of enabled state — matching the per-item
+        :meth:`get_item` semantics this method previously relied on.
+
         Args:
             item_id: The UUID of the item to query.
             relation_type: Optional filter; case-insensitive.
@@ -1117,12 +1121,27 @@ class TaxomeshService:
                 returns sources.
 
         Returns:
-            List of related Item objects; empty list if none match.
+            List of related Item objects in link order; empty list if none match.
+
+        Raises:
+            TaxomeshItemNotFoundError: If a related item referenced by a link
+                does not exist in the repository.
         """
         links = self.list_item_relations(item_id, relation_type=relation_type, direction=direction)
         if direction == "outgoing":
-            return [self.get_item(lnk.target_item_id) for lnk in links]
-        return [self.get_item(lnk.source_item_id) for lnk in links]
+            ordered_ids = [lnk.target_item_id for lnk in links]
+        else:
+            ordered_ids = [lnk.source_item_id for lnk in links]
+        if not ordered_ids:
+            return []
+        item_map = self._repo.get_items_by_ids(set(ordered_ids), enabled=None)
+        result: list[Item] = []
+        for needed_id in ordered_ids:
+            found = item_map.get(needed_id)
+            if found is None:
+                raise TaxomeshItemNotFoundError(f"Item not found: {needed_id}")
+            result.append(found)
+        return result
 
     def list_related_items_for_sources(
         self,
@@ -1143,6 +1162,13 @@ class TaxomeshService:
         Source items that have no outgoing links (or no links matching the
         filter) are **absent** from the returned dict — they are not represented
         as empty inner dicts.
+
+        Results are served from the service read cache for ``DEFAULT_CACHE_TTL``
+        seconds: calls that differ only in argument ordering, duplicates, or
+        relation-type casing/whitespace share one cache entry, and any write
+        operation (or :func:`taxomesh.utils.memoize.clear_all_caches`)
+        invalidates it. Cached results are shared object references — callers
+        must not mutate the returned structures.
 
         Args:
             source_item_ids: Collection of source UUIDs.  Duplicates are
@@ -1190,11 +1216,24 @@ class TaxomeshService:
             # Note: song_a's "released_by" link is excluded by the filter.
             # Note: song_b is present even though it only has one matching link.
         """
-        unique_ids = set(source_item_ids)
+        unique_ids = frozenset(source_item_ids)
         if not unique_ids:
             return {}
-        normalised_types = [t.strip().lower() for t in relation_types] if relation_types else None
-        links = self._repo.list_item_relation_links_for_sources(unique_ids, relation_types=normalised_types)
+        normalised_types = tuple(sorted({t.strip().lower() for t in relation_types})) if relation_types else None
+        return self._fetch_related_items_for_sources(
+            unique_ids, relation_types=normalised_types, skip_on_error=skip_on_error
+        )
+
+    @memoize(DEFAULT_CACHE_TTL)
+    def _fetch_related_items_for_sources(
+        self,
+        source_item_ids: frozenset[UUID],
+        *,
+        relation_types: tuple[str, ...] | None,
+        skip_on_error: bool,
+    ) -> dict[UUID, dict[str, list[Item]]]:
+        """Memoized batch lookup. Hashable, pre-normalised args → cache key."""
+        links = self._repo.list_item_relation_links_for_sources(source_item_ids, relation_types=relation_types)
         if not links:
             return {}
         needed_ids = {lnk.source_item_id for lnk in links} | {lnk.target_item_id for lnk in links}
