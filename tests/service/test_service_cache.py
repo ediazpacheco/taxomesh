@@ -1,7 +1,9 @@
 """Tests for service-level memoization caching."""
 
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+import pytest
 
 from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.models import Category, Item, Tag
@@ -278,3 +280,267 @@ class TestItemRelationCaching:
         svc.list_related_items(src_id)
         svc.list_related_items(src_id)
         repo.list_item_relation_links.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# 055-memoize-batch-related — list_related_items_for_sources caching
+# ---------------------------------------------------------------------------
+
+
+def _repo_with_batch_relation(src_id: UUID, tgt_id: UUID) -> MagicMock:
+    """Mock repo with one outgoing relation src → tgt for the batch lookup."""
+    from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
+
+    repo = _mock_repo()
+    link = ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers")
+    repo.list_item_relation_links_for_sources.return_value = [link]
+    repo.get_items_by_ids.return_value = {
+        src_id: Item(external_id="src", item_id=src_id),
+        tgt_id: Item(external_id="tgt", item_id=tgt_id),
+    }
+    return repo
+
+
+class TestBatchRelatedItemsCaching:
+    def setup_method(self) -> None:
+        clear_all_caches()
+
+    def test_identical_calls_hit_repo_once(self) -> None:
+        """US1 — two identical batched calls query the repository once."""
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        svc = _make_service(repo)
+
+        first = svc.list_related_items_for_sources([src_id])
+        second = svc.list_related_items_for_sources([src_id])
+        repo.list_item_relation_links_for_sources.assert_called_once()
+        assert second == first
+
+    def test_cache_expires_after_ttl(self) -> None:
+        """US1 — cached result is re-fetched once the TTL window has elapsed."""
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        svc = _make_service(repo)
+
+        with patch("taxomesh.utils.memoize.time") as mock_time:
+            mock_time.monotonic.return_value = 0.0
+            svc.list_related_items_for_sources([src_id])
+            assert repo.list_item_relation_links_for_sources.call_count == 1
+
+            mock_time.monotonic.return_value = 6.0  # past DEFAULT_CACHE_TTL (5 s)
+            svc.list_related_items_for_sources([src_id])
+            assert repo.list_item_relation_links_for_sources.call_count == 2
+
+    def test_different_source_ids_are_independent_entries(self) -> None:
+        """US1 — a different source set queries the repository again."""
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([src_id])
+        svc.list_related_items_for_sources([uuid4()])
+        assert repo.list_item_relation_links_for_sources.call_count == 2
+
+    def test_different_relation_type_filters_are_independent_entries(self) -> None:
+        """US1 — a different relation-type filter queries the repository again."""
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([src_id], relation_types=["covers"])
+        svc.list_related_items_for_sources([src_id], relation_types=["performs"])
+        assert repo.list_item_relation_links_for_sources.call_count == 2
+
+    def test_empty_source_ids_returns_empty_without_repo_call(self) -> None:
+        """US1 — empty input short-circuits before the cache and the repository."""
+        repo = _mock_repo()
+        svc = _make_service(repo)
+
+        assert svc.list_related_items_for_sources([]) == {}
+        repo.list_item_relation_links_for_sources.assert_not_called()
+
+    def test_relation_type_variants_share_cache_entry(self) -> None:
+        """US2 — reordering, duplicates, casing and whitespace share one entry."""
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([src_id], relation_types=["a", "b"])
+        svc.list_related_items_for_sources([src_id], relation_types=["b", "a"])
+        svc.list_related_items_for_sources([src_id], relation_types=["B", " a ", "b"])
+        repo.list_item_relation_links_for_sources.assert_called_once()
+
+    def test_source_id_variants_share_cache_entry(self) -> None:
+        """US2 — reordered and duplicated source IDs share one entry."""
+        src_a, src_b, tgt_id = uuid4(), uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_a, tgt_id)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([src_a, src_b])
+        svc.list_related_items_for_sources([src_b, src_a, src_a])
+        repo.list_item_relation_links_for_sources.assert_called_once()
+
+    def test_none_and_empty_relation_types_share_cache_entry(self) -> None:
+        """US2 — "no filter" as None and as an empty collection share one entry."""
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([src_id], relation_types=None)
+        svc.list_related_items_for_sources([src_id], relation_types=[])
+        repo.list_item_relation_links_for_sources.assert_called_once()
+
+    def test_skip_on_error_values_are_distinct_entries(self) -> None:
+        """US2/FR-003 — skip_on_error changes behaviour, so it splits the key."""
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([src_id], skip_on_error=True)
+        svc.list_related_items_for_sources([src_id], skip_on_error=False)
+        assert repo.list_item_relation_links_for_sources.call_count == 2
+
+    def test_clear_all_caches_forces_refetch(self) -> None:
+        """US3 — explicit cache clearing re-queries the repository."""
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([src_id])
+        clear_all_caches()
+        svc.list_related_items_for_sources([src_id])
+        assert repo.list_item_relation_links_for_sources.call_count == 2
+
+    def test_write_invalidates_batch_cache(self) -> None:
+        """US3 — a write between identical calls invalidates the cached entry."""
+        from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
+
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(src_id, tgt_id)
+        repo.get_item.return_value = Item(external_id="src", item_id=src_id)
+        svc = _make_service(repo)
+
+        first = svc.list_related_items_for_sources([src_id])
+        assert set(first[src_id]) == {"covers"}
+
+        new_tgt = uuid4()
+        repo.list_item_relation_links_for_sources.return_value = [
+            ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers"),
+            ItemRelationLink(source_item_id=src_id, target_item_id=new_tgt, relation_type="performs"),
+        ]
+        repo.get_items_by_ids.return_value = {
+            src_id: Item(external_id="src", item_id=src_id),
+            tgt_id: Item(external_id="tgt", item_id=tgt_id),
+            new_tgt: Item(external_id="new-tgt", item_id=new_tgt),
+        }
+        svc.relate_items(src_id, new_tgt, "performs")
+
+        second = svc.list_related_items_for_sources([src_id])
+        assert repo.list_item_relation_links_for_sources.call_count == 2
+        assert set(second[src_id]) == {"covers", "performs"}
+
+    def test_raised_error_is_not_cached(self) -> None:
+        """US3 — a TaxomeshItemNotFoundError leaves no cache entry behind."""
+        from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
+        from taxomesh.exceptions import TaxomeshItemNotFoundError  # noqa: PLC0415
+
+        src_id, tgt_id = uuid4(), uuid4()
+        repo = _mock_repo()
+        repo.list_item_relation_links_for_sources.return_value = [
+            ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers")
+        ]
+        repo.get_items_by_ids.return_value = {src_id: Item(external_id="src", item_id=src_id)}  # tgt dangling
+        svc = _make_service(repo)
+
+        with pytest.raises(TaxomeshItemNotFoundError):
+            svc.list_related_items_for_sources([src_id], skip_on_error=False)
+        with pytest.raises(TaxomeshItemNotFoundError):
+            svc.list_related_items_for_sources([src_id], skip_on_error=False)
+        assert repo.list_item_relation_links_for_sources.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# 055-memoize-batch-related (FR-009) — bulk target resolution in
+# list_related_items: one get_items_by_ids call instead of N get_item calls
+# ---------------------------------------------------------------------------
+
+
+class TestListRelatedItemsBulkResolution:
+    def setup_method(self) -> None:
+        clear_all_caches()
+
+    def _repo_with_links(self, src_id: UUID, tgt_ids: list[UUID]) -> MagicMock:
+        from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
+
+        repo = _mock_repo()
+        repo.list_item_relation_links.return_value = [
+            ItemRelationLink(source_item_id=src_id, target_item_id=tgt, relation_type="covers") for tgt in tgt_ids
+        ]
+        repo.get_items_by_ids.return_value = {
+            tgt: Item(external_id=f"t{i}", item_id=tgt) for i, tgt in enumerate(tgt_ids)
+        }
+        return repo
+
+    def test_cold_cache_uses_single_bulk_lookup(self) -> None:
+        """FR-009 — targets resolve via one get_items_by_ids call, never get_item."""
+        src_id = uuid4()
+        tgt_ids = [uuid4(), uuid4(), uuid4()]
+        repo = self._repo_with_links(src_id, tgt_ids)
+        svc = _make_service(repo)
+
+        svc.list_related_items(src_id)
+        repo.get_items_by_ids.assert_called_once_with(set(tgt_ids), enabled=None)
+        repo.get_item.assert_not_called()
+
+    def test_link_order_is_preserved(self) -> None:
+        """FR-009 — result order follows link order, not the bulk dict's order."""
+        src_id = uuid4()
+        tgt_ids = [uuid4(), uuid4(), uuid4()]
+        repo = self._repo_with_links(src_id, tgt_ids)
+        svc = _make_service(repo)
+
+        result = svc.list_related_items(src_id)
+        assert [item.item_id for item in result] == tgt_ids
+
+    def test_missing_target_raises_item_not_found(self) -> None:
+        """FR-009 — a dangling target raises with the same message as get_item."""
+        from taxomesh.exceptions import TaxomeshItemNotFoundError  # noqa: PLC0415
+
+        src_id = uuid4()
+        tgt_ids = [uuid4(), uuid4()]
+        repo = self._repo_with_links(src_id, tgt_ids)
+        missing = tgt_ids[1]
+        del repo.get_items_by_ids.return_value[missing]
+        svc = _make_service(repo)
+
+        with pytest.raises(TaxomeshItemNotFoundError, match=f"Item not found: {missing}"):
+            svc.list_related_items(src_id)
+
+    def test_incoming_direction_resolves_sources_in_bulk(self) -> None:
+        """FR-009 — direction="incoming" bulk-resolves source items the same way."""
+        from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
+
+        tgt_id = uuid4()
+        src_ids = [uuid4(), uuid4()]
+        repo = _mock_repo()
+        repo.list_item_relation_links.return_value = [
+            ItemRelationLink(source_item_id=src, target_item_id=tgt_id, relation_type="covers") for src in src_ids
+        ]
+        repo.get_items_by_ids.return_value = {
+            src: Item(external_id=f"s{i}", item_id=src) for i, src in enumerate(src_ids)
+        }
+        svc = _make_service(repo)
+
+        result = svc.list_related_items(tgt_id, direction="incoming")
+        repo.get_items_by_ids.assert_called_once_with(set(src_ids), enabled=None)
+        repo.get_item.assert_not_called()
+        assert [item.item_id for item in result] == src_ids
+
+    def test_no_links_returns_empty_without_bulk_lookup(self) -> None:
+        """FR-009 — zero links short-circuits before the bulk item query."""
+        repo = _mock_repo()
+        repo.list_item_relation_links.return_value = []
+        svc = _make_service(repo)
+
+        assert svc.list_related_items(uuid4()) == []
+        repo.get_items_by_ids.assert_not_called()

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a44] — 2026-06-11
+
+### Performance
+
+#### `list_related_items_for_sources` joins the read cache (055)
+
+The batched related-items lookup was the only `TaxomeshService` read method
+without `@memoize(DEFAULT_CACHE_TTL)` caching, creating a perverse trade-off:
+the per-relation-type `list_related_items` loop was N+1 cold but free warm,
+while the batched call was 2 repository queries cold **and** on every
+subsequent call. The batched call is now at most 2 repository queries cold
+and **0 warm** — consumers can migrate per-type loops (2–5 queries per detail
+page) to one batched call with no warm-cache penalty.
+
+- Cache keys are normalised: `source_item_ids` ordering/duplicates and
+  `relation_types` ordering/duplicates/casing/whitespace do not fragment the
+  cache; `relation_types=None` and `[]` ("no filter") share one entry
+- `skip_on_error` is part of the cache key — it changes dangling-link
+  behaviour, so `True`/`False` results are never shared
+- Raised `TaxomeshItemNotFoundError` (with `skip_on_error=False`) is never
+  cached; the next call re-queries
+- Invalidated by `clear_all_caches()` and every write operation, like all
+  sibling read methods
+
+#### Bulk cold-path target resolution in `list_related_items` (055)
+
+On a cold cache, `list_related_items` resolved each related item with one
+`get_item` query per relation link. It now issues a single
+`get_items_by_ids` bulk query.
+
+**No observable behavior change** in either method: identical signatures,
+results, ordering, enabled-state semantics (`get_items_by_ids(..., enabled=None)`
+mirrors `get_item`'s any-state contract), exceptions, and error messages.
+
 ## [0.1.0a43] — 2026-06-05
 
 ### Documentation
