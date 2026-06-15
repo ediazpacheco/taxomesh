@@ -913,7 +913,7 @@ class DjangoRepository:
         item_id: UUID,
         *,
         relation_type: str | None = None,
-        direction: Literal["outgoing", "incoming"] = "outgoing",
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[ItemRelationLink]:
         """Return item relation links for the given item.
 
@@ -923,20 +923,26 @@ class DjangoRepository:
                 exact (already-normalised) type are returned.
             direction: ``"outgoing"`` returns links where ``source_item_id``
                 equals ``item_id``; ``"incoming"`` returns links where
-                ``target_item_id`` equals ``item_id``.
+                ``target_item_id`` equals ``item_id``; ``"both"`` returns links
+                where ``item_id`` is either the source or the target (resolved
+                DB-side via an ``OR`` filter; each row at most once).
 
         Returns:
             List of matching ItemRelationLink objects; empty list if none match.
         """
         from django.db import DatabaseError  # noqa: PLC0415
+        from django.db.models import Q  # noqa: PLC0415
 
         from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
 
         try:
+            base = self._ItemRelationLinkModel.objects.using(self._using)
             if direction == "outgoing":
-                qs = self._ItemRelationLinkModel.objects.using(self._using).filter(source_item_id=item_id)
-            else:
-                qs = self._ItemRelationLinkModel.objects.using(self._using).filter(target_item_id=item_id)
+                qs = base.filter(source_item_id=item_id)
+            elif direction == "incoming":
+                qs = base.filter(target_item_id=item_id)
+            else:  # "both"
+                qs = base.filter(Q(source_item_id=item_id) | Q(target_item_id=item_id))
             if relation_type is not None:
                 qs = qs.filter(relation_type=relation_type)
             qs = qs.order_by("sort_index", "source_item_id", "target_item_id")

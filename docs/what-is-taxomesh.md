@@ -22,7 +22,8 @@ It gives you:
 - categories with more than one parent
 - items placed in multiple branches
 - per-parent ordering
-- tags and typed item-to-item relations
+- tags and typed item-to-item relations (relation type names are defined by
+  your application; taxomesh treats them as opaque strings)
 - slugs, metadata, and external IDs
 - one consistent service layer with optional CLI, Django, and HTTP integrations
 

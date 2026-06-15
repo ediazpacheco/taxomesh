@@ -1082,7 +1082,7 @@ class TaxomeshService:
         item_id: UUID,
         *,
         relation_type: str | None = None,
-        direction: Literal["outgoing", "incoming"] = "outgoing",
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[ItemRelationLink]:
         """Return relation links for the given item.
 
@@ -1092,7 +1092,14 @@ class TaxomeshService:
                 only links whose normalised type matches are returned.
             direction: ``"outgoing"`` (default) returns links where this item
                 is the source; ``"incoming"`` returns links where it is the
-                target.
+                target; ``"both"`` returns links where this item is either the
+                source or the target, each link at most once. Note that a
+                bidirectional relation persisted as two separate rows
+                (``A --rel--> B`` and ``B --rel--> A``) yields two distinct
+                links under ``"both"`` when queried for ``A`` — one outgoing,
+                one incoming — because they are genuinely distinct directed
+                edges. Relation type values are opaque to taxomesh: callers
+                define their own vocabulary.
 
         Returns:
             List of matching ItemRelationLink objects; empty list if none match.
@@ -1106,7 +1113,7 @@ class TaxomeshService:
         item_id: UUID,
         *,
         relation_type: str | None = None,
-        direction: Literal["outgoing", "incoming"] = "outgoing",
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[Item]:
         """Return the items reachable via relations from/to the given item.
 
@@ -1118,7 +1125,9 @@ class TaxomeshService:
             item_id: The UUID of the item to query.
             relation_type: Optional filter; case-insensitive.
             direction: ``"outgoing"`` (default) returns targets; ``"incoming"``
-                returns sources.
+                returns sources; ``"both"`` returns the *other* endpoint of
+                every link touching ``item_id`` (the target of outgoing links
+                and the source of incoming links), in link order.
 
         Returns:
             List of related Item objects in link order; empty list if none match.
@@ -1130,8 +1139,12 @@ class TaxomeshService:
         links = self.list_item_relations(item_id, relation_type=relation_type, direction=direction)
         if direction == "outgoing":
             ordered_ids = [lnk.target_item_id for lnk in links]
-        else:
+        elif direction == "incoming":
             ordered_ids = [lnk.source_item_id for lnk in links]
+        else:  # "both" — return the endpoint that is not item_id
+            ordered_ids = [
+                lnk.target_item_id if lnk.source_item_id == item_id else lnk.source_item_id for lnk in links
+            ]
         if not ordered_ids:
             return []
         item_map = self._repo.get_items_by_ids(set(ordered_ids), enabled=None)

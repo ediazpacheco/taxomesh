@@ -474,7 +474,7 @@ class TaxomeshRepositoryBase(Protocol):
         item_id: UUID,
         *,
         relation_type: str | None = None,
-        direction: Literal["outgoing", "incoming"] = "outgoing",
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[ItemRelationLink]:
         """Return item relation links for the given item, ordered by sort_index.
 
@@ -487,7 +487,9 @@ class TaxomeshRepositoryBase(Protocol):
                 exact (already-normalised) type are returned.
             direction: ``"outgoing"`` returns links where ``source_item_id``
                 equals ``item_id``; ``"incoming"`` returns links where
-                ``target_item_id`` equals ``item_id``.
+                ``target_item_id`` equals ``item_id``; ``"both"`` returns links
+                where ``item_id`` is *either* the source or the target (each
+                link at most once).
 
         Returns:
             List of matching ItemRelationLink objects ordered by

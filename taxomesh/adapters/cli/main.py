@@ -603,7 +603,7 @@ def relation_list(
     ctx: typer.Context,
     item_id: UUID = typer.Argument(..., help="Item UUID to query relations for"),
     relation_type: str | None = typer.Option(None, "--type", help="Filter by relation type"),
-    direction: str = typer.Option("outgoing", "--direction", help="'outgoing' (default) or 'incoming'"),
+    direction: str = typer.Option("outgoing", "--direction", help="'outgoing' (default), 'incoming', or 'both'"),
 ) -> None:
     """List relations for an item."""
     result = build(_config_path(ctx))
@@ -631,7 +631,7 @@ def relation_related(
     ctx: typer.Context,
     item_id: UUID = typer.Argument(..., help="Item UUID"),
     relation_type: str | None = typer.Option(None, "--type", help="Filter by relation type"),
-    direction: str = typer.Option("outgoing", "--direction", help="'outgoing' (default) or 'incoming'"),
+    direction: str = typer.Option("outgoing", "--direction", help="'outgoing' (default), 'incoming', or 'both'"),
 ) -> None:
     """List items related to the given item."""
     result = build(_config_path(ctx))
