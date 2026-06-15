@@ -131,7 +131,17 @@ svc.list_related_items(cover.item_id, relation_type="covers")
 # [Item(name='Original', ...)]                      — outgoing by default
 svc.list_related_items(original.item_id, direction="incoming")
 # [Item(name='Cover', ...)]                          — who points at me?
+svc.list_related_items(original.item_id, direction="both")
+# [Item(name='Cover', ...), ...]                     — every item linked in either direction
 ```
+
+Use `direction="both"` when an item can sit on *either* end of its links — i.e. it
+is the **source** of some relations but the **target** of others. `"outgoing"`
+(the default) would miss the incoming links entirely. `list_item_relations(...,
+direction="both")` returns each link at most once; a bidirectional relation stored
+as two rows (`A→B` and `B→A`) still yields two distinct links, one per direction.
+Relation type values (`covers`, `version_of`, …) are opaque to taxomesh — the
+consuming application defines its own vocabulary.
 
 ### Fuzzy search
 

@@ -87,6 +87,25 @@ class TestDjangoRelationPersistence:
         sources = {lnk.source_item_id for lnk in links}
         assert sources == {a.item_id, c.item_id}
 
+    def test_both_direction_filter(self) -> None:
+        svc = make_service()
+        author = svc.create_item(name="Author")
+        peer = svc.create_item(name="Peer")
+        work = svc.create_item(name="Work")
+        svc.relate_items(author.item_id, peer.item_id, "worked_with")  # outgoing
+        svc.relate_items(work.item_id, author.item_id, "lyrics_by")  # incoming
+
+        both = svc.list_item_relations(author.item_id, direction="both")
+        triples = {(lnk.source_item_id, lnk.target_item_id, lnk.relation_type) for lnk in both}
+        assert triples == {
+            (author.item_id, peer.item_id, "worked_with"),
+            (work.item_id, author.item_id, "lyrics_by"),
+        }
+        # The original bug: outgoing alone drops the incoming credit.
+        assert svc.list_item_relations(author.item_id, direction="outgoing") == [
+            lnk for lnk in both if lnk.source_item_id == author.item_id
+        ]
+
     def test_remove_relation(self) -> None:
         svc = make_service()
         src = svc.create_item(name="A")

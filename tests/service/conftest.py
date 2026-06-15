@@ -261,13 +261,15 @@ class InMemoryRepository:
         item_id: UUID,
         *,
         relation_type: str | None = None,
-        direction: Literal["outgoing", "incoming"] = "outgoing",
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[ItemRelationLink]:
         """Return item relation links for the given item."""
         if direction == "outgoing":
             result = [lnk for lnk in self._item_relation_links if lnk.source_item_id == item_id]
-        else:
+        elif direction == "incoming":
             result = [lnk for lnk in self._item_relation_links if lnk.target_item_id == item_id]
+        else:  # "both"
+            result = [lnk for lnk in self._item_relation_links if item_id in (lnk.source_item_id, lnk.target_item_id)]
         if relation_type is not None:
             result = [lnk for lnk in result if lnk.relation_type == relation_type]
         return result

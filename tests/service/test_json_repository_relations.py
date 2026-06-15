@@ -71,6 +71,26 @@ class TestJsonRelationRoundTrip:
         assert len(raw["item_relation_links"]) == 1
         assert raw["item_relation_links"][0]["relation_type"] == "covers"
 
+    def test_both_direction_survives_reload(self, tmp_json_path: Path) -> None:
+        svc = _fresh(tmp_json_path)
+        author = svc.create_item(name="Author")
+        peer = svc.create_item(name="Peer")
+        work = svc.create_item(name="Work")
+        svc.relate_items(author.item_id, peer.item_id, "worked_with")  # outgoing
+        svc.relate_items(work.item_id, author.item_id, "lyrics_by")  # incoming
+
+        svc2 = _fresh(tmp_json_path)
+        both = svc2.list_item_relations(author.item_id, direction="both")
+        triples = {(lnk.source_item_id, lnk.target_item_id, lnk.relation_type) for lnk in both}
+        assert triples == {
+            (author.item_id, peer.item_id, "worked_with"),
+            (work.item_id, author.item_id, "lyrics_by"),
+        }
+        # The original bug: outgoing alone drops the incoming credit.
+        assert svc2.list_item_relations(author.item_id, direction="outgoing") == [
+            lnk for lnk in both if lnk.source_item_id == author.item_id
+        ]
+
     def test_cascade_delete_survives_reload(self, tmp_json_path: Path) -> None:
         svc = _fresh(tmp_json_path)
         src = svc.create_item(name="A")

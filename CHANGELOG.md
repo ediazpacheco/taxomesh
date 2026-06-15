@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a45] — 2026-06-15
+
+### Added
+
+#### `direction="both"` for item relation queries
+
+`TaxomeshService.list_item_relations` and `list_related_items` accept a new
+`direction="both"` value (alongside the existing `"outgoing"` default and
+`"incoming"`). `"both"` returns every link that touches the item on **either**
+end — the union of outgoing and incoming — so an item that is the *source* of
+some relations and the *target* of others can be queried in a single call.
+
+This fixes a class of bug where an item only ever appears as a relation
+*target* (e.g. a credit stored as `work → author`): an `"outgoing"`-only query
+returns nothing for that item and it looks unrelated/orphaned. `"both"` (or
+`"incoming"`) surfaces those incoming links.
+
+- Backward compatible: the default remains `"outgoing"`; existing callers are
+  unaffected.
+- Each link is returned at most once. A bidirectional relation stored as two
+  rows (`A→B` and `B→A`) yields two distinct links under `"both"` (one per
+  direction) because they are genuinely separate directed edges — no dedup.
+- For repository backends the filter is applied in storage (Django uses a
+  DB-side `Q(source) | Q(target)` OR); the in-memory/JSON/YAML backends filter
+  in one pass.
+- Available on every backend (`JsonRepository`, `YAMLRepository`,
+  `DjangoRepository`, in-memory) and via the CLI `--direction both`.
+
+**Relation type values are opaque to taxomesh.** taxomesh never interprets,
+validates, or hardcodes relation-type strings (`covers`, `version_of`,
+`worked_with`, …); the only normalisation is case-folding. The vocabulary is
+defined entirely by the consuming application — `direction` operates purely on
+the source/target structure, independently of the type.
+
+---
+
 ## [0.1.0a44] — 2026-06-11
 
 ### Performance

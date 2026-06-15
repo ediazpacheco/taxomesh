@@ -151,6 +151,76 @@ class TestListItemRelations:
         assert service.list_item_relations(a.item_id) == []
 
 
+class TestListItemRelationsBothDirection:
+    """Tests for the ``direction="both"`` option of list_item_relations.
+
+    Regression coverage for the letrastango bug: an AUTHOR item is the *source*
+    of ``worked_with`` edges but the *target* of ``lyrics_by`` / ``music_by``
+    credits (stored work→author). Querying only outgoing relations silently
+    drops every incoming credit, making such an author look orphaned.
+    """
+
+    def test_both_returns_union_of_outgoing_and_incoming(self, service: TaxomeshService) -> None:
+        author = service.create_item(name="Author")
+        peer = service.create_item(name="Peer")
+        work = service.create_item(name="Work")
+        # outgoing: author --worked_with--> peer
+        service.relate_items(author.item_id, peer.item_id, "worked_with")
+        # incoming: work --lyrics_by--> author
+        service.relate_items(work.item_id, author.item_id, "lyrics_by")
+
+        both = service.list_item_relations(author.item_id, direction="both")
+        triples = {(lnk.source_item_id, lnk.target_item_id, lnk.relation_type) for lnk in both}
+        assert triples == {
+            (author.item_id, peer.item_id, "worked_with"),
+            (work.item_id, author.item_id, "lyrics_by"),
+        }
+
+    def test_bug_target_only_item_appears_in_incoming_and_both_not_outgoing(self, service: TaxomeshService) -> None:
+        author = service.create_item(name="Author")
+        work = service.create_item(name="Work")
+        # The credit is stored work→author, so the author is ONLY ever a target.
+        service.relate_items(work.item_id, author.item_id, "lyrics_by")
+
+        # The original bug: outgoing query loses the credit entirely.
+        assert service.list_item_relations(author.item_id, direction="outgoing") == []
+        # incoming and both both surface it.
+        incoming = service.list_item_relations(author.item_id, direction="incoming")
+        both = service.list_item_relations(author.item_id, direction="both")
+        assert len(incoming) == 1
+        assert incoming[0].source_item_id == work.item_id
+        assert {(lnk.source_item_id, lnk.target_item_id) for lnk in both} == {(work.item_id, author.item_id)}
+
+    def test_both_with_bidirectional_worked_with_returns_both_rows(self, service: TaxomeshService) -> None:
+        # worked_with stored as two distinct directed rows.
+        a = service.create_item(name="A")
+        b = service.create_item(name="B")
+        service.relate_items(a.item_id, b.item_id, "worked_with")
+        service.relate_items(b.item_id, a.item_id, "worked_with")
+
+        both = service.list_item_relations(a.item_id, direction="both")
+        # Two genuinely distinct directed edges — returned as-is, not deduplicated.
+        assert len(both) == 2
+        triples = {(lnk.source_item_id, lnk.target_item_id) for lnk in both}
+        assert triples == {(a.item_id, b.item_id), (b.item_id, a.item_id)}
+
+    def test_both_respects_relation_type_filter(self, service: TaxomeshService) -> None:
+        author = service.create_item(name="Author")
+        peer = service.create_item(name="Peer")
+        work = service.create_item(name="Work")
+        service.relate_items(author.item_id, peer.item_id, "worked_with")
+        service.relate_items(work.item_id, author.item_id, "lyrics_by")
+
+        filtered = service.list_item_relations(author.item_id, relation_type="lyrics_by", direction="both")
+        assert len(filtered) == 1
+        assert filtered[0].relation_type == "lyrics_by"
+        assert filtered[0].source_item_id == work.item_id
+
+    def test_both_empty_when_no_relations(self, service: TaxomeshService) -> None:
+        item = service.create_item(name="Lonely")
+        assert service.list_item_relations(item.item_id, direction="both") == []
+
+
 class TestListRelatedItems:
     """Tests for service.list_related_items."""
 
@@ -169,6 +239,15 @@ class TestListRelatedItems:
         items = service.list_related_items(b.item_id, direction="incoming")
         assert len(items) == 1
         assert items[0].item_id == a.item_id
+
+    def test_both_direction_returns_other_endpoint(self, service: TaxomeshService) -> None:
+        author = service.create_item(name="Author")
+        peer = service.create_item(name="Peer")
+        work = service.create_item(name="Work")
+        service.relate_items(author.item_id, peer.item_id, "worked_with")  # outgoing → peer
+        service.relate_items(work.item_id, author.item_id, "lyrics_by")  # incoming ← work
+        items = service.list_related_items(author.item_id, direction="both")
+        assert {it.item_id for it in items} == {peer.item_id, work.item_id}
 
     def test_filter_by_relation_type(self, service: TaxomeshService) -> None:
         a = service.create_item(name="A")
