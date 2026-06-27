@@ -498,40 +498,50 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
-    def list_item_relation_links_for_sources(
+    def list_item_relation_links_for_items(
         self,
-        source_item_ids: Collection[UUID],
+        item_ids: Collection[UUID],
         *,
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
         relation_types: Collection[str] | None = None,
     ) -> list[ItemRelationLink]:
-        """Return outgoing relation links for many source items in a single query.
+        """Return relation links for many items in a single query, by direction.
 
         Eliminates the N+1 pattern that arises when calling
-        :meth:`list_item_relation_links` in a loop over many source items.
-        Only outgoing links (where ``source_item_id`` is in *source_item_ids*)
-        are returned.  Results are ordered deterministically by
-        ``(source_item_id ASC, relation_type ASC, sort_index ASC, target_item_id ASC)``.
+        :meth:`list_item_relation_links` in a loop over many items. A single
+        query resolves every queried item regardless of *direction* — including
+        ``"both"``, which uses one combined ``source OR target`` query rather
+        than two.
+
+        Direction semantics and deterministic ordering:
+
+        - ``"outgoing"``: links where ``source_item_id`` is in *item_ids*,
+          ordered by ``(source_item_id, relation_type, sort_index, target_item_id)``.
+        - ``"incoming"``: links where ``target_item_id`` is in *item_ids*,
+          ordered by ``(target_item_id, relation_type, sort_index, source_item_id)``.
+        - ``"both"``: links where *item_ids* contains the source **or** the
+          target, ordered by ``(sort_index, source_item_id, target_item_id)``.
 
         Args:
-            source_item_ids: Collection of source UUIDs to query.
-                An empty collection returns ``[]`` immediately without hitting storage.
+            item_ids: Collection of item UUIDs to query. An empty collection
+                returns ``[]`` immediately without hitting storage.
+            direction: Which side of the link the queried items are matched on.
             relation_types: Optional allow-list of relation type strings.
                 ``None`` or ``[]`` means no filter — all types are returned.
 
         Returns:
             List of matching :class:`~taxomesh.domain.models.ItemRelationLink` objects
-            in deterministic order; empty list if *source_item_ids* is empty or no
-            links match.
+            in deterministic order; empty list if *item_ids* is empty or no links
+            match.
 
         Example:
 
-            # items: song_a (UUID a), song_b (UUID b), artist_x (UUID x), label_y (UUID y)
             # links: song_a --(performed_by)--> artist_x
             #        song_b --(performed_by)--> artist_x
-            #        song_a --(released_by)-->  label_y
 
-            links = repo.list_item_relation_links_for_sources(
-                [song_a_id, song_b_id],
+            links = repo.list_item_relation_links_for_items(
+                [artist_x_id],
+                direction="incoming",
                 relation_types=["performed_by"],
             )
             # → [

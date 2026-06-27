@@ -161,7 +161,7 @@ class TestDjangoRelationCascadeDelete:
 
 @pytest.mark.django_db
 class TestDjangoBatchRelationLookup:
-    """Tests for DjangoRepository.list_item_relation_links_for_sources."""
+    """Tests for DjangoRepository.list_item_relation_links_for_items."""
 
     def test_returns_links_for_multiple_sources(self) -> None:
         svc = make_service()
@@ -174,7 +174,7 @@ class TestDjangoBatchRelationLookup:
         svc.relate_items(b.item_id, t2.item_id, "y")
 
         repo = make_repo()
-        links = repo.list_item_relation_links_for_sources([a.item_id, b.item_id])
+        links = repo.list_item_relation_links_for_items([a.item_id, b.item_id])
         assert len(links) == 2
         source_ids = {lnk.source_item_id for lnk in links}
         assert source_ids == {a.item_id, b.item_id}
@@ -182,7 +182,7 @@ class TestDjangoBatchRelationLookup:
 
     def test_empty_source_ids_returns_empty(self) -> None:
         repo = make_repo()
-        assert repo.list_item_relation_links_for_sources([]) == []
+        assert repo.list_item_relation_links_for_items([]) == []
 
     def test_filters_by_relation_types(self) -> None:
         svc = make_service()
@@ -193,7 +193,7 @@ class TestDjangoBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
 
         repo = make_repo()
-        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=["music_by"])
+        links = repo.list_item_relation_links_for_items([src.item_id], relation_types=["music_by"])
         assert len(links) == 1
         assert links[0].relation_type == "music_by"
 
@@ -206,7 +206,7 @@ class TestDjangoBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
 
         repo = make_repo()
-        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=None)
+        links = repo.list_item_relation_links_for_items([src.item_id], relation_types=None)
         assert len(links) == 2
 
     def test_empty_filter_returns_all(self) -> None:
@@ -218,7 +218,7 @@ class TestDjangoBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
 
         repo = make_repo()
-        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=[])
+        links = repo.list_item_relation_links_for_items([src.item_id], relation_types=[])
         assert len(links) == 2
 
     def test_ordering(self) -> None:
@@ -230,7 +230,7 @@ class TestDjangoBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "covers", sort_index=1)
 
         repo = make_repo()
-        links = repo.list_item_relation_links_for_sources([src.item_id])
+        links = repo.list_item_relation_links_for_items([src.item_id])
         assert links[0].sort_index == 1
         assert links[1].sort_index == 5
 
@@ -246,6 +246,39 @@ class TestDjangoBatchRelationLookup:
         from django.test.utils import CaptureQueriesContext  # noqa: PLC0415
 
         with CaptureQueriesContext(connection) as ctx:
-            links = repo.list_item_relation_links_for_sources([src.item_id])
+            links = repo.list_item_relation_links_for_items([src.item_id])
         assert len(ctx.captured_queries) == 1
         assert len(links) == 2
+
+    def test_incoming_returns_links_by_target(self) -> None:
+        svc = make_service()
+        s1 = svc.create_item(name="S1")
+        s2 = svc.create_item(name="S2")
+        tgt = svc.create_item(name="tgt")
+        other = svc.create_item(name="other")
+        svc.relate_items(s1.item_id, tgt.item_id, "covers")
+        svc.relate_items(s2.item_id, tgt.item_id, "covers")
+        svc.relate_items(s1.item_id, other.item_id, "covers")
+
+        repo = make_repo()
+        links = repo.list_item_relation_links_for_items([tgt.item_id], direction="incoming")
+        assert {lnk.source_item_id for lnk in links} == {s1.item_id, s2.item_id}
+        assert all(lnk.target_item_id == tgt.item_id for lnk in links)
+
+    def test_both_uses_single_or_query(self) -> None:
+        svc = make_service()
+        mid = svc.create_item(name="mid")
+        out_tgt = svc.create_item(name="out")
+        in_src = svc.create_item(name="in")
+        svc.relate_items(mid.item_id, out_tgt.item_id, "covers")  # outgoing for mid
+        svc.relate_items(in_src.item_id, mid.item_id, "covers")  # incoming for mid
+
+        repo = make_repo()
+        from django.test.utils import CaptureQueriesContext  # noqa: PLC0415
+
+        with CaptureQueriesContext(connection) as ctx:
+            links = repo.list_item_relation_links_for_items([mid.item_id], direction="both")
+        # A single combined source-OR-target query, not two.
+        assert len(ctx.captured_queries) == 1
+        triples = {(lnk.source_item_id, lnk.target_item_id) for lnk in links}
+        assert triples == {(mid.item_id, out_tgt.item_id), (in_src.item_id, mid.item_id)}

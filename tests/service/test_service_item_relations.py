@@ -444,3 +444,159 @@ class TestListRelatedItemsForSources:
 
         with pytest.raises(TaxomeshItemNotFoundError):
             service.list_related_items_for_sources([src.item_id], skip_on_error=False)
+
+
+# ---------------------------------------------------------------------------
+# 056 — direction-aware batched traversal: incoming
+# ---------------------------------------------------------------------------
+
+
+class TestListRelatedItemsForSourcesIncoming:
+    """Tests for service.list_related_items_for_sources(direction="incoming")."""
+
+    def test_returns_grouped_dict(self, service: TaxomeshService) -> None:
+        src1 = service.create_item(name="src1")
+        src2 = service.create_item(name="src2")
+        tgt1 = service.create_item(name="tgt1")
+        tgt2 = service.create_item(name="tgt2")
+        service.relate_items(src1.item_id, tgt1.item_id, "covers")
+        service.relate_items(src2.item_id, tgt2.item_id, "covers")
+
+        # Query the targets; incoming returns the source-side items grouped by target.
+        result = service.list_related_items_for_sources([tgt1.item_id, tgt2.item_id], direction="incoming")
+        assert set(result.keys()) == {tgt1.item_id, tgt2.item_id}
+        assert [i.item_id for i in result[tgt1.item_id]["covers"]] == [src1.item_id]
+        assert [i.item_id for i in result[tgt2.item_id]["covers"]] == [src2.item_id]
+
+    def test_multiple_sources_under_one_target(self, service: TaxomeshService) -> None:
+        s1 = service.create_item(name="s1")
+        s2 = service.create_item(name="s2")
+        tgt = service.create_item(name="tgt")
+        service.relate_items(s1.item_id, tgt.item_id, "covers", sort_index=1)
+        service.relate_items(s2.item_id, tgt.item_id, "covers", sort_index=0)
+
+        result = service.list_related_items_for_sources([tgt.item_id], direction="incoming")
+        # ordered by (sort_index, source_item_id): s2 (sort 0) before s1 (sort 1)
+        assert [i.item_id for i in result[tgt.item_id]["covers"]] == [s2.item_id, s1.item_id]
+
+    def test_empty_input_returns_empty_dict(self, service: TaxomeshService) -> None:
+        assert service.list_related_items_for_sources([], direction="incoming") == {}
+
+    def test_item_with_no_incoming_absent(self, service: TaxomeshService) -> None:
+        # src has only an OUTGOING link; queried as a target it has no incoming links.
+        src = service.create_item(name="src")
+        tgt = service.create_item(name="tgt")
+        service.relate_items(src.item_id, tgt.item_id, "covers")
+        result = service.list_related_items_for_sources([src.item_id], direction="incoming")
+        assert result == {}
+
+    def test_deduplicates_input_ids(self, service: TaxomeshService) -> None:
+        src = service.create_item(name="src")
+        tgt = service.create_item(name="tgt")
+        service.relate_items(src.item_id, tgt.item_id, "covers")
+        once = service.list_related_items_for_sources([tgt.item_id], direction="incoming")
+        dup = service.list_related_items_for_sources([tgt.item_id, tgt.item_id], direction="incoming")
+        assert once == dup
+
+    def test_filters_by_relation_types_case_insensitive(self, service: TaxomeshService) -> None:
+        s1 = service.create_item(name="s1")
+        s2 = service.create_item(name="s2")
+        tgt = service.create_item(name="tgt")
+        service.relate_items(s1.item_id, tgt.item_id, "covers")
+        service.relate_items(s2.item_id, tgt.item_id, "samples")
+
+        result = service.list_related_items_for_sources([tgt.item_id], relation_types=["COVERS"], direction="incoming")
+        assert "covers" in result[tgt.item_id]
+        assert "samples" not in result.get(tgt.item_id, {})
+
+    def test_raises_for_missing_source_item(self, service: TaxomeshService) -> None:
+        from uuid import uuid4  # noqa: PLC0415
+
+        from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
+
+        try:
+            from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+
+            if isinstance(service._repo, DjangoRepository):
+                pytest.skip("Django FK constraints prevent saving an orphan link")
+        except ImportError:
+            pass
+
+        tgt = service.create_item(name="tgt")
+        orphan_link = ItemRelationLink(
+            source_item_id=uuid4(),
+            target_item_id=tgt.item_id,
+            relation_type="covers",
+        )
+        service._repo.save_item_relation_link(orphan_link)
+
+        with pytest.raises(TaxomeshItemNotFoundError):
+            service.list_related_items_for_sources([tgt.item_id], skip_on_error=False, direction="incoming")
+
+
+# ---------------------------------------------------------------------------
+# 056 — direction-aware batched traversal: default outgoing preserved (US2)
+# ---------------------------------------------------------------------------
+
+
+class TestListRelatedItemsForSourcesDefaultEquivalence:
+    """The default (no direction arg) must equal direction="outgoing"."""
+
+    def test_default_equals_explicit_outgoing(self, service: TaxomeshService) -> None:
+        src = service.create_item(name="src")
+        t1 = service.create_item(name="t1")
+        t2 = service.create_item(name="t2")
+        service.relate_items(src.item_id, t1.item_id, "covers", sort_index=0)
+        service.relate_items(src.item_id, t2.item_id, "samples", sort_index=1)
+
+        default = service.list_related_items_for_sources([src.item_id])
+        explicit = service.list_related_items_for_sources([src.item_id], direction="outgoing")
+        assert default == explicit
+        assert [i.item_id for i in default[src.item_id]["covers"]] == [t1.item_id]
+
+
+# ---------------------------------------------------------------------------
+# 056 — direction-aware batched traversal: both
+# ---------------------------------------------------------------------------
+
+
+class TestListRelatedItemsForSourcesBoth:
+    """Tests for service.list_related_items_for_sources(direction="both")."""
+
+    def test_unions_outgoing_and_incoming(self, service: TaxomeshService) -> None:
+        mid = service.create_item(name="mid")
+        out_tgt = service.create_item(name="out_tgt")
+        in_src = service.create_item(name="in_src")
+        # mid --covers--> out_tgt   (outgoing for mid)
+        # in_src --covers--> mid    (incoming for mid)
+        service.relate_items(mid.item_id, out_tgt.item_id, "covers")
+        service.relate_items(in_src.item_id, mid.item_id, "covers")
+
+        result = service.list_related_items_for_sources([mid.item_id], direction="both")
+        related_ids = [i.item_id for i in result[mid.item_id]["covers"]]
+        # Documented union order: outgoing-derived first, then incoming-derived.
+        assert related_ids == [out_tgt.item_id, in_src.item_id]
+
+    def test_empty_input_returns_empty_dict(self, service: TaxomeshService) -> None:
+        assert service.list_related_items_for_sources([], direction="both") == {}
+
+    def test_filters_by_relation_types(self, service: TaxomeshService) -> None:
+        mid = service.create_item(name="mid")
+        out_tgt = service.create_item(name="out_tgt")
+        in_src = service.create_item(name="in_src")
+        service.relate_items(mid.item_id, out_tgt.item_id, "covers")
+        service.relate_items(in_src.item_id, mid.item_id, "samples")
+
+        result = service.list_related_items_for_sources([mid.item_id], relation_types=["covers"], direction="both")
+        assert "covers" in result[mid.item_id]
+        assert "samples" not in result[mid.item_id]
+
+    def test_link_with_both_endpoints_queried_appears_on_both_sides(self, service: TaxomeshService) -> None:
+        """A single link A→B, querying [A, B] with both, yields A's outgoing (B) and B's incoming (A)."""
+        a = service.create_item(name="A")
+        b = service.create_item(name="B")
+        service.relate_items(a.item_id, b.item_id, "covers")
+
+        result = service.list_related_items_for_sources([a.item_id, b.item_id], direction="both")
+        assert [i.item_id for i in result[a.item_id]["covers"]] == [b.item_id]
+        assert [i.item_id for i in result[b.item_id]["covers"]] == [a.item_id]

@@ -143,6 +143,22 @@ as two rows (`A→B` and `B→A`) still yields two distinct links, one per direc
 Relation type values (`covers`, `version_of`, …) are opaque to taxomesh — the
 consuming application defines its own vocabulary.
 
+To resolve relations for **many items at once** without an N+1 loop, use the
+batched traversal, which is also direction-aware:
+
+```python
+ids = [cover.item_id, remix.item_id]
+
+svc.list_related_items_for_sources(ids)                         # outgoing (default)
+svc.list_related_items_for_sources(ids, direction="incoming")  # who points at these?
+svc.list_related_items_for_sources(ids, direction="both")      # union of both
+# → {queried_item_id: {relation_type: [Item, ...]}}
+```
+
+Every direction resolves in just two repository calls — one batched link query
+(`"both"` uses a single combined `source OR target` query) plus one bulk item
+lookup. The call count is constant regardless of how many ids are passed.
+
 ### Fuzzy search
 
 Typo-tolerant, accent-insensitive, ranked (exact > prefix > substring > fuzzy).

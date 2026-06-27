@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a46] — 2026-06-27
+
+### Added
+
+#### `direction` parameter for the batched related-items traversal
+
+`TaxomeshService.list_related_items_for_sources` accepts a new
+`direction="outgoing" | "incoming" | "both"` parameter (default `"outgoing"`),
+generalizing the previously outgoing-only batched traversal. This closes the
+N+1 gap on the incoming side: code needing the incoming relations of many items
+no longer has to loop the single-item `list_related_items` /
+`list_item_relations` with `direction="incoming"`.
+
+- **Every** direction resolves in exactly **two repository calls** — one batched
+  link query plus one bulk item lookup. `"both"` uses a single combined
+  `source OR target` query rather than two, so it is two calls, not three. The
+  call count is constant — it does not grow with the number of input ids.
+- The result keeps the same grouped shape `{queried_item_id: {relation_type:
+  [Item, ...]}}`. For `"incoming"` the related items are the source-side items;
+  for `"both"` each group lists outgoing-derived items first, then
+  incoming-derived items.
+- `direction` is part of the read-cache key, so each direction is an independent
+  cache entry; writes and `clear_all_caches()` invalidate as before.
+- Backward compatible at the service layer: the default `"outgoing"` is
+  byte-for-byte identical to the previous behavior.
+
+#### Unified `list_item_relation_links_for_items` repository query
+
+The two prior batched link queries were replaced by a single direction-aware
+repository method
+`list_item_relation_links_for_items(item_ids, *, direction="outgoing" | "incoming" | "both", relation_types=None)`
+on the `TaxomeshRepositoryBase` protocol and all adapters (`JsonRepository`,
+`YAMLRepository`, `DjangoRepository`, and the in-memory test repository). This
+matches the direction-parameter shape of the single-item `list_item_relation_links`.
+
+**Breaking (repository protocol):** `list_item_relation_links_for_sources`
+(added in `0.1.0a44`) is removed; call
+`list_item_relation_links_for_items(ids)` (default `direction="outgoing"`)
+instead. `"both"` issues one `Q(source__in) | Q(target__in)` query on the Django
+backend.
+
+#### Django index for the incoming batched query
+
+Added composite index `taxomesh_rl_tgt_type_sort_idx` on
+`(target_item_id, relation_type, sort_index, source_item_id)` (migration `0010`),
+the mirror of the existing `taxomesh_rl_src_type_sort_idx`. It lets the incoming
+batched query replace a filesort with an index scan, matching the outgoing
+path's performance.
+
+---
+
 ## [0.1.0a45] — 2026-06-15
 
 ### Added

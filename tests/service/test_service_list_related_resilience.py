@@ -220,3 +220,63 @@ def test_source_str_raises_warning_still_emits(caplog: pytest.LogCaptureFixture)
     msg = warning_records[0].getMessage()
     assert str(missing_target_id) in msg
     assert "str() failed" in msg
+
+
+# ---------------------------------------------------------------------------
+# 056 — incoming direction resilience (symmetric to the outgoing cases above)
+# ---------------------------------------------------------------------------
+
+
+def test_incoming_single_dangling_link_no_exception(caplog: pytest.LogCaptureFixture) -> None:
+    """Incoming dangling link (missing source): returns {}, one WARNING naming the orphan source."""
+    target = Item(name="Target")
+    missing_source_id = uuid4()
+    link = ItemRelationLink(
+        source_item_id=missing_source_id,
+        target_item_id=target.item_id,
+        relation_type="related_to",
+    )
+    svc = _make_service_with_links([target], [link])
+
+    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+        result = svc.list_related_items_for_sources([target.item_id], direction="incoming")
+
+    assert result == {}
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warning_records) == 1
+    msg = warning_records[0].getMessage()
+    assert "list_related_items_for_sources" in msg
+    assert target.name in msg
+    assert "orphaned" in msg
+    assert str(missing_source_id) in msg
+    assert "related_to" in msg
+    # Role wording is mirrored for incoming: the orphan is the source endpoint.
+    assert f"source: <orphaned item {missing_source_id}>" in msg
+
+
+def test_incoming_empty_input_no_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """Incoming empty input: returns {} immediately, no WARNING."""
+    svc = _make_service_with_links([], [])
+
+    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+        result = svc.list_related_items_for_sources([], direction="incoming")
+
+    assert result == {}
+    assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_incoming_skip_on_error_false_raises(caplog: pytest.LogCaptureFixture) -> None:
+    """Incoming skip_on_error=False: TaxomeshItemNotFoundError raised, no WARNING logged."""
+    target = Item(name="Target")
+    missing_source_id = uuid4()
+    link = ItemRelationLink(
+        source_item_id=missing_source_id,
+        target_item_id=target.item_id,
+        relation_type="rel",
+    )
+    svc = _make_service_with_links([target], [link])
+
+    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER), pytest.raises(TaxomeshItemNotFoundError):
+        svc.list_related_items_for_sources([target.item_id], skip_on_error=False, direction="incoming")
+
+    assert not any(r.levelno == logging.WARNING for r in caplog.records)

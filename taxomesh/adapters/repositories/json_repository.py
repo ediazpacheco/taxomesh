@@ -509,24 +509,41 @@ class JsonRepository:
             result = [lnk for lnk in result if lnk.relation_type == relation_type]
         return sorted(result, key=lambda lnk: (lnk.sort_index, str(lnk.source_item_id), str(lnk.target_item_id)))
 
-    def list_item_relation_links_for_sources(
+    def list_item_relation_links_for_items(
         self,
-        source_item_ids: Collection[UUID],
+        item_ids: Collection[UUID],
         *,
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
         relation_types: Collection[str] | None = None,
     ) -> list[ItemRelationLink]:
-        """Return outgoing links for many source items."""
-        source_set = set(source_item_ids)
-        if not source_set:
+        """Return relation links for many items in a single pass, by direction."""
+        id_set = set(item_ids)
+        if not id_set:
             return []
-        result = [lnk for lnk in self._item_relation_links if lnk.source_item_id in source_set]
+        if direction == "outgoing":
+            result = [lnk for lnk in self._item_relation_links if lnk.source_item_id in id_set]
+        elif direction == "incoming":
+            result = [lnk for lnk in self._item_relation_links if lnk.target_item_id in id_set]
+        else:
+            result = [
+                lnk
+                for lnk in self._item_relation_links
+                if lnk.source_item_id in id_set or lnk.target_item_id in id_set
+            ]
         if relation_types:
             type_set = set(relation_types)
             result = [lnk for lnk in result if lnk.relation_type in type_set]
-        return sorted(
-            result,
-            key=lambda lnk: (str(lnk.source_item_id), lnk.relation_type, lnk.sort_index, str(lnk.target_item_id)),
-        )
+        if direction == "outgoing":
+            return sorted(
+                result,
+                key=lambda lnk: (str(lnk.source_item_id), lnk.relation_type, lnk.sort_index, str(lnk.target_item_id)),
+            )
+        if direction == "incoming":
+            return sorted(
+                result,
+                key=lambda lnk: (str(lnk.target_item_id), lnk.relation_type, lnk.sort_index, str(lnk.source_item_id)),
+            )
+        return sorted(result, key=lambda lnk: (lnk.sort_index, str(lnk.source_item_id), str(lnk.target_item_id)))
 
     def delete_item_relation_link(
         self,
