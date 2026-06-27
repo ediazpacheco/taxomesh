@@ -950,25 +950,42 @@ class DjangoRepository:
             raise TaxomeshRepositoryError(str(exc)) from exc
         return [self._row_to_item_relation_link(row) for row in qs]
 
-    def list_item_relation_links_for_sources(
+    def list_item_relation_links_for_items(
         self,
-        source_item_ids: Collection[UUID],
+        item_ids: Collection[UUID],
         *,
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
         relation_types: Collection[str] | None = None,
     ) -> list[ItemRelationLink]:
-        """Return outgoing links for many source items via single ORM query."""
+        """Return relation links for many items via a single ORM query, by direction.
+
+        ``"both"`` uses one combined ``source OR target`` query (``Q(...) | Q(...)``)
+        rather than two — keeping the batched ``both`` path at a single link query.
+        """
         from django.db import DatabaseError  # noqa: PLC0415
+        from django.db.models import Q  # noqa: PLC0415
 
         from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
 
-        source_list = list(source_item_ids)
-        if not source_list:
+        id_list = list(item_ids)
+        if not id_list:
             return []
         try:
-            qs = self._ItemRelationLinkModel.objects.using(self._using).filter(source_item_id__in=source_list)
+            qs = self._ItemRelationLinkModel.objects.using(self._using)
+            if direction == "outgoing":
+                qs = qs.filter(source_item_id__in=id_list).order_by(
+                    "source_item_id", "relation_type", "sort_index", "target_item_id"
+                )
+            elif direction == "incoming":
+                qs = qs.filter(target_item_id__in=id_list).order_by(
+                    "target_item_id", "relation_type", "sort_index", "source_item_id"
+                )
+            else:
+                qs = qs.filter(Q(source_item_id__in=id_list) | Q(target_item_id__in=id_list)).order_by(
+                    "sort_index", "source_item_id", "target_item_id"
+                )
             if relation_types:
                 qs = qs.filter(relation_type__in=list(relation_types))
-            qs = qs.order_by("source_item_id", "relation_type", "sort_index", "target_item_id")
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
         return [self._row_to_item_relation_link(row) for row in qs]

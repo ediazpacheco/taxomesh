@@ -22,7 +22,7 @@ from taxomesh.exceptions import (
     TaxomeshValidationError,
 )
 
-__VERSION__ = "0.1.0a45"
+__VERSION__ = "0.1.0a46"
 __version__ = __VERSION__
 
 # Register a NullHandler so taxomesh never emits "no handlers" warnings in

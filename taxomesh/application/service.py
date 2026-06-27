@@ -1162,79 +1162,91 @@ class TaxomeshService:
         *,
         relation_types: Collection[str] | None = None,
         skip_on_error: bool = True,
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> dict[UUID, dict[str, list[Item]]]:
-        """Return related items grouped by source item ID and relation type.
+        """Return related items grouped by queried item ID and relation type.
 
-        Resolves all outgoing relations for every item in *source_item_ids* in
-        **two repository calls** (one batch link query + one bulk item lookup
-        restricted to the source and target IDs of the matched links),
-        eliminating the N+1 pattern of calling :meth:`list_related_items` in a
-        loop.  Relation type strings are normalised to lower-case before
-        filtering so callers may pass ``"Covers"`` or ``"COVERS"`` freely.
+        Resolves the relations of every item in *source_item_ids* in exactly
+        **two repository calls** — one batched link query
+        (:meth:`~taxomesh.ports.repository.TaxomeshRepositoryBase.list_item_relation_links_for_items`)
+        plus one bulk item lookup restricted to the endpoints of the matched
+        links — for **every** direction, including ``"both"`` (which uses a single
+        combined ``source OR target`` query rather than two). This eliminates the
+        N+1 pattern of calling :meth:`list_related_items` in a loop.
 
-        Source items that have no outgoing links (or no links matching the
-        filter) are **absent** from the returned dict — they are not represented
-        as empty inner dicts.
+        The call count is constant regardless of how many ids are passed (it never
+        degrades to a per-item query). Relation type strings are
+        normalised to lower-case before filtering so callers may pass ``"Covers"``
+        or ``"COVERS"`` freely.
+
+        Despite the historical ``source_item_ids`` / ``..._for_sources`` naming,
+        the ids are the **queried** items, interpreted per *direction*: matched on
+        the source side (``"outgoing"``), the target side (``"incoming"``), or
+        either side (``"both"``). The related item is the *other* endpoint of each
+        matched link — the target for outgoing links, the source for incoming
+        links. Queried items with no matching links (or none matching the filter)
+        are **absent** from the returned dict — they are not represented as empty
+        inner dicts.
 
         Results are served from the service read cache for ``DEFAULT_CACHE_TTL``
         seconds: calls that differ only in argument ordering, duplicates, or
-        relation-type casing/whitespace share one cache entry, and any write
-        operation (or :func:`taxomesh.utils.memoize.clear_all_caches`)
-        invalidates it. Cached results are shared object references — callers
-        must not mutate the returned structures.
+        relation-type casing/whitespace share one cache entry; *direction* is part
+        of the cache key, so each direction is an independent entry. Any write
+        operation (or :func:`taxomesh.utils.memoize.clear_all_caches`) invalidates
+        the cache. Cached results are shared object references — callers must not
+        mutate the returned structures.
 
         Args:
-            source_item_ids: Collection of source UUIDs.  Duplicates are
+            source_item_ids: Collection of queried item UUIDs.  Duplicates are
                 deduplicated automatically; order is not significant.
                 An empty collection returns ``{}`` immediately.
             relation_types: Optional case-insensitive allow-list.
                 ``None`` or ``[]`` means no filter — all relation types are
                 included.
-            skip_on_error: When ``True`` (default), dangling links — where
-                ``target_item_id`` is not found in the repository — are skipped
-                and a ``WARNING`` is logged containing ``source_item_id``,
-                ``target_item_id``, and ``relation_type``.  When ``False``, the
-                original ``TaxomeshItemNotFoundError`` is raised immediately.
+            skip_on_error: When ``True`` (default), dangling links — where the
+                related endpoint is not found in the repository — are skipped and
+                a ``WARNING`` is logged identifying the queried item, the orphaned
+                related item, and the ``relation_type``.  When ``False``, the
+                ``TaxomeshItemNotFoundError`` is raised immediately.
+            direction: ``"outgoing"`` (default) resolves the targets of the
+                queried items; ``"incoming"`` resolves the sources pointing at
+                them; ``"both"`` resolves the union of the two.
 
         Returns:
-            Nested dict ``{source_item_id: {relation_type: [Item, ...]}}``
-            where items within each relation type list appear in
-            ``(sort_index ASC, target_item_id ASC)`` order.
-            Source IDs with no matching links are absent from the result.
+            Nested dict ``{queried_item_id: {relation_type: [Item, ...]}}``.
+            Within each relation-type list, ``"outgoing"`` items appear in
+            ``(sort_index ASC, target_item_id ASC)`` order, ``"incoming"`` items
+            in ``(sort_index ASC, source_item_id ASC)`` order, and ``"both"``
+            concatenates the outgoing-derived items first, then the
+            incoming-derived items. Queried IDs with no matching links are absent.
 
         Raises:
-            TaxomeshItemNotFoundError: If a ``target_item_id`` referenced by
-                any matched link does not exist in the repository and
-                ``skip_on_error`` is ``False``.
+            TaxomeshItemNotFoundError: If a related item referenced by any matched
+                link does not exist in the repository and ``skip_on_error`` is
+                ``False``.
 
         Example:
 
             song_a = service.create_item(name="Song A")
-            song_b = service.create_item(name="Song B")
             artist = service.create_item(name="Artist X")
-            label  = service.create_item(name="Label Y")
-
             service.relate_items(song_a.item_id, artist.item_id, "performed_by")
-            service.relate_items(song_a.item_id, label.item_id,  "released_by")
-            service.relate_items(song_b.item_id, artist.item_id, "performed_by")
 
-            result = service.list_related_items_for_sources(
-                [song_a.item_id, song_b.item_id],
-                relation_types=["performed_by"],
+            # Outgoing: what does song_a point to?
+            out = service.list_related_items_for_sources([song_a.item_id])
+            # out == {song_a.item_id: {"performed_by": [artist]}}
+
+            # Incoming: what points at artist?
+            inc = service.list_related_items_for_sources(
+                [artist.item_id], direction="incoming"
             )
-            # result == {
-            #     song_a.item_id: {"performed_by": [artist]},
-            #     song_b.item_id: {"performed_by": [artist]},
-            # }
-            # Note: song_a's "released_by" link is excluded by the filter.
-            # Note: song_b is present even though it only has one matching link.
+            # inc == {artist.item_id: {"performed_by": [song_a]}}
         """
         unique_ids = frozenset(source_item_ids)
         if not unique_ids:
             return {}
         normalised_types = tuple(sorted({t.strip().lower() for t in relation_types})) if relation_types else None
         return self._fetch_related_items_for_sources(
-            unique_ids, relation_types=normalised_types, skip_on_error=skip_on_error
+            unique_ids, relation_types=normalised_types, skip_on_error=skip_on_error, direction=direction
         )
 
     @memoize(DEFAULT_CACHE_TTL)
@@ -1244,39 +1256,87 @@ class TaxomeshService:
         *,
         relation_types: tuple[str, ...] | None,
         skip_on_error: bool,
+        direction: Literal["outgoing", "incoming", "both"],
     ) -> dict[UUID, dict[str, list[Item]]]:
-        """Memoized batch lookup. Hashable, pre-normalised args → cache key."""
-        links = self._repo.list_item_relation_links_for_sources(source_item_ids, relation_types=relation_types)
+        """Memoized batch lookup. Hashable, pre-normalised args → cache key.
+
+        Resolves all directions in a **single** batched link query
+        (:meth:`list_item_relation_links_for_items`) plus one bulk item lookup —
+        two repository calls total, ``"both"`` included. Each entry is
+        ``(group_key_id, related_id, relation_type, sort_index, related_is_target)``
+        where ``group_key_id`` is the queried endpoint (the outer dict key) and
+        ``related_id`` is the endpoint to materialise. For ``"both"`` the entries
+        are reordered so each group lists outgoing-derived items first, then
+        incoming-derived items.
+        """
+        links = self._repo.list_item_relation_links_for_items(
+            source_item_ids, direction=direction, relation_types=relation_types
+        )
         if not links:
             return {}
-        needed_ids = {lnk.source_item_id for lnk in links} | {lnk.target_item_id for lnk in links}
+        entries: list[tuple[UUID, UUID, str, int, bool]] = []
+        needed_ids: set[UUID] = set()
+        # One loop covers all directions. The endpoint membership check is what
+        # disambiguates "both" (a link may match on either or both endpoints);
+        # for "outgoing"/"incoming" the repo already filtered, so it is always true.
+        for link in links:
+            if direction in ("outgoing", "both") and link.source_item_id in source_item_ids:
+                entries.append((link.source_item_id, link.target_item_id, link.relation_type, link.sort_index, True))
+                needed_ids.update((link.source_item_id, link.target_item_id))
+            if direction in ("incoming", "both") and link.target_item_id in source_item_ids:
+                entries.append((link.target_item_id, link.source_item_id, link.relation_type, link.sort_index, False))
+                needed_ids.update((link.target_item_id, link.source_item_id))
+        if direction == "both":
+            # Single OR query returns links in one order; re-sort so each
+            # (group, relation_type) lists outgoing-derived items (related_is_target
+            # True → sorts first) before incoming-derived ones.
+            entries.sort(key=lambda e: (e[0], e[2], not e[4], e[3], e[1]))
         item_map: dict[UUID, Item] = self._repo.get_items_by_ids(needed_ids, enabled=True)
         result: dict[UUID, dict[str, list[Item]]] = {}
-        for link in links:
-            if link.target_item_id not in item_map:
+        for group_key_id, related_id, relation_type, _sort_index, related_is_target in entries:
+            if related_id not in item_map:
                 if skip_on_error:
                     if logger.isEnabledFor(logging.WARNING):
-                        source_item = item_map.get(link.source_item_id)
-                        if source_item is None:
-                            source_repr = f"<unknown source item {link.source_item_id}>"
-                        else:
-                            try:
-                                source_repr = str(source_item)
-                            except Exception:
-                                source_repr = f"<item {link.source_item_id} str() failed>"
-                        logger.warning(
-                            "list_related_items_for_sources: dangling relation skipped — "
-                            "source: %s, target: <orphaned item %s>, relation_type: %r",
-                            source_repr,
-                            link.target_item_id,
-                            link.relation_type,
+                        self._log_dangling_relation(
+                            item_map, group_key_id, related_id, relation_type, related_is_target
                         )
                     continue
-                raise TaxomeshItemNotFoundError(f"Item {link.target_item_id!r} referenced by relation not found")
-            result.setdefault(link.source_item_id, {}).setdefault(link.relation_type, []).append(
-                item_map[link.target_item_id]
-            )
+                raise TaxomeshItemNotFoundError(f"Item {related_id!r} referenced by relation not found")
+            result.setdefault(group_key_id, {}).setdefault(relation_type, []).append(item_map[related_id])
         return result
+
+    def _log_dangling_relation(
+        self,
+        item_map: dict[UUID, Item],
+        present_id: UUID,
+        orphan_id: UUID,
+        relation_type: str,
+        orphan_is_target: bool,
+    ) -> None:
+        """Emit the WARNING for a dangling relation skipped during batch resolution.
+
+        *present_id* is the queried endpoint (expected to be enabled and present);
+        *orphan_id* is the related endpoint that could not be materialised. Role
+        labels follow the link's direction so the message stays accurate for
+        outgoing, incoming, and both traversals.
+        """
+        present_role = "source" if orphan_is_target else "target"
+        orphan_role = "target" if orphan_is_target else "source"
+        present_item = item_map.get(present_id)
+        if present_item is None:
+            present_repr = f"<unknown {present_role} item {present_id}>"
+        else:
+            try:
+                present_repr = str(present_item)
+            except Exception:
+                present_repr = f"<item {present_id} str() failed>"
+        logger.warning(
+            f"list_related_items_for_sources: dangling relation skipped — "
+            f"{present_role}: %s, {orphan_role}: <orphaned item %s>, relation_type: %r",
+            present_repr,
+            orphan_id,
+            relation_type,
+        )
 
     def remove_item_relation(
         self,

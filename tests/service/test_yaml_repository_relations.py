@@ -141,7 +141,7 @@ class TestYAMLBackwardCompat:
 
 
 class TestYAMLBatchRelationLookup:
-    """Tests for YAMLRepository.list_item_relation_links_for_sources."""
+    """Tests for YAMLRepository.list_item_relation_links_for_items."""
 
     def test_returns_links_for_multiple_sources(self, tmp_yaml_path: Path) -> None:
         svc = _fresh(tmp_yaml_path)
@@ -154,7 +154,7 @@ class TestYAMLBatchRelationLookup:
         svc.relate_items(b.item_id, t2.item_id, "y")
 
         repo = _fresh(tmp_yaml_path)._repo
-        links = repo.list_item_relation_links_for_sources([a.item_id, b.item_id])
+        links = repo.list_item_relation_links_for_items([a.item_id, b.item_id])
         assert len(links) == 2
         source_ids = {lnk.source_item_id for lnk in links}
         assert source_ids == {a.item_id, b.item_id}
@@ -162,7 +162,7 @@ class TestYAMLBatchRelationLookup:
 
     def test_empty_source_ids_returns_empty(self, tmp_yaml_path: Path) -> None:
         repo = YAMLRepository(tmp_yaml_path)
-        assert repo.list_item_relation_links_for_sources([]) == []
+        assert repo.list_item_relation_links_for_items([]) == []
 
     def test_filters_by_relation_types(self, tmp_yaml_path: Path) -> None:
         svc = _fresh(tmp_yaml_path)
@@ -173,7 +173,7 @@ class TestYAMLBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
 
         repo = _fresh(tmp_yaml_path)._repo
-        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=["music_by"])
+        links = repo.list_item_relation_links_for_items([src.item_id], relation_types=["music_by"])
         assert len(links) == 1
         assert links[0].relation_type == "music_by"
 
@@ -186,7 +186,7 @@ class TestYAMLBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
 
         repo = _fresh(tmp_yaml_path)._repo
-        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=None)
+        links = repo.list_item_relation_links_for_items([src.item_id], relation_types=None)
         assert len(links) == 2
 
     def test_empty_filter_returns_all_types(self, tmp_yaml_path: Path) -> None:
@@ -198,7 +198,7 @@ class TestYAMLBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "lyrics_by")
 
         repo = _fresh(tmp_yaml_path)._repo
-        links = repo.list_item_relation_links_for_sources([src.item_id], relation_types=[])
+        links = repo.list_item_relation_links_for_items([src.item_id], relation_types=[])
         assert len(links) == 2
 
     def test_ordering(self, tmp_yaml_path: Path) -> None:
@@ -210,7 +210,7 @@ class TestYAMLBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "covers", sort_index=1)
 
         repo = _fresh(tmp_yaml_path)._repo
-        links = repo.list_item_relation_links_for_sources([src.item_id])
+        links = repo.list_item_relation_links_for_items([src.item_id])
         assert links[0].sort_index == 1
         assert links[1].sort_index == 5
 
@@ -223,6 +223,96 @@ class TestYAMLBatchRelationLookup:
         svc.relate_items(src.item_id, t2.item_id, "covers", sort_index=0)
 
         repo = _fresh(tmp_yaml_path)._repo
-        links = repo.list_item_relation_links_for_sources([src.item_id])
+        links = repo.list_item_relation_links_for_items([src.item_id])
         target_ids = [str(lnk.target_item_id) for lnk in links]
         assert target_ids == sorted(target_ids)
+
+
+class TestYAMLBatchIncomingRelationLookup:
+    """Tests for YAMLRepository.list_item_relation_links_for_items(direction="incoming")."""
+
+    def test_returns_links_for_multiple_targets(self, tmp_yaml_path: Path) -> None:
+        svc = _fresh(tmp_yaml_path)
+        s1 = svc.create_item(name="S1")
+        s2 = svc.create_item(name="S2")
+        a = svc.create_item(name="A")
+        b = svc.create_item(name="B")
+        c = svc.create_item(name="C")
+        svc.relate_items(s1.item_id, a.item_id, "x")
+        svc.relate_items(s2.item_id, b.item_id, "y")
+
+        repo = _fresh(tmp_yaml_path)._repo
+        links = repo.list_item_relation_links_for_items([a.item_id, b.item_id], direction="incoming")
+        assert len(links) == 2
+        target_ids = {lnk.target_item_id for lnk in links}
+        assert target_ids == {a.item_id, b.item_id}
+        assert all(lnk.target_item_id != c.item_id for lnk in links)
+
+    def test_empty_target_ids_returns_empty(self, tmp_yaml_path: Path) -> None:
+        repo = YAMLRepository(tmp_yaml_path)
+        assert repo.list_item_relation_links_for_items([], direction="incoming") == []
+
+    def test_filters_by_relation_types(self, tmp_yaml_path: Path) -> None:
+        svc = _fresh(tmp_yaml_path)
+        s1 = svc.create_item(name="S1")
+        s2 = svc.create_item(name="S2")
+        tgt = svc.create_item(name="tgt")
+        svc.relate_items(s1.item_id, tgt.item_id, "music_by")
+        svc.relate_items(s2.item_id, tgt.item_id, "lyrics_by")
+
+        repo = _fresh(tmp_yaml_path)._repo
+        links = repo.list_item_relation_links_for_items(
+            [tgt.item_id], direction="incoming", relation_types=["music_by"]
+        )
+        assert len(links) == 1
+        assert links[0].relation_type == "music_by"
+
+    def test_none_filter_returns_all_types(self, tmp_yaml_path: Path) -> None:
+        svc = _fresh(tmp_yaml_path)
+        s1 = svc.create_item(name="S1")
+        s2 = svc.create_item(name="S2")
+        tgt = svc.create_item(name="tgt")
+        svc.relate_items(s1.item_id, tgt.item_id, "music_by")
+        svc.relate_items(s2.item_id, tgt.item_id, "lyrics_by")
+
+        repo = _fresh(tmp_yaml_path)._repo
+        links = repo.list_item_relation_links_for_items([tgt.item_id], direction="incoming", relation_types=None)
+        assert len(links) == 2
+
+    def test_empty_filter_returns_all_types(self, tmp_yaml_path: Path) -> None:
+        svc = _fresh(tmp_yaml_path)
+        s1 = svc.create_item(name="S1")
+        s2 = svc.create_item(name="S2")
+        tgt = svc.create_item(name="tgt")
+        svc.relate_items(s1.item_id, tgt.item_id, "music_by")
+        svc.relate_items(s2.item_id, tgt.item_id, "lyrics_by")
+
+        repo = _fresh(tmp_yaml_path)._repo
+        links = repo.list_item_relation_links_for_items([tgt.item_id], direction="incoming", relation_types=[])
+        assert len(links) == 2
+
+    def test_ordering(self, tmp_yaml_path: Path) -> None:
+        svc = _fresh(tmp_yaml_path)
+        s1 = svc.create_item(name="S1")
+        s2 = svc.create_item(name="S2")
+        tgt = svc.create_item(name="tgt")
+        svc.relate_items(s1.item_id, tgt.item_id, "covers", sort_index=5)
+        svc.relate_items(s2.item_id, tgt.item_id, "covers", sort_index=1)
+
+        repo = _fresh(tmp_yaml_path)._repo
+        links = repo.list_item_relation_links_for_items([tgt.item_id], direction="incoming")
+        assert links[0].sort_index == 1
+        assert links[1].sort_index == 5
+
+    def test_stable_tiebreak_by_source_id(self, tmp_yaml_path: Path) -> None:
+        svc = _fresh(tmp_yaml_path)
+        s1 = svc.create_item(name="S1")
+        s2 = svc.create_item(name="S2")
+        tgt = svc.create_item(name="tgt")
+        svc.relate_items(s1.item_id, tgt.item_id, "covers", sort_index=0)
+        svc.relate_items(s2.item_id, tgt.item_id, "covers", sort_index=0)
+
+        repo = _fresh(tmp_yaml_path)._repo
+        links = repo.list_item_relation_links_for_items([tgt.item_id], direction="incoming")
+        source_ids = [str(lnk.source_item_id) for lnk in links]
+        assert source_ids == sorted(source_ids)

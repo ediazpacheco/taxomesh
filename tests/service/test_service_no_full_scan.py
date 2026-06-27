@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Collection
+from typing import Literal
 from uuid import UUID, uuid4
 
 import pytest
@@ -43,6 +44,16 @@ class RecordingRepository(InMemoryRepository):
         recorded_categories = set(category_ids) if category_ids is not None else None
         self.calls.append(("list_item_parent_links", {"item_id": item_id, "category_ids": recorded_categories}))
         return super().list_item_parent_links(item_id=item_id, category_ids=category_ids)
+
+    def list_item_relation_links_for_items(
+        self,
+        item_ids: Collection[UUID],
+        *,
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
+        relation_types: Collection[str] | None = None,
+    ) -> list[ItemRelationLink]:
+        self.calls.append(("list_item_relation_links_for_items", {"item_ids": set(item_ids), "direction": direction}))
+        return super().list_item_relation_links_for_items(item_ids, direction=direction, relation_types=relation_types)
 
     def names(self) -> list[str]:
         """Return the recorded method names in call order."""
@@ -133,6 +144,93 @@ def test_related_items_disabled_target_raises_when_skip_disabled(
     with pytest.raises(TaxomeshItemNotFoundError) as excinfo:
         spy_service.list_related_items_for_sources([source.item_id], skip_on_error=False)
     assert str(excinfo.value) == f"Item {target.item_id!r} referenced by relation not found"
+
+
+# ---------------------------------------------------------------------------
+# Site 1b — direction-aware batched traversal: incoming / both anti-N+1 (056)
+# ---------------------------------------------------------------------------
+
+
+def _link_query_calls(spy: RecordingRepository) -> list[dict[str, object]]:
+    """Recorded calls to the unified batched link query."""
+    return spy.kwargs_of("list_item_relation_links_for_items")
+
+
+def test_related_items_incoming_two_calls_no_full_scan(spy: RecordingRepository, spy_service: TaxomeshService) -> None:
+    """direction="incoming": exactly one link query (direction=incoming) + one bulk lookup; no full scan."""
+    tgt = spy_service.create_item("Target")
+    src_b = spy_service.create_item("Source B")
+    src_c = spy_service.create_item("Source C")
+    unrelated = spy_service.create_item("Unrelated")
+    spy_service.relate_items(src_b.item_id, tgt.item_id, "covers")
+    spy_service.relate_items(src_c.item_id, tgt.item_id, "performed_by")
+    spy.calls.clear()
+
+    result = spy_service.list_related_items_for_sources([tgt.item_id], direction="incoming")
+
+    assert "list_items" not in spy.names()
+    link_calls = _link_query_calls(spy)
+    assert len(link_calls) == 1
+    assert link_calls[0]["direction"] == "incoming"
+    bulk_calls = spy.kwargs_of("get_items_by_ids")
+    assert len(bulk_calls) == 1
+    assert bulk_calls[0]["enabled"] is True
+    assert bulk_calls[0]["item_ids"] == {tgt.item_id, src_b.item_id, src_c.item_id}
+    assert unrelated.item_id not in bulk_calls[0]["item_ids"]  # type: ignore[operator]
+    assert result == {tgt.item_id: {"covers": [src_b], "performed_by": [src_c]}}
+
+
+def test_related_items_incoming_call_count_constant_in_input_size(
+    spy: RecordingRepository, spy_service: TaxomeshService
+) -> None:
+    """Repository call count does not grow with the number of queried ids (anti-N+1)."""
+    targets = [spy_service.create_item(f"T{n}") for n in range(5)]
+    for t in targets:
+        s = spy_service.create_item(f"S-for-{t.name}")
+        spy_service.relate_items(s.item_id, t.item_id, "covers")
+    spy.calls.clear()
+
+    spy_service.list_related_items_for_sources([t.item_id for t in targets], direction="incoming")
+
+    assert len(_link_query_calls(spy)) == 1
+    assert len(spy.kwargs_of("get_items_by_ids")) == 1
+
+
+def test_related_items_both_two_calls(spy: RecordingRepository, spy_service: TaxomeshService) -> None:
+    """direction="both": a single combined link query + one bulk lookup = two calls."""
+    mid = spy_service.create_item("Mid")
+    out_tgt = spy_service.create_item("OutTarget")
+    in_src = spy_service.create_item("InSource")
+    spy_service.relate_items(mid.item_id, out_tgt.item_id, "covers")
+    spy_service.relate_items(in_src.item_id, mid.item_id, "covers")
+    spy.calls.clear()
+
+    result = spy_service.list_related_items_for_sources([mid.item_id], direction="both")
+
+    assert "list_items" not in spy.names()
+    link_calls = _link_query_calls(spy)
+    assert len(link_calls) == 1
+    assert link_calls[0]["direction"] == "both"
+    assert len(spy.kwargs_of("get_items_by_ids")) == 1
+    assert [i.item_id for i in result[mid.item_id]["covers"]] == [out_tgt.item_id, in_src.item_id]
+
+
+def test_related_items_both_call_count_constant_in_input_size(
+    spy: RecordingRepository, spy_service: TaxomeshService
+) -> None:
+    """The two-call bound for "both" stays constant as the number of queried ids grows."""
+    mids = [spy_service.create_item(f"M{n}") for n in range(5)]
+    for m in mids:
+        out_t = spy_service.create_item(f"out-{m.name}")
+        in_s = spy_service.create_item(f"in-{m.name}")
+        spy_service.relate_items(m.item_id, out_t.item_id, "covers")
+        spy_service.relate_items(in_s.item_id, m.item_id, "covers")
+    spy.calls.clear()
+
+    spy_service.list_related_items_for_sources([m.item_id for m in mids], direction="both")
+
+    assert len(_link_query_calls(spy)) == 1
+    assert len(spy.kwargs_of("get_items_by_ids")) == 1
 
 
 # ---------------------------------------------------------------------------

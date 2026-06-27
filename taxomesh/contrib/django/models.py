@@ -249,6 +249,10 @@ class ItemRelationLinkModel(models.Model):
                 fields=["source_item_id", "relation_type", "sort_index", "target_item_id"],
                 name="taxomesh_rl_src_type_sort_idx",
             ),
+            models.Index(
+                fields=["target_item_id", "relation_type", "sort_index", "source_item_id"],
+                name="taxomesh_rl_tgt_type_sort_idx",
+            ),
         ]
 
 

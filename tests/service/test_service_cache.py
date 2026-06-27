@@ -293,7 +293,7 @@ def _repo_with_batch_relation(src_id: UUID, tgt_id: UUID) -> MagicMock:
 
     repo = _mock_repo()
     link = ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers")
-    repo.list_item_relation_links_for_sources.return_value = [link]
+    repo.list_item_relation_links_for_items.return_value = [link]
     repo.get_items_by_ids.return_value = {
         src_id: Item(external_id="src", item_id=src_id),
         tgt_id: Item(external_id="tgt", item_id=tgt_id),
@@ -313,7 +313,7 @@ class TestBatchRelatedItemsCaching:
 
         first = svc.list_related_items_for_sources([src_id])
         second = svc.list_related_items_for_sources([src_id])
-        repo.list_item_relation_links_for_sources.assert_called_once()
+        repo.list_item_relation_links_for_items.assert_called_once()
         assert second == first
 
     def test_cache_expires_after_ttl(self) -> None:
@@ -325,11 +325,11 @@ class TestBatchRelatedItemsCaching:
         with patch("taxomesh.utils.memoize.time") as mock_time:
             mock_time.monotonic.return_value = 0.0
             svc.list_related_items_for_sources([src_id])
-            assert repo.list_item_relation_links_for_sources.call_count == 1
+            assert repo.list_item_relation_links_for_items.call_count == 1
 
             mock_time.monotonic.return_value = 6.0  # past DEFAULT_CACHE_TTL (5 s)
             svc.list_related_items_for_sources([src_id])
-            assert repo.list_item_relation_links_for_sources.call_count == 2
+            assert repo.list_item_relation_links_for_items.call_count == 2
 
     def test_different_source_ids_are_independent_entries(self) -> None:
         """US1 — a different source set queries the repository again."""
@@ -339,7 +339,7 @@ class TestBatchRelatedItemsCaching:
 
         svc.list_related_items_for_sources([src_id])
         svc.list_related_items_for_sources([uuid4()])
-        assert repo.list_item_relation_links_for_sources.call_count == 2
+        assert repo.list_item_relation_links_for_items.call_count == 2
 
     def test_different_relation_type_filters_are_independent_entries(self) -> None:
         """US1 — a different relation-type filter queries the repository again."""
@@ -349,7 +349,7 @@ class TestBatchRelatedItemsCaching:
 
         svc.list_related_items_for_sources([src_id], relation_types=["covers"])
         svc.list_related_items_for_sources([src_id], relation_types=["performs"])
-        assert repo.list_item_relation_links_for_sources.call_count == 2
+        assert repo.list_item_relation_links_for_items.call_count == 2
 
     def test_empty_source_ids_returns_empty_without_repo_call(self) -> None:
         """US1 — empty input short-circuits before the cache and the repository."""
@@ -357,7 +357,7 @@ class TestBatchRelatedItemsCaching:
         svc = _make_service(repo)
 
         assert svc.list_related_items_for_sources([]) == {}
-        repo.list_item_relation_links_for_sources.assert_not_called()
+        repo.list_item_relation_links_for_items.assert_not_called()
 
     def test_relation_type_variants_share_cache_entry(self) -> None:
         """US2 — reordering, duplicates, casing and whitespace share one entry."""
@@ -368,7 +368,7 @@ class TestBatchRelatedItemsCaching:
         svc.list_related_items_for_sources([src_id], relation_types=["a", "b"])
         svc.list_related_items_for_sources([src_id], relation_types=["b", "a"])
         svc.list_related_items_for_sources([src_id], relation_types=["B", " a ", "b"])
-        repo.list_item_relation_links_for_sources.assert_called_once()
+        repo.list_item_relation_links_for_items.assert_called_once()
 
     def test_source_id_variants_share_cache_entry(self) -> None:
         """US2 — reordered and duplicated source IDs share one entry."""
@@ -378,7 +378,7 @@ class TestBatchRelatedItemsCaching:
 
         svc.list_related_items_for_sources([src_a, src_b])
         svc.list_related_items_for_sources([src_b, src_a, src_a])
-        repo.list_item_relation_links_for_sources.assert_called_once()
+        repo.list_item_relation_links_for_items.assert_called_once()
 
     def test_none_and_empty_relation_types_share_cache_entry(self) -> None:
         """US2 — "no filter" as None and as an empty collection share one entry."""
@@ -388,7 +388,7 @@ class TestBatchRelatedItemsCaching:
 
         svc.list_related_items_for_sources([src_id], relation_types=None)
         svc.list_related_items_for_sources([src_id], relation_types=[])
-        repo.list_item_relation_links_for_sources.assert_called_once()
+        repo.list_item_relation_links_for_items.assert_called_once()
 
     def test_skip_on_error_values_are_distinct_entries(self) -> None:
         """US2/FR-003 — skip_on_error changes behaviour, so it splits the key."""
@@ -398,7 +398,7 @@ class TestBatchRelatedItemsCaching:
 
         svc.list_related_items_for_sources([src_id], skip_on_error=True)
         svc.list_related_items_for_sources([src_id], skip_on_error=False)
-        assert repo.list_item_relation_links_for_sources.call_count == 2
+        assert repo.list_item_relation_links_for_items.call_count == 2
 
     def test_clear_all_caches_forces_refetch(self) -> None:
         """US3 — explicit cache clearing re-queries the repository."""
@@ -409,7 +409,29 @@ class TestBatchRelatedItemsCaching:
         svc.list_related_items_for_sources([src_id])
         clear_all_caches()
         svc.list_related_items_for_sources([src_id])
-        assert repo.list_item_relation_links_for_sources.call_count == 2
+        assert repo.list_item_relation_links_for_items.call_count == 2
+
+    def test_direction_variants_are_independent_entries(self) -> None:
+        """056 — outgoing/incoming/both are distinct cache keys (one unified query each)."""
+        a, b = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(a, b)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([a], direction="outgoing")
+        svc.list_related_items_for_sources([a], direction="incoming")
+        svc.list_related_items_for_sources([a], direction="both")
+        # Three distinct directions → three distinct cache entries → three queries.
+        assert repo.list_item_relation_links_for_items.call_count == 3
+
+    def test_incoming_identical_calls_hit_repo_once(self) -> None:
+        """056 — two identical incoming calls query the repository once."""
+        a, b = uuid4(), uuid4()
+        repo = _repo_with_batch_relation(a, b)
+        svc = _make_service(repo)
+
+        svc.list_related_items_for_sources([b], direction="incoming")
+        svc.list_related_items_for_sources([b], direction="incoming")
+        repo.list_item_relation_links_for_items.assert_called_once()
 
     def test_write_invalidates_batch_cache(self) -> None:
         """US3 — a write between identical calls invalidates the cached entry."""
@@ -424,7 +446,7 @@ class TestBatchRelatedItemsCaching:
         assert set(first[src_id]) == {"covers"}
 
         new_tgt = uuid4()
-        repo.list_item_relation_links_for_sources.return_value = [
+        repo.list_item_relation_links_for_items.return_value = [
             ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers"),
             ItemRelationLink(source_item_id=src_id, target_item_id=new_tgt, relation_type="performs"),
         ]
@@ -436,7 +458,7 @@ class TestBatchRelatedItemsCaching:
         svc.relate_items(src_id, new_tgt, "performs")
 
         second = svc.list_related_items_for_sources([src_id])
-        assert repo.list_item_relation_links_for_sources.call_count == 2
+        assert repo.list_item_relation_links_for_items.call_count == 2
         assert set(second[src_id]) == {"covers", "performs"}
 
     def test_raised_error_is_not_cached(self) -> None:
@@ -446,7 +468,7 @@ class TestBatchRelatedItemsCaching:
 
         src_id, tgt_id = uuid4(), uuid4()
         repo = _mock_repo()
-        repo.list_item_relation_links_for_sources.return_value = [
+        repo.list_item_relation_links_for_items.return_value = [
             ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers")
         ]
         repo.get_items_by_ids.return_value = {src_id: Item(external_id="src", item_id=src_id)}  # tgt dangling
@@ -456,7 +478,7 @@ class TestBatchRelatedItemsCaching:
             svc.list_related_items_for_sources([src_id], skip_on_error=False)
         with pytest.raises(TaxomeshItemNotFoundError):
             svc.list_related_items_for_sources([src_id], skip_on_error=False)
-        assert repo.list_item_relation_links_for_sources.call_count == 2
+        assert repo.list_item_relation_links_for_items.call_count == 2
 
 
 # ---------------------------------------------------------------------------
