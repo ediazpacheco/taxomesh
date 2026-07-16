@@ -47,7 +47,7 @@ class CreateItemRequest(BaseModel):
     """Request body for creating a new item."""
 
     name: Annotated[str, Field(max_length=MAX_ITEM_NAME_LENGTH)]
-    external_id: Annotated[str, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = ""
+    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = None
     slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
