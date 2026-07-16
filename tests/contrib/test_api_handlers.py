@@ -235,12 +235,26 @@ class TestUpdateItem:
         result = handlers.update_item(service, item.item_id, body)
         assert result.enabled is False
 
-    def test_updates_external_id(self, service: TaxomeshService) -> None:
-        """external_id field is updated when provided."""
+    def test_omitted_external_id_is_unchanged(self, service: TaxomeshService) -> None:
+        """An omitted external_id is preserved during an unrelated update."""
+        item = service.create_item(name="Item", external_id="ext-original")
+        body = UpdateItemRequest(name="Renamed Item")
+        result = handlers.update_item(service, item.item_id, body)
+        assert result.external_id == "ext-original"
+
+    def test_updates_external_id_to_explicit_value(self, service: TaxomeshService) -> None:
+        """external_id is updated when an explicit value is provided."""
         item = service.create_item(name="Item")
         body = UpdateItemRequest(external_id="ext-42")
         result = handlers.update_item(service, item.item_id, body)
         assert result.external_id == "ext-42"
+
+    def test_explicit_none_clears_external_id(self, service: TaxomeshService) -> None:
+        """An explicitly null external_id clears the stored value."""
+        item = service.create_item(name="Item", external_id="ext-original")
+        body = UpdateItemRequest(external_id=None)
+        result = handlers.update_item(service, item.item_id, body)
+        assert result.external_id is None
 
 
 class TestDeleteItem:

@@ -111,7 +111,7 @@ def update_category(service: TaxomeshService, category_id: UUID, body: UpdateCat
     Args:
         service: The TaxomeshService instance to delegate to.
         category_id: The library-assigned UUID of the category to update.
-        body: Validated update request; only non-None fields are applied.
+        body: Validated update request; only explicitly provided fields are delegated.
 
     Returns:
         The updated Category.
@@ -120,13 +120,7 @@ def update_category(service: TaxomeshService, category_id: UUID, body: UpdateCat
         TaxomeshCategoryNotFoundError: If no category with the given id exists.
         TaxomeshDuplicateSlugError: If slug is non-empty and already in use.
     """
-    return service.update_category(
-        category_id=category_id,
-        name=body.name,
-        description=body.description,
-        slug=body.slug,
-        metadata=body.metadata,
-    )
+    return service.update_category(category_id=category_id, **body.model_dump(exclude_unset=True))
 
 
 def delete_category(service: TaxomeshService, category_id: UUID) -> None:
@@ -242,7 +236,7 @@ def update_item(service: TaxomeshService, item_id: UUID, body: UpdateItemRequest
     Args:
         service: The TaxomeshService instance to delegate to.
         item_id: The library-assigned UUID of the item to update.
-        body: Validated update request; only non-None fields are applied.
+        body: Validated update request; only explicitly provided fields are delegated.
 
     Returns:
         The updated Item.
@@ -251,14 +245,7 @@ def update_item(service: TaxomeshService, item_id: UUID, body: UpdateItemRequest
         TaxomeshItemNotFoundError: If no item with the given id exists.
         TaxomeshDuplicateSlugError: If slug is non-empty and already in use.
     """
-    return service.update_item(
-        item_id=item_id,
-        name=body.name,
-        external_id=body.external_id,
-        enabled=body.enabled,
-        slug=body.slug,
-        metadata=body.metadata,
-    )
+    return service.update_item(item_id=item_id, **body.model_dump(exclude_unset=True))
 
 
 def delete_item(service: TaxomeshService, item_id: UUID) -> None:
@@ -310,7 +297,7 @@ def update_tag(service: TaxomeshService, tag_id: UUID, body: UpdateTagRequest) -
     Args:
         service: The TaxomeshService instance to delegate to.
         tag_id: The library-assigned UUID of the tag to update.
-        body: Validated update request; only non-None fields are applied.
+        body: Validated update request; only explicitly provided fields are delegated.
 
     Returns:
         The updated Tag.
@@ -318,7 +305,7 @@ def update_tag(service: TaxomeshService, tag_id: UUID, body: UpdateTagRequest) -
     Raises:
         TaxomeshTagNotFoundError: If no tag with the given id exists.
     """
-    return service.update_tag(tag_id=tag_id, name=body.name)
+    return service.update_tag(tag_id=tag_id, **body.model_dump(exclude_unset=True))
 
 
 def delete_tag(service: TaxomeshService, tag_id: UUID) -> None:
