@@ -34,7 +34,7 @@ class CreateCategoryRequest(BaseModel):
 class UpdateCategoryRequest(BaseModel):
     """Request body for partially updating an existing category.
 
-    Only non-None fields are applied by the handler.
+    The handler delegates only explicitly provided fields.
     """
 
     name: Annotated[str, Field(max_length=MAX_CATEGORY_NAME_LENGTH)] | None = None
@@ -55,7 +55,8 @@ class CreateItemRequest(BaseModel):
 class UpdateItemRequest(BaseModel):
     """Request body for partially updating an existing item.
 
-    Only non-None fields are applied by the handler.
+    The handler delegates only explicitly provided fields. An explicit null
+    external_id clears the stored external identifier.
     """
 
     name: Annotated[str, Field(max_length=MAX_ITEM_NAME_LENGTH)] | None = None
@@ -75,7 +76,7 @@ class CreateTagRequest(BaseModel):
 class UpdateTagRequest(BaseModel):
     """Request body for partially updating an existing tag.
 
-    Only non-None fields are applied by the handler.
+    The handler delegates only explicitly provided fields.
     """
 
     name: Annotated[str, Field(max_length=MAX_TAG_NAME_LENGTH)] | None = None
