@@ -310,6 +310,8 @@ Do NOT update README during implement — only after
 - N/A — pure in-process cache; no storage or migration changes. All repository adapters (Json, YAML, Django, InMemory) untouched. (055-memoize-batch-related)
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 (domain models); Django ≥ 4.2 (optional adapter); pyyaml ≥ 6.0; existing `taxomesh/utils/memoize.py` TTL cache (056-batch-related-direction)
 - JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM), InMemoryRepository (test fixture in `tests/service/conftest.py`) (056-batch-related-direction)
+- Python 3.11 (targets 3.11–3.13) + Pydantic v2 (existing direct dep) — **no new dependencies** (057-api-request-omission)
+- N/A for the change itself. Verification spans all four backends: `InMemoryRepository` (test fixture), `JsonRepository`, `YAMLRepository`, `DjangoRepository` (057-api-request-omission)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

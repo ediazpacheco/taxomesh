@@ -1,5 +1,6 @@
 """Tests for taxomesh.contrib.api.schemas — Pydantic request model validation."""
 
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -54,28 +55,64 @@ class TestCreateCategoryRequest:
         with pytest.raises(ValidationError):
             CreateCategoryRequest(name="ok", slug="s" * (MAX_SLUG_LENGTH + 1))
 
+    @pytest.mark.parametrize("field", ["name", "description", "slug", "metadata"])
+    def test_explicit_null_on_non_nullable_field_is_rejected(self, field: str) -> None:
+        """FR-011: the creation schema already conforms to the single rule — null is rejected here.
+
+        Locks the conformance in so a creation field can never later be widened to X | None merely
+        to express that it may be omitted.
+        """
+        kwargs: dict[str, Any] = {"name": "ok", field: None}
+        with pytest.raises(ValidationError):
+            CreateCategoryRequest(**kwargs)
+
 
 class TestUpdateCategoryRequest:
-    """Tests for UpdateCategoryRequest schema."""
+    """Tests for UpdateCategoryRequest schema — same single rule as items, plus the external_id
+    and enabled fields exposed by this feature (FR-013, FR-014)."""
 
-    def test_all_none_is_valid(self) -> None:
-        """Partial update with all None fields is accepted."""
+    def test_all_fields_omittable(self) -> None:
+        """Every field may be omitted; an empty request carries no instruction."""
         req = UpdateCategoryRequest()
-        assert req.name is None
-        assert req.description is None
-        assert req.slug is None
-        assert req.metadata is None
+        assert req.model_fields_set == set()
+        assert req.model_dump(exclude_unset=True) == {}
 
-    def test_partial_update(self) -> None:
-        """Only provided fields override defaults."""
+    def test_partial_update_records_only_set_fields(self) -> None:
+        """Only fields the caller set are recorded; an unmentioned field stays absent, not defaulted."""
         req = UpdateCategoryRequest(name="New Name")
         assert req.name == "New Name"
-        assert req.description is None
+        assert req.model_fields_set == {"name"}
+        assert "description" not in req.model_fields_set
 
     def test_name_too_long_raises(self) -> None:
         """Name exceeding max_length triggers a ValidationError."""
         with pytest.raises(ValidationError):
             UpdateCategoryRequest(name="x" * (MAX_CATEGORY_NAME_LENGTH + 1))
+
+    @pytest.mark.parametrize("field", ["name", "description", "slug", "metadata", "enabled"])
+    def test_explicit_null_on_non_nullable_field_is_rejected(self, field: str) -> None:
+        """A non-nullable field rejects an explicit null (SC-003), including the new enabled field."""
+        kwargs: dict[str, Any] = {field: None}
+        with pytest.raises(ValidationError):
+            UpdateCategoryRequest(**kwargs)
+
+    def test_external_id_field(self) -> None:
+        """external_id is exposed and accepts a string (FR-013)."""
+        req = UpdateCategoryRequest(external_id="ext-cat")
+        assert req.external_id == "ext-cat"
+        assert "external_id" in req.model_fields_set
+
+    def test_explicit_null_external_id_is_valid(self) -> None:
+        """external_id is the sole nullable field: an explicit null is accepted as 'clear' (FR-013)."""
+        req = UpdateCategoryRequest(external_id=None)
+        assert req.external_id is None
+        assert "external_id" in req.model_fields_set
+
+    def test_enabled_field(self) -> None:
+        """enabled is exposed and accepts a bool (FR-014)."""
+        req = UpdateCategoryRequest(enabled=False)
+        assert req.enabled is False
+        assert "enabled" in req.model_fields_set
 
 
 class TestCreateItemRequest:
@@ -99,18 +136,33 @@ class TestCreateItemRequest:
         with pytest.raises(ValidationError):
             CreateItemRequest(name="x" * (MAX_ITEM_NAME_LENGTH + 1))
 
+    @pytest.mark.parametrize("field", ["name", "slug", "metadata"])
+    def test_explicit_null_on_non_nullable_field_is_rejected(self, field: str) -> None:
+        """FR-011: the creation schema rejects null on non-nullable fields."""
+        kwargs: dict[str, Any] = {"name": "ok", field: None}
+        with pytest.raises(ValidationError):
+            CreateItemRequest(**kwargs)
+
+    def test_explicit_null_external_id_is_accepted(self) -> None:
+        """FR-011 / FR-009: external_id is nullable, so an explicit null is accepted (means absent)."""
+        req = CreateItemRequest(name="ok", external_id=None)
+        assert req.external_id is None
+
 
 class TestUpdateItemRequest:
-    """Tests for UpdateItemRequest schema."""
+    """Tests for UpdateItemRequest schema — the single rule: omitted = no instruction,
+    present = assign-or-reject, only external_id accepts null (it is the sole nullable field)."""
 
-    def test_all_none_is_valid(self) -> None:
-        """All fields may be None for a no-op update."""
+    def test_all_fields_omittable(self) -> None:
+        """Every field may be omitted; an empty request carries no instruction.
+
+        Presence — not a default value — is what carries meaning. ``model_fields_set`` is empty
+        and ``model_dump(exclude_unset=True)`` yields nothing to delegate, so a no-op update
+        touches no stored field.
+        """
         req = UpdateItemRequest()
-        assert req.name is None
-        assert req.external_id is None
-        assert req.enabled is None
-        assert req.slug is None
-        assert req.metadata is None
+        assert req.model_fields_set == set()
+        assert req.model_dump(exclude_unset=True) == {}
 
     def test_enabled_field(self) -> None:
         """enabled field accepts bool."""
@@ -121,6 +173,26 @@ class TestUpdateItemRequest:
         """external_id field is accepted as optional str."""
         req = UpdateItemRequest(external_id="ext-99")
         assert req.external_id == "ext-99"
+
+    @pytest.mark.parametrize("field", ["name", "slug", "enabled", "metadata"])
+    def test_explicit_null_on_non_nullable_field_is_rejected(self, field: str) -> None:
+        """A non-nullable field rejects an explicit null — it is not accepted and discarded (SC-003)."""
+        kwargs: dict[str, Any] = {field: None}
+        with pytest.raises(ValidationError):
+            UpdateItemRequest(**kwargs)
+
+    def test_explicit_null_external_id_is_valid(self) -> None:
+        """external_id is the sole nullable field: an explicit null is accepted as 'clear'."""
+        req = UpdateItemRequest(external_id=None)
+        assert req.external_id is None
+        assert "external_id" in req.model_fields_set
+
+    def test_present_valid_value_is_assigned(self) -> None:
+        """A present valid value is recorded as set, so it is delegated."""
+        req = UpdateItemRequest(name="Renamed", slug="renamed")
+        assert req.name == "Renamed"
+        assert req.slug == "renamed"
+        assert req.model_fields_set == {"name", "slug"}
 
 
 class TestCreateTagRequest:
@@ -137,19 +209,33 @@ class TestCreateTagRequest:
         with pytest.raises(ValidationError):
             CreateTagRequest(name="t" * (MAX_TAG_NAME_LENGTH + 1))
 
+    @pytest.mark.parametrize("field", ["name", "metadata"])
+    def test_explicit_null_on_non_nullable_field_is_rejected(self, field: str) -> None:
+        """FR-011: the creation schema rejects null on non-nullable fields."""
+        kwargs: dict[str, Any] = {"name": "ok", field: None}
+        with pytest.raises(ValidationError):
+            CreateTagRequest(**kwargs)
+
 
 class TestUpdateTagRequest:
     """Tests for UpdateTagRequest schema."""
 
-    def test_all_none_is_valid(self) -> None:
-        """All fields may be None."""
+    def test_name_omittable(self) -> None:
+        """name may be omitted; an empty request carries no instruction."""
         req = UpdateTagRequest()
-        assert req.name is None
+        assert req.model_fields_set == set()
+        assert req.model_dump(exclude_unset=True) == {}
 
     def test_name_provided(self) -> None:
         """Non-None name is accepted."""
         req = UpdateTagRequest(name="sci-fi")
         assert req.name == "sci-fi"
+
+    def test_explicit_null_name_is_rejected(self) -> None:
+        """name is non-nullable: an explicit null is rejected, not discarded (SC-003)."""
+        kwargs: dict[str, Any] = {"name": None}
+        with pytest.raises(ValidationError):
+            UpdateTagRequest(**kwargs)
 
 
 class TestAddParentRequest:

@@ -34,13 +34,20 @@ class CreateCategoryRequest(BaseModel):
 class UpdateCategoryRequest(BaseModel):
     """Request body for partially updating an existing category.
 
-    The handler delegates only explicitly provided fields.
+    Follows the single rule: an omitted field carries no instruction and leaves the stored
+    value untouched; a present field means "assign exactly this value" and is rejected if that
+    value is invalid for the field. Optionality is expressed by an inert default, never by
+    widening a field's type — so a non-nullable field rejects an explicit null. ``external_id``
+    is the sole field whose value domain includes null, so it alone accepts an explicit null,
+    which clears the stored external identifier.
     """
 
-    name: Annotated[str, Field(max_length=MAX_CATEGORY_NAME_LENGTH)] | None = None
-    description: Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)] | None = None
-    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] | None = None
-    metadata: dict[str, Any] | None = None
+    name: Annotated[str, Field(max_length=MAX_CATEGORY_NAME_LENGTH)] = ""
+    description: Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)] = ""
+    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = None
+    enabled: bool = True
 
 
 class CreateItemRequest(BaseModel):
@@ -55,15 +62,19 @@ class CreateItemRequest(BaseModel):
 class UpdateItemRequest(BaseModel):
     """Request body for partially updating an existing item.
 
-    The handler delegates only explicitly provided fields. An explicit null
-    external_id clears the stored external identifier.
+    Follows the single rule: an omitted field carries no instruction and leaves the stored
+    value untouched; a present field means "assign exactly this value" and is rejected if that
+    value is invalid for the field. Optionality is expressed by an inert default, never by
+    widening a field's type — so a non-nullable field rejects an explicit null. ``external_id``
+    is the sole field whose value domain includes null, so it alone accepts an explicit null,
+    which clears the stored external identifier.
     """
 
-    name: Annotated[str, Field(max_length=MAX_ITEM_NAME_LENGTH)] | None = None
-    external_id: Annotated[str, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] | None = None
-    enabled: bool | None = None
-    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] | None = None
-    metadata: dict[str, Any] | None = None
+    name: Annotated[str, Field(max_length=MAX_ITEM_NAME_LENGTH)] = ""
+    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = None
+    enabled: bool = True
+    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateTagRequest(BaseModel):
@@ -76,10 +87,12 @@ class CreateTagRequest(BaseModel):
 class UpdateTagRequest(BaseModel):
     """Request body for partially updating an existing tag.
 
-    The handler delegates only explicitly provided fields.
+    Follows the single rule: an omitted field carries no instruction; a present field is
+    assigned or rejected. ``name`` is non-nullable, so an explicit null is rejected rather
+    than silently discarded.
     """
 
-    name: Annotated[str, Field(max_length=MAX_TAG_NAME_LENGTH)] | None = None
+    name: Annotated[str, Field(max_length=MAX_TAG_NAME_LENGTH)] = ""
 
 
 class AddParentRequest(BaseModel):

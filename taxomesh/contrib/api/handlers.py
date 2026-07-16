@@ -108,6 +108,12 @@ def create_category(service: TaxomeshService, body: CreateCategoryRequest) -> Ca
 def update_category(service: TaxomeshService, category_id: UUID, body: UpdateCategoryRequest) -> Category:
     """Update an existing category.
 
+    Only fields the caller explicitly set are delegated: an omitted field carries no
+    instruction and leaves the stored value untouched. A present field is assigned its value.
+    ``external_id`` is the sole field whose value domain includes null, so an explicit null
+    external_id clears the stored identifier; a null on any other field (including enabled) is
+    rejected by request validation before this handler runs.
+
     Args:
         service: The TaxomeshService instance to delegate to.
         category_id: The library-assigned UUID of the category to update.
@@ -119,6 +125,7 @@ def update_category(service: TaxomeshService, category_id: UUID, body: UpdateCat
     Raises:
         TaxomeshCategoryNotFoundError: If no category with the given id exists.
         TaxomeshDuplicateSlugError: If slug is non-empty and already in use.
+        TaxomeshExternalIdConflictError: If external_id is already held by another category.
     """
     return service.update_category(category_id=category_id, **body.model_dump(exclude_unset=True))
 
@@ -233,6 +240,12 @@ def create_item(service: TaxomeshService, body: CreateItemRequest) -> Item:
 def update_item(service: TaxomeshService, item_id: UUID, body: UpdateItemRequest) -> Item:
     """Update an existing item.
 
+    Only fields the caller explicitly set are delegated: an omitted field carries no
+    instruction and leaves the stored value untouched. A present field is assigned its value.
+    ``external_id`` is the sole field whose value domain includes null, so an explicit null
+    external_id clears the stored identifier; a null on any other field is rejected by request
+    validation before this handler runs.
+
     Args:
         service: The TaxomeshService instance to delegate to.
         item_id: The library-assigned UUID of the item to update.
@@ -244,6 +257,7 @@ def update_item(service: TaxomeshService, item_id: UUID, body: UpdateItemRequest
     Raises:
         TaxomeshItemNotFoundError: If no item with the given id exists.
         TaxomeshDuplicateSlugError: If slug is non-empty and already in use.
+        TaxomeshExternalIdConflictError: If external_id is already held by another item.
     """
     return service.update_item(item_id=item_id, **body.model_dump(exclude_unset=True))
 
@@ -293,6 +307,10 @@ def create_tag(service: TaxomeshService, body: CreateTagRequest) -> Tag:
 
 def update_tag(service: TaxomeshService, tag_id: UUID, body: UpdateTagRequest) -> Tag:
     """Update an existing tag.
+
+    Only fields the caller explicitly set are delegated: an omitted field carries no
+    instruction and leaves the stored value untouched. ``name`` is non-nullable, so an
+    explicit null is rejected by request validation before this handler runs.
 
     Args:
         service: The TaxomeshService instance to delegate to.

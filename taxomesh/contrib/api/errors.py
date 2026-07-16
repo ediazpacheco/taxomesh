@@ -11,6 +11,7 @@ from typing import Any, Final
 from taxomesh.exceptions import (
     TaxomeshDuplicateSlugError,
     TaxomeshError,
+    TaxomeshExternalIdConflictError,
     TaxomeshNotFoundError,
     TaxomeshRepositoryError,
     TaxomeshValidationError,
@@ -26,8 +27,9 @@ def to_tuple(exc: TaxomeshError) -> tuple[int, dict[str, Any]]:
     """Map a TaxomeshError to an HTTP (status_code, body) pair.
 
     The mapping order matters: more-specific subclasses are checked before
-    their parents. TaxomeshDuplicateSlugError is a validation subclass but
-    maps to 409 (Conflict) rather than 422 (Unprocessable Entity).
+    their parents. TaxomeshDuplicateSlugError and TaxomeshExternalIdConflictError
+    are both validation subclasses but map to 409 (Conflict) rather than 422
+    (Unprocessable Entity): both are uniqueness conflicts and surface identically.
 
     Args:
         exc: Any TaxomeshError instance.
@@ -38,6 +40,8 @@ def to_tuple(exc: TaxomeshError) -> tuple[int, dict[str, Any]]:
     body: dict[str, Any] = {"detail": str(exc)}
 
     if isinstance(exc, TaxomeshDuplicateSlugError):
+        return _HTTP_409, body
+    if isinstance(exc, TaxomeshExternalIdConflictError):
         return _HTTP_409, body
     if isinstance(exc, TaxomeshNotFoundError):
         return _HTTP_404, body
