@@ -85,7 +85,7 @@ class TestCreateItemRequest:
         """Only name is required; defaults apply for other fields."""
         req = CreateItemRequest(name="Item A")
         assert req.name == "Item A"
-        assert req.external_id == ""
+        assert req.external_id is None
         assert req.slug == ""
         assert req.metadata == {}
 
