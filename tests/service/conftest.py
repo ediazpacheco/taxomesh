@@ -1,6 +1,8 @@
 """Shared pytest fixtures for the service test suite."""
 
+import contextlib
 from collections.abc import Collection
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
@@ -38,6 +40,12 @@ class InMemoryRepository:
         self._category_parent_links: list[CategoryParentLink] = []
         self._item_parent_links: list[ItemParentLink] = []
         self._item_relation_links: list[ItemRelationLink] = []
+
+    # --- Atomicity boundary ---
+
+    def atomic(self) -> AbstractContextManager[None]:
+        """Return a best-effort no-op boundary (in-memory has no transaction)."""
+        return contextlib.nullcontext()
 
     # --- Category ---
 

@@ -25,8 +25,10 @@ from taxomesh.exceptions import (
     TaxomeshConfigError,
     TaxomeshCyclicDependencyError,
     TaxomeshDuplicateSlugError,
+    TaxomeshError,
     TaxomeshItemNotFoundError,
     TaxomeshRelationError,
+    TaxomeshRepositoryError,
     TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
 )
@@ -255,10 +257,18 @@ class TaxomeshService:
             created_at=now,
             updated_at=now,
         )
-        self._repo.save_category(category)
-        self._repo.save_category_parent_link(
-            CategoryParentLink(category_id=category.category_id, parent_category_id=self._root_id, sort_index=0)
-        )
+        try:
+            with self._repo.atomic():
+                self._repo.save_category(category)
+                self._repo.save_category_parent_link(
+                    CategoryParentLink(
+                        category_id=category.category_id, parent_category_id=self._root_id, sort_index=0
+                    )
+                )
+        except TaxomeshError:
+            raise
+        except Exception as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
         clear_all_caches()
         self._category_corpus = None
         return category
@@ -1383,10 +1393,16 @@ class TaxomeshService:
         for uid in category_ids_in_order:
             if uid not in existing:
                 raise ValueError(f"Category {uid} is not a child of {parent_id}")
-        for sort_index, uid in enumerate(category_ids_in_order):
-            link = existing[uid]
-            link.sort_index = sort_index
-            self._repo.save_category_parent_link(link)
+        try:
+            with self._repo.atomic():
+                for sort_index, uid in enumerate(category_ids_in_order):
+                    link = existing[uid]
+                    link.sort_index = sort_index
+                    self._repo.save_category_parent_link(link)
+        except TaxomeshError:
+            raise
+        except Exception as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
         clear_all_caches()
 
     def reparent_item(
@@ -1432,14 +1448,19 @@ class TaxomeshService:
                 len(existing_siblings),
             )
 
-        self._repo.delete_item_parent_link(item_id, old_category_id)
-
         new_link = ItemParentLink(item_id=item_id, category_id=new_category_id, sort_index=insert_pos)
         existing_siblings.insert(insert_pos, new_link)
 
-        for i, lnk in enumerate(existing_siblings):
-            lnk.sort_index = i
-            self._repo.save_item_parent_link(lnk)
+        try:
+            with self._repo.atomic():
+                self._repo.delete_item_parent_link(item_id, old_category_id)
+                for i, lnk in enumerate(existing_siblings):
+                    lnk.sort_index = i
+                    self._repo.save_item_parent_link(lnk)
+        except TaxomeshError:
+            raise
+        except Exception as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
 
         clear_all_caches()
         return new_link
@@ -1487,15 +1508,22 @@ class TaxomeshService:
                 len(existing_siblings),
             )
 
-        self._repo.delete_category_parent_link(category_id, old_parent_id)
+        try:
+            with self._repo.atomic():
+                self._repo.delete_category_parent_link(category_id, old_parent_id)
 
-        # add_category_parent runs cycle detection internally
-        new_link = self.add_category_parent(category_id, new_parent_id, sort_index=insert_pos)
-        existing_siblings.insert(insert_pos, new_link)
+                # add_category_parent runs cycle detection internally; it stays inside the
+                # boundary so a TaxomeshCyclicDependencyError rolls back the preceding delete.
+                new_link = self.add_category_parent(category_id, new_parent_id, sort_index=insert_pos)
+                existing_siblings.insert(insert_pos, new_link)
 
-        for i, lnk in enumerate(existing_siblings):
-            lnk.sort_index = i
-            self._repo.save_category_parent_link(lnk)
+                for i, lnk in enumerate(existing_siblings):
+                    lnk.sort_index = i
+                    self._repo.save_category_parent_link(lnk)
+        except TaxomeshError:
+            raise
+        except Exception as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
 
         clear_all_caches()
         return new_link
@@ -1517,10 +1545,16 @@ class TaxomeshService:
         for uid in item_ids_in_order:
             if uid not in existing:
                 raise ValueError(f"Item {uid} is not placed in category {category_id}")
-        for sort_index, uid in enumerate(item_ids_in_order):
-            link = existing[uid]
-            link.sort_index = sort_index
-            self._repo.save_item_parent_link(link)
+        try:
+            with self._repo.atomic():
+                for sort_index, uid in enumerate(item_ids_in_order):
+                    link = existing[uid]
+                    link.sort_index = sort_index
+                    self._repo.save_item_parent_link(link)
+        except TaxomeshError:
+            raise
+        except Exception as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
         clear_all_caches()
 
     def remove_item_from_category(self, item_id: UUID, category_id: UUID) -> None:

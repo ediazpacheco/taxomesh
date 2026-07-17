@@ -6,10 +6,12 @@ a sibling temporary file is flushed with ``os.fsync`` and then renamed into
 place with ``os.replace`` so the target file is never in a partial state.
 """
 
+import contextlib
 import json
 import os
 import tempfile
 from collections.abc import Collection
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Final, Literal
 from uuid import UUID
@@ -77,6 +79,23 @@ class JsonRepository:
         else:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             self._flush()
+
+    # ------------------------------------------------------------------
+    # Atomicity boundary
+    # ------------------------------------------------------------------
+
+    def atomic(self) -> AbstractContextManager[None]:
+        """Return a **best-effort no-op** consistency boundary.
+
+        The JSON backend has no transaction primitive: each write flushes the
+        whole document to disk independently. This returns
+        ``contextlib.nullcontext()`` so the port contract is satisfied and the
+        success path is never altered — but there is **no rollback**. If a
+        multi-write operation fails midway, the writes already flushed remain on
+        disk (partial state MAY persist). This limitation is intentional and
+        documented; use a transactional backend where full rollback is required.
+        """
+        return contextlib.nullcontext()
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -312,6 +312,7 @@ Do NOT update README during implement — only after
 - JsonRepository (JSON file), YAMLRepository (YAML file), DjangoRepository (Django ORM), InMemoryRepository (test fixture in `tests/service/conftest.py`) (056-batch-related-direction)
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 (existing direct dep) — **no new dependencies** (057-api-request-omission)
 - N/A for the change itself. Verification spans all four backends: `InMemoryRepository` (test fixture), `JsonRepository`, `YAMLRepository`, `DjangoRepository` (057-api-request-omission)
+- Python 3.11 (targets 3.11–3.14) + Pydantic v2 (domain models), Django ≥ 6.0 (optional adapter — transactional backend), pyyaml ≥ 6.0 (YAML adapter); stdlib `contextlib` (nullcontext / `AbstractContextManager`) (058-atomic-operations)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
