@@ -7,18 +7,14 @@ on:
     branches: [main]
 
 jobs:
-  quality:
-    name: Quality gates (Python ${{ matrix.python-version }})
+  static:
+    name: Static checks (ruff + mypy)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.13"
       - name: Install dependencies
         run: uv sync --extra dev --extra django
       - name: Lint (ruff check)
@@ -27,18 +23,78 @@ jobs:
         run: uv run ruff format --check .
       - name: Type check (mypy --strict)
         run: uv run mypy --strict .
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }} + Django 6.0)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --extra dev --extra django
       - name: Tests + coverage
         run: uv run pytest
 
+  wheel:
+    name: Wheel consumer smoke (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build wheel
+        run: uv build --wheel
+      - name: Create clean consumer environment
+        run: uv venv --python ${{ matrix.python-version }} /tmp/consumer
+      - name: Install built wheel (core)
+        run: uv pip install --python /tmp/consumer dist/*.whl
+      - name: Smoke-test core import, service op, and CLI
+        run: |
+          cd "$(mktemp -d)"
+          /tmp/consumer/bin/python - <<'PY'
+          from importlib.metadata import version
+          import taxomesh
+          from taxomesh import TaxomeshService
+
+          svc = TaxomeshService()  # defaults to a YAML file backend in the cwd
+          category = svc.create_category(name="Smoke")
+          assert svc.get_category(category.category_id).name == "Smoke"
+          print("core wheel OK — taxomesh", version("taxomesh"))
+          PY
+          /tmp/consumer/bin/taxomesh --help
+      - name: Install and verify the Django extra from the wheel
+        run: |
+          uv pip install --python /tmp/consumer "$(ls dist/*.whl)[django]"
+          /tmp/consumer/bin/python - <<'PY'
+          import django
+
+          assert django.VERSION[:2] == (6, 0), django.VERSION
+          import taxomesh  # noqa: F401  core still imports alongside the Django extra
+          print("django extra OK — Django", django.get_version())
+          PY
+
   ci:
     name: ci
-    needs: [quality]
+    needs: [static, test, wheel]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: All quality gates passed
         run: |
-          if [[ "${{ needs.quality.result }}" != "success" ]]; then
+          if [[ "${{ needs.static.result }}" != "success" \
+             || "${{ needs.test.result }}" != "success" \
+             || "${{ needs.wheel.result }}" != "success" ]]; then
             echo "One or more quality gates failed"
             exit 1
           fi
