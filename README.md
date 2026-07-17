@@ -29,7 +29,7 @@ Django admin, or your own HTTP API.
 
 ## Installation
 
-Requires **Python 3.11+**.
+Requires **Python 3.13+**.
 
 ```bash
 pip install taxomesh
@@ -312,8 +312,7 @@ your application ──┐
   changes only occur in major releases.
 - Deprecations are announced at least one minor release before removal, with
   runtime `DeprecationWarning`s.
-- Supported Python versions: 3.11, 3.12, 3.13. Django integration supports
-  Django ≥ 4.2.
+- Supported Python versions: 3.13, 3.14. Django integration supports Django ≥ 6.0.
 - Every release passes `ruff`, `mypy --strict`, and the full test suite with
   ≥ 80% coverage.
 

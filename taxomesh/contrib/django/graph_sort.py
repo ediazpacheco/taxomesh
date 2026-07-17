@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Final, TypeAlias
+from typing import Final
 
 from taxomesh.contrib.django.graph_types import GraphEntry
 
-SortModeFn: TypeAlias = Callable[[list[GraphEntry]], list[GraphEntry]]
-SortMode: TypeAlias = tuple[str, str, SortModeFn]
+type SortModeFn = Callable[[list[GraphEntry]], list[GraphEntry]]
+type SortMode = tuple[str, str, SortModeFn]
 
 DEFAULT_SORT_MODE: Final[str] = "sort_index_asc"
 

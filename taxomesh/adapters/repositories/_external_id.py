@@ -6,7 +6,7 @@ UNIQUE constraint instead.
 """
 
 from collections.abc import Collection, Mapping
-from typing import Protocol, TypeVar
+from typing import Protocol
 from uuid import UUID
 
 from taxomesh.exceptions import TaxomeshExternalIdConflictError
@@ -19,9 +19,6 @@ class _HasExternalId(Protocol):
 class _HasExternalIdAndEnabled(Protocol):
     external_id: str | None
     enabled: bool
-
-
-_T = TypeVar("_T", bound=_HasExternalIdAndEnabled)
 
 
 def check_external_id_unique(
@@ -51,11 +48,11 @@ def check_external_id_unique(
             )
 
 
-def bulk_lookup_by_external_id(
-    collection: Mapping[UUID, _T],
+def bulk_lookup_by_external_id[T: _HasExternalIdAndEnabled](
+    collection: Mapping[UUID, T],
     external_ids: Collection[str],
     enabled: bool | None,
-) -> dict[str, _T]:
+) -> dict[str, T]:
     """Return entities from *collection* whose external_id is in *external_ids*.
 
     Args:
@@ -69,7 +66,7 @@ def bulk_lookup_by_external_id(
         A dict mapping each found external_id to its entity.
     """
     target = set(external_ids)
-    result: dict[str, _T] = {}
+    result: dict[str, T] = {}
     for entity in collection.values():
         if entity.external_id in target and (enabled is None or entity.enabled == enabled):
             assert entity.external_id is not None

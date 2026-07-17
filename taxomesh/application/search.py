@@ -11,7 +11,7 @@ a single search call.
 
 import re
 import unicodedata
-from typing import Final, Generic, TypeVar
+from typing import Final
 
 from rapidfuzz import fuzz
 
@@ -36,10 +36,8 @@ FUZZY_THRESHOLD: Final[int] = 70
 _SEP_RE: Final[re.Pattern[str]] = re.compile(r"['\'\-._\\]")
 _SPACE_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
 
-_T = TypeVar("_T")
 
-
-class SearchCandidate(Generic[_T]):
+class SearchCandidate[T]:
     """A domain object paired with its pre-normalized searchable fields.
 
     Built once per search call to eliminate repeated normalization of the same
@@ -63,7 +61,7 @@ class SearchCandidate(Generic[_T]):
         score = engine._score_prenorm(norm_q, sc.norm_name, sc.norm_slug, sc.norm_ext)
     """
 
-    def __init__(self, obj: _T, norm_name: str, norm_slug: str, norm_ext: str) -> None:
+    def __init__(self, obj: T, norm_name: str, norm_slug: str, norm_ext: str) -> None:
         """Initialise with the domain object and its pre-normalized field values."""
         self.obj = obj
         self.norm_name = norm_name
