@@ -5,6 +5,7 @@ per-parent sort indexes, free-form tags, and pluggable storage backends.
 """
 
 import logging
+from importlib.metadata import version
 
 from taxomesh.application.service import TaxomeshService
 from taxomesh.exceptions import (
@@ -22,8 +23,7 @@ from taxomesh.exceptions import (
     TaxomeshValidationError,
 )
 
-__VERSION__ = "0.1.0a46"
-__version__ = __VERSION__
+__version__ = version("taxomesh")
 
 # Register a NullHandler so taxomesh never emits "no handlers" warnings in
 # consuming applications that have not configured logging.

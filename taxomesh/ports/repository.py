@@ -7,6 +7,7 @@ structurally at type-check time.
 """
 
 from collections.abc import Collection
+from contextlib import AbstractContextManager
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
@@ -20,6 +21,41 @@ class TaxomeshRepositoryBase(Protocol):
     in any class (no inheritance required) and pass the instance to
     ``TaxomeshService`` at construction time.
     """
+
+    # --- Atomicity boundary ---
+
+    def atomic(self) -> AbstractContextManager[None]:
+        """Return a context manager defining a per-backend consistency boundary.
+
+        ``TaxomeshService`` wraps the write sequence of each multi-write
+        operation (``create_category``, ``reorder_subcategories``,
+        ``reorder_items_in_category``, ``reparent_category``, ``reparent_item``)
+        in ``with self._repo.atomic():`` so the writes either all commit or all
+        roll back.
+
+        The guarantee is **two-tier** and backend-dependent:
+
+        - **Transactional backends** (e.g. ``DjangoRepository``) MUST make this a
+          full-rollback boundary: if the wrapped body raises, every write
+          performed inside — including nested inner boundaries opened by the
+          backend's own per-method writes (Django savepoints) — is rolled back,
+          leaving the datastore in its pre-boundary state.
+        - **Non-transactional backends** (file/in-memory, e.g.
+          ``JsonRepository``, ``YAMLRepository``) treat the boundary as a
+          **best-effort no-op**: the success path is never altered, but after a
+          mid-boundary failure partial state MAY remain. Such backends return
+          ``contextlib.nullcontext()``.
+
+        Entering the context MUST NOT raise. On normal exit the wrapped writes
+        are made durable per the backend's usual semantics. On exceptional exit
+        the context manager MUST propagate the exception (transactional backends
+        additionally roll back).
+
+        Returns:
+            A context manager usable as ``with repo.atomic():`` that yields
+            ``None``.
+        """
+        ...
 
     # --- Category ---
 

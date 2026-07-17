@@ -13,6 +13,7 @@ Usage::
 """
 
 from collections.abc import Collection
+from contextlib import AbstractContextManager
 from typing import Any, Final, Literal
 from uuid import UUID
 
@@ -101,6 +102,30 @@ class DjangoRepository:
         self._ItemParentLinkModel = ItemParentLinkModel
         self._ItemTagLinkModel = ItemTagLinkModel
         self._ItemRelationLinkModel = ItemRelationLinkModel
+
+    # ------------------------------------------------------------------
+    # Atomicity boundary
+    # ------------------------------------------------------------------
+
+    def atomic(self) -> AbstractContextManager[None]:
+        """Return a **full-rollback** database transaction boundary.
+
+        Delegates to ``django.db.transaction.atomic(using=self._using)``. When
+        ``TaxomeshService`` wraps a multi-write operation in this boundary and
+        the wrapped body raises, the entire transaction is rolled back — no
+        partial writes commit.
+
+        Django's ``atomic()`` is reentrant: this outermost block opens the real
+        database transaction, and the per-method ``transaction.atomic`` blocks
+        already present in each write (``save_category``, ``save_item_parent_link``,
+        …) nest **as savepoints** inside it. An exception propagating past this
+        boundary unwinds every savepoint and rolls the whole transaction back to
+        its pre-boundary state.
+        """
+        from django.db import transaction  # type: ignore[import-untyped]  # noqa: PLC0415
+
+        result: AbstractContextManager[None] = transaction.atomic(using=self._using)
+        return result
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -216,7 +241,7 @@ class DjangoRepository:
                 record with a different category_id already holds the same external_id.
             TaxomeshRepositoryError: On any other database error.
         """
-        from django.db import (  # type: ignore[import-untyped]  # noqa: PLC0415
+        from django.db import (  # noqa: PLC0415
             DatabaseError,
             IntegrityError,
             transaction,
