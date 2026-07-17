@@ -1,11 +1,14 @@
 """Tests for taxomesh.contrib.api.handlers — delegation to TaxomeshService."""
 
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
+from taxomesh.adapters.repositories.json_repository import JsonRepository
 from taxomesh.application.service import TaxomeshService
 from taxomesh.contrib.api import handlers
+from taxomesh.contrib.api.errors import to_tuple
 from taxomesh.contrib.api.schemas import (
     AddParentRequest,
     CreateCategoryRequest,
@@ -22,6 +25,7 @@ from taxomesh.domain.graph import TaxomeshGraph
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
 from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
+    TaxomeshExternalIdConflictError,
     TaxomeshItemNotFoundError,
     TaxomeshTagNotFoundError,
 )
@@ -114,6 +118,62 @@ class TestUpdateCategory:
         result = handlers.update_category(service, cat.category_id, body)
         assert result.name == "Keep"
         assert result.description == "desc"
+
+    def test_sets_external_id(self, service: TaxomeshService) -> None:
+        """A supplied external_id string is stored (US4 scenario 1, FR-013)."""
+        cat = service.create_category(name="Cat")
+        result = handlers.update_category(service, cat.category_id, UpdateCategoryRequest(external_id="ext-cat"))
+        assert result.external_id == "ext-cat"
+
+    def test_omitted_external_id_is_unchanged(self, service: TaxomeshService) -> None:
+        """An omitted external_id is preserved during an unrelated update (US4 scenario 2)."""
+        cat = service.create_category(name="Cat")
+        handlers.update_category(service, cat.category_id, UpdateCategoryRequest(external_id="ext-cat"))
+        result = handlers.update_category(service, cat.category_id, UpdateCategoryRequest(name="Renamed"))
+        assert result.name == "Renamed"
+        assert result.external_id == "ext-cat"
+
+    def test_explicit_null_clears_external_id(self, service: TaxomeshService) -> None:
+        """An explicitly null external_id clears the stored value (US4 scenario 3)."""
+        cat = service.create_category(name="Cat")
+        handlers.update_category(service, cat.category_id, UpdateCategoryRequest(external_id="ext-cat"))
+        result = handlers.update_category(service, cat.category_id, UpdateCategoryRequest(external_id=None))
+        assert result.external_id is None
+
+    def test_sets_enabled(self, service: TaxomeshService) -> None:
+        """A supplied enabled state is stored (US4 scenario 4, FR-014)."""
+        cat = service.create_category(name="Cat")
+        result = handlers.update_category(service, cat.category_id, UpdateCategoryRequest(enabled=False))
+        assert result.enabled is False
+
+
+class TestUpdateExternalIdConflict:
+    """US4 scenario 5 / FR-006 / FR-015 — an external-id collision through a public handler
+    surfaces as 409, identically to the slug conflict. Uses a JSON-backed service because the
+    conflict is enforced by real storage adapters (the in-memory test fixture does not enforce)."""
+
+    def _json_service(self, tmp_path: Path) -> TaxomeshService:
+        return TaxomeshService(repository=JsonRepository(tmp_path / "conflict.json"))
+
+    def test_category_external_id_conflict_maps_to_409(self, tmp_path: Path) -> None:
+        """Updating a category to an external_id held by another category conflicts → 409."""
+        service = self._json_service(tmp_path)
+        service.create_category(name="A", external_id="shared")
+        target = service.create_category(name="B")
+        with pytest.raises(TaxomeshExternalIdConflictError) as exc_info:
+            handlers.update_category(service, target.category_id, UpdateCategoryRequest(external_id="shared"))
+        status, _ = to_tuple(exc_info.value)
+        assert status == 409
+
+    def test_item_external_id_conflict_maps_to_409(self, tmp_path: Path) -> None:
+        """Updating an item to an external_id held by another item conflicts → 409 (FR-006)."""
+        service = self._json_service(tmp_path)
+        service.create_item(name="A", external_id="shared")
+        target = service.create_item(name="B")
+        with pytest.raises(TaxomeshExternalIdConflictError) as exc_info:
+            handlers.update_item(service, target.item_id, UpdateItemRequest(external_id="shared"))
+        status, _ = to_tuple(exc_info.value)
+        assert status == 409
 
 
 class TestDeleteCategory:

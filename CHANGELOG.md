@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.0a47] — 2026-07-16
+
+Aligns the public request contract in `taxomesh.contrib.api` with the external-identifier
+semantics established at the domain and service layers (specs 041, 043), enforcing one rule at
+the HTTP boundary: **an omitted field carries no instruction; a present field means "assign this
+value" and is rejected if the value is invalid for that field.** See `specs/057-api-request-omission`.
+
+This release also ships two fixes previously merged to `main` but never released
+(commits `e93ef5d`, `e049b68`): item creation without an external identifier, and preservation of
+omitted fields on partial update.
+
+### Changed
+
+**Breaking — an explicit `null` on a non-nullable partial-update field is now rejected.**
+The partial-update request schemas (`UpdateItemRequest`, `UpdateCategoryRequest`, `UpdateTagRequest`)
+no longer express "this field may be omitted" by widening the field type to `X | None`. Each field
+now carries its true type and an inert default. As a result, a non-nullable field (`name`, `slug`,
+`description`, `enabled`, `metadata`) rejects an explicit `null` at request validation instead of
+accepting it and silently discarding it. A caller that relied on `null`-as-no-op must omit the field
+instead — which is what it meant all along. `external_id` remains genuinely nullable: an explicit
+`null` clears the stored external identifier. Omitting any field is unchanged: it leaves the stored
+value untouched.
+
+**Breaking — an external-identifier uniqueness conflict now returns 409 instead of 422.**
+`errors.to_tuple` now maps `TaxomeshExternalIdConflictError` to HTTP 409 (Conflict), identically to
+the structurally equivalent `TaxomeshDuplicateSlugError`. It previously fell through to the generic
+422 (Unprocessable Entity) because the error type postdated the error mapping. A caller branching on
+422 for this case must branch on 409, alongside the slug conflict it already handles there.
+
+### Added
+
+- **`UpdateCategoryRequest` now exposes `external_id` and `enabled`.** The service layer already
+  supported both with full omitted/set/clear semantics; the public request schema now reaches them,
+  so categories can have their external identifier set, changed, or cleared, and their enabled state
+  toggled, through the public partial-update handler.
+- **Four-backend PATCH parity coverage** (`tests/service/test_api_patch_parity.py`) and a
+  schema/service **drift guard** (`tests/contrib/test_api_schema_service_parity.py`) and an
+  error-mapping **completeness guard** (`tests/contrib/test_api_errors.py`) so a future error type
+  cannot silently inherit a generic status.
+
+### Lineage
+
+Supersedes the `028-contrib-api` public contract in three scoped respects only — item-creation
+external-identifier defaulting, partial-update null handling, and the mapped status for
+external-identifier conflicts. The historical spec directories for 028, 041, and 043 are unchanged;
+the supersession is recorded in this feature's own artifacts, following 041's precedent.
+
+---
+
 ## [0.1.0a46] — 2026-06-27
 
 ### Added
