@@ -48,3 +48,6 @@ Thumbs.db
 /data/taxomesh.json
 /data/taxomesh.yaml
 /taxomesh.toml
+
+# Internal review docs — local only
+docs/review-2026-07-15/
