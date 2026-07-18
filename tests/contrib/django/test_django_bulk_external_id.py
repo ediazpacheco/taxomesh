@@ -6,6 +6,9 @@ import pytest
 
 django = pytest.importorskip("django", reason="Django is not installed")
 
+from django.db import connection  # noqa: E402
+from django.test.utils import CaptureQueriesContext  # noqa: E402
+
 from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: E402
 from taxomesh.domain.models import Category, Item  # noqa: E402
 from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: E402
@@ -81,6 +84,19 @@ def test_items_database_error_raises_repository_error(repo: DjangoRepository) ->
             repo.get_items_by_external_ids(["some-id"])
 
 
+def test_items_bulk_lookup_uses_single_query(repo: DjangoRepository) -> None:
+    """Anti-N+1 guard: the whole batch resolves in exactly 1 SQL query, whatever the cardinality."""
+    external_ids = [f"django-bulk-q-{n}" for n in range(25)]
+    for ext_id in external_ids:
+        repo.save_item(Item(external_id=ext_id))
+
+    with CaptureQueriesContext(connection) as ctx:
+        result = repo.get_items_by_external_ids(external_ids)
+
+    assert len(ctx.captured_queries) == 1
+    assert set(result.keys()) == set(external_ids)
+
+
 # ---------------------------------------------------------------------------
 # get_categories_by_external_ids (US3)
 # ---------------------------------------------------------------------------
@@ -137,3 +153,16 @@ def test_categories_database_error_raises_repository_error(repo: DjangoRepositor
     ):
         with pytest.raises(TaxomeshRepositoryError):
             repo.get_categories_by_external_ids(["some-cat-id"])
+
+
+def test_categories_bulk_lookup_uses_single_query(repo: DjangoRepository) -> None:
+    """Anti-N+1 guard: the whole batch resolves in exactly 1 SQL query, whatever the cardinality."""
+    external_ids = [f"dj-cat-q-{n}" for n in range(25)]
+    for ext_id in external_ids:
+        repo.save_category(Category(name=f"QCat-{ext_id}", external_id=ext_id))
+
+    with CaptureQueriesContext(connection) as ctx:
+        result = repo.get_categories_by_external_ids(external_ids)
+
+    assert len(ctx.captured_queries) == 1
+    assert set(result.keys()) == set(external_ids)
