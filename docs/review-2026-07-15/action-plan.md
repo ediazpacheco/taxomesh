@@ -66,6 +66,20 @@ failure mode is explicit and repairable.
 
 **Done when:** an accidental N+1 regression fails a release gate.
 
+**Status (2026-07-17): ✅ Done.** The relations query-count coverage already
+existed — a spy repository (`tests/service/test_service_no_full_scan.py`), mock
+`call_count` (`tests/service/test_service_cache.py`), and Django
+`CaptureQueriesContext` (`tests/contrib/django/test_django_repository_relations.py`)
+— across outgoing/incoming/both, including constant-in-input-size checks. The one
+open gap was the bulk `external_id` lookups, which had no query-count assertion.
+Closed by single-query guard tests in
+`tests/contrib/django/test_django_bulk_external_id.py`
+(`test_items_bulk_lookup_uses_single_query`,
+`test_categories_bulk_lookup_uses_single_query`): each asserts exactly one SQL
+query at representative cardinality (25 ids) and runs in the standard release
+gate. The broader registry/introspection enforcement framework was considered
+and dropped as over-engineering (YAGNI) — three well-named guard tests suffice.
+
 ### 4. Define cache ownership — P1
 
 - Decide whether caches belong to a service, repository, or process.
