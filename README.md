@@ -316,6 +316,24 @@ your application ──┐
 - Every release passes `ruff`, `mypy --strict`, and the full test suite with
   ≥ 80% coverage.
 
+## Used in production
+
+`taxomesh` was extracted from — and is used in production by —
+[LetrasTango](https://letrastango.com/), a **personal, non-commercial side
+project** cataloguing tango lyrics, artists, and works. It shares an author with
+`taxomesh` and is the **only known production consumer**, so it is one deep,
+owner-operated integration rather than independent external validation. Over the
+Django backend it exercises external-ID binding and bulk lookup, multi-parent
+categories with ordered placements, typed directed item relations with batched
+traversal, and fuzzy search — the library's core paths. Tags, the HTTP handlers,
+the JSON/YAML backends, and the CLI are library-tested but not proven by this use.
+
+Any figures from LetrasTango are internal snapshot totals, **not** audience,
+traffic, or customer metrics; the public site shows lower, filtered counts. Its
+public artist-graph visualization is **derived by LetrasTango** from its own domain
+logic — `taxomesh` supplies the underlying categories and relations but does not
+render or own that visualization.
+
 ## Documentation
 
 | Topic | Description |
