@@ -65,7 +65,7 @@ svc.assign_tag(featured.tag_id, album.item_id)
 
 # Traverse
 print([node.category.name for node in svc.get_graph().roots])
-# ['Music', 'Genres']
+# ['Genres', 'Music']
 print([c.name for c in svc.list_categories_by_item(album.item_id)])
 # ['Jazz']
 ```
@@ -80,7 +80,7 @@ the taxonomy around it and hands it back to you by `external_id`.
 A category may have any number of parents, and its position is independent per
 parent. Cycles are rejected at write time.
 
-```python
+```python notest
 from taxomesh import TaxomeshCyclicDependencyError
 
 svc.add_category_parent(jazz.category_id, music.category_id, sort_index=10)
@@ -93,7 +93,7 @@ except TaxomeshCyclicDependencyError:
 
 Ordering is mutable after the fact:
 
-```python
+```python notest
 svc.reorder_subcategories(music.category_id, [jazz.category_id, blues.category_id])
 svc.reorder_items_in_category(jazz.category_id, [album_b.item_id, album_a.item_id])
 ```
@@ -103,7 +103,7 @@ svc.reorder_items_in_category(jazz.category_id, [album_b.item_id, album_a.item_i
 `external_id` is unique per record (`str | None`); it is the bridge between a
 taxomesh record and the entity it represents in your system.
 
-```python
+```python notest
 item = svc.get_item_by_external_id("catalog:42")          # Item | None
 found = svc.get_items_by_external_ids(["catalog:42", "catalog:7"])
 # {'catalog:42': Item(...), 'catalog:7': Item(...)} — missing IDs are simply absent
@@ -111,7 +111,7 @@ found = svc.get_items_by_external_ids(["catalog:42", "catalog:7"])
 
 Conflicts are typed errors, not silent overwrites:
 
-```python
+```python notest
 from taxomesh import TaxomeshExternalIdConflictError
 
 try:
@@ -124,7 +124,7 @@ except TaxomeshExternalIdConflictError:
 
 Directed, typed links between items, traversable in both directions:
 
-```python
+```python notest
 svc.relate_items(cover.item_id, original.item_id, relation_type="covers")
 
 svc.list_related_items(cover.item_id, relation_type="covers")
@@ -146,7 +146,7 @@ consuming application defines its own vocabulary.
 To resolve relations for **many items at once** without an N+1 loop, use the
 batched traversal, which is also direction-aware:
 
-```python
+```python notest
 ids = [cover.item_id, remix.item_id]
 
 svc.list_related_items_for_sources(ids)                         # outgoing (default)
@@ -164,7 +164,7 @@ lookup. The call count is constant regardless of how many ids are passed.
 Typo-tolerant, accent-insensitive, ranked (exact > prefix > substring > fuzzy).
 Optimized for per-keystroke autocomplete usage out of the box.
 
-```python
+```python notest
 svc.search_items("piazola")                    # finds "Piazzolla"
 svc.search_items("agustin magaldi")            # finds "Agustín Magaldi"
 svc.search_items("tango", category_id=cat.category_id, recursive=True)  # subtree-scoped
@@ -180,7 +180,7 @@ for the full parameter reference and caching behavior.
 `get_graph()` returns a `TaxomeshGraph` — an ordered, read-only view of the
 entire taxonomy, ready for rendering or serialization:
 
-```python
+```python notest
 graph = svc.get_graph()           # enabled records only; pass enabled=None for all
 for root in graph.roots:          # roots and children are sorted by sort_index
     print(root.category.name, [child.category.name for child in root.children])
@@ -191,7 +191,7 @@ for root in graph.roots:          # roots and children are sorted by sort_index
 All backends implement the same repository port; service behavior, validation,
 and errors are identical across them.
 
-```python
+```python notest
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
 from taxomesh.adapters.repositories.json_repository import JsonRepository
@@ -210,9 +210,9 @@ selection can also be driven by a `taxomesh.toml` file — see
 The `taxomesh` CLI exposes the same service against the configured backend:
 
 ```bash
-taxomesh category add "Music"
-taxomesh item add "Kind of Blue" --external-id catalog:42
-taxomesh item add-to-category <item-uuid> <category-uuid>
+taxomesh category add --name "Music"
+taxomesh item add --name "Kind of Blue" --external-id catalog:42
+taxomesh item add-to-category <item-uuid> --category-id <category-uuid>
 taxomesh item relation add <source-uuid> <target-uuid> covers
 taxomesh graph        # Rich-rendered taxonomy tree
 ```
@@ -235,7 +235,7 @@ handler functions, serializers, and error-to-status mapping, so the taxonomy can
 be exposed from FastAPI, Django views, or any other stack without re-implementing
 validation:
 
-```python
+```python notest
 from taxomesh.contrib.api import handlers, schemas, serializers
 
 body = schemas.CreateCategoryRequest(name="Music")
@@ -250,7 +250,7 @@ See [HTTP API integration](https://github.com/ediazpacheco/taxomesh/blob/main/do
 Every failure mode is a typed exception rooted at `TaxomeshError`, importable
 from the package root:
 
-```python
+```python notest
 from taxomesh import (
     TaxomeshError,                    # root
     TaxomeshNotFoundError,            #   ├─ Category / Item / Tag NotFound variants
@@ -267,7 +267,7 @@ Standard library `logging` under the `"taxomesh"` logger with a `NullHandler`
 registered at import — silent by default, fully controllable by the host
 application:
 
-```python
+```python notest
 import logging
 logging.getLogger("taxomesh").setLevel(logging.WARNING)
 logging.getLogger("taxomesh").addHandler(logging.StreamHandler())

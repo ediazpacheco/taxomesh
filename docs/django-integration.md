@@ -62,7 +62,7 @@ from uuid import uuid4
 from django.db import models
 
 from content_catalog.taxomesh_bridge import (
-    delete_items_for_external_id,
+    delete_item_for_external_id,
     ensure_item_for_external_id,
 )
 
@@ -76,7 +76,7 @@ class Content(models.Model):
         ensure_item_for_external_id(str(self.id))
 
     def delete(self, *args, **kwargs):
-        delete_items_for_external_id(str(self.id))
+        delete_item_for_external_id(str(self.id))
         return super().delete(*args, **kwargs)
 ```
 
