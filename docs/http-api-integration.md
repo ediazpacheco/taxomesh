@@ -197,7 +197,7 @@ def search_items_view(request):
 | `limit` | `int` | `20` | Maximum results returned |
 | `category_id` | `UUID \| None` | `None` | Restrict results to items in this category |
 | `recursive` | `bool` | `False` | Include items in descendant categories |
-| `enabled_only` | `bool` | `True` | Exclude disabled items |
+| `enabled` | `bool` | `True` | Exclude disabled items |
 | `fuzzy` | `bool` | `True` | Enable typo-tolerant fuzzy matching |
 
 ### SearchCategoriesRequest fields
@@ -207,7 +207,7 @@ def search_items_view(request):
 | `q` | `str` | required | Search query (max 500 chars) |
 | `limit` | `int` | `20` | Maximum results returned |
 | `parent_id` | `UUID \| None` | `None` | Restrict to direct children of this parent |
-| `enabled_only` | `bool` | `True` | Exclude disabled categories |
+| `enabled` | `bool` | `True` | Exclude disabled categories |
 | `fuzzy` | `bool` | `True` | Enable typo-tolerant fuzzy matching |
 
 ### Serializers

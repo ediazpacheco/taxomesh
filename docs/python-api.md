@@ -19,7 +19,10 @@ svc.add_category_parent(child.category_id, root.category_id, sort_index=10)
 
 children = svc.list_categories(parent_id=root.category_id)
 updated = svc.update_category(child.category_id, description="Updated")
-svc.delete_category(updated.category_id)
+
+# Delete a category (shown on a throwaway so "child-topic" stays available below)
+scratch = svc.create_category(name="Scratch Topic")
+svc.delete_category(scratch.category_id)
 
 # Look up by slug
 cat = svc.get_category_by_slug("child-topic")  # raises TaxomeshCategoryNotFoundError if missing
@@ -75,6 +78,8 @@ Slugs are optional URL-friendly identifiers. They must be unique within their na
 `external_id` is a 1:1 unique identifier — each Item or Category owns at most one `external_id`, and each `external_id` value is held by at most one record of its type.
 
 ```python
+from taxomesh.domain.models import Category, Item
+
 item: Item | None = svc.get_item_by_external_id("article-abc")
 category: Category | None = svc.get_category_by_external_id("legacy-category-id")
 ```
@@ -109,7 +114,7 @@ results = svc.search_items("d arienzo")         # finds "D'Arienzo" (punctuation
 results = svc.search_items("tango", limit=5)
 
 # Include disabled items
-results = svc.search_items("tango", enabled_only=False)
+results = svc.search_items("tango", enabled=False)
 
 # Restrict to direct members of a category
 results = svc.search_items("tango", category_id=cat.category_id)
@@ -127,7 +132,7 @@ results = svc.search_items("tango", fuzzy=False)
 | `limit` | `int` | `20` | Maximum results; raises `ValueError` if `<= 0` |
 | `category_id` | `UUID \| None` | `None` | Restrict candidates to this category |
 | `recursive` | `bool` | `False` | When `True` and `category_id` is set, includes all descendant categories |
-| `enabled_only` | `bool` | `True` | Exclude disabled items when `True` |
+| `enabled` | `bool` | `True` | Exclude disabled items when `True` |
 | `fuzzy` | `bool` | `True` | Include fuzzy (typo-tolerant) scoring |
 
 Returns `list[Item]`, sorted by descending match score. Ties broken alphabetically by
@@ -135,7 +140,7 @@ normalised name. Raises `TaxomeshCategoryNotFoundError` if `category_id` does no
 
 ### search_categories
 
-```python
+```python notest
 # Basic category search
 results = svc.search_categories("orkesta tipika")   # finds "Orquesta Típica"
 results = svc.search_categories("tango romantico")  # finds "Tango Romántico"
@@ -144,7 +149,7 @@ results = svc.search_categories("tango romantico")  # finds "Tango Romántico"
 results = svc.search_categories("tango", parent_id=parent.category_id)
 
 # Include disabled categories
-results = svc.search_categories("tango", enabled_only=False)
+results = svc.search_categories("tango", enabled=False)
 ```
 
 | Parameter | Type | Default | Description |
@@ -152,7 +157,7 @@ results = svc.search_categories("tango", enabled_only=False)
 | `query` | `str` | — | Search text; whitespace-only returns `[]` immediately |
 | `limit` | `int` | `20` | Maximum results; raises `ValueError` if `<= 0` |
 | `parent_id` | `UUID \| None` | `None` | Restrict candidates to direct children of this category |
-| `enabled_only` | `bool` | `True` | Exclude disabled categories when `True` |
+| `enabled` | `bool` | `True` | Exclude disabled categories when `True` |
 | `fuzzy` | `bool` | `True` | Include fuzzy (typo-tolerant) scoring |
 
 Returns `list[Category]`, sorted by descending match score. The internal root category
