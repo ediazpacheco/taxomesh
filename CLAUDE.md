@@ -313,6 +313,10 @@ Do NOT update README during implement — only after
 - Python 3.11 (targets 3.11–3.13) + Pydantic v2 (existing direct dep) — **no new dependencies** (057-api-request-omission)
 - N/A for the change itself. Verification spans all four backends: `InMemoryRepository` (test fixture), `JsonRepository`, `YAMLRepository`, `DjangoRepository` (057-api-request-omission)
 - Python 3.11 (targets 3.11–3.14) + Pydantic v2 (domain models), Django ≥ 6.0 (optional adapter — transactional backend), pyyaml ≥ 6.0 (YAML adapter); stdlib `contextlib` (nullcontext / `AbstractContextManager`) (058-atomic-operations)
+- Python 3.11+ syntax targeting 3.13 (`requires-python = ">=3.13"`, `ruff target-version = "py313"`) + None new — stdlib `logging` and `typing.Final` only (059-safe-error-bodies)
+- N/A — this feature touches only the error-mapping primitive (059-safe-error-bodies)
+- Python 3.13 (`requires-python = ">=3.13"`, ruff `target-version = "py313"`) + Pydantic v2 (domain models), Django ≥ 6.0 (optional adapter), pyyaml ≥ 6.0 — **no new dependencies** (060-batch-placement-reads)
+- `JsonRepository`, `YAMLRepository`, `DjangoRepository`, plus the `InMemoryRepository` test fixture — all four must implement both port additions (060-batch-placement-reads)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 

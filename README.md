@@ -8,7 +8,7 @@
 [![Typed](https://img.shields.io/badge/types-mypy--strict-blue.svg)](https://github.com/ediazpacheco/taxomesh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ediazpacheco/taxomesh/blob/main/LICENSE)
 
-`taxomesh` adds a serious taxonomy layer on top of business objects that already
+`taxomesh` adds a taxonomy layer on top of business objects that already
 live elsewhere — products, articles, tracks, assets. Your entities stay in your
 system and are referenced by a unique `external_id`; `taxomesh` owns the structure
 around them: category graphs, placement, ordering, tags, relations, and traversal.
@@ -18,14 +18,14 @@ Django admin, or your own HTTP API.
 ## Highlights
 
 - **Multi-parent category DAGs** — categories form a directed acyclic graph, not a strict tree; cycle creation is rejected with a typed error
-- **Per-parent ordering** — every category-to-parent and item-to-category link carries its own `sort_index`; reorder and reparent operations are first-class
+- **Per-parent ordering** — every category-to-parent and item-to-category link carries its own `sort_index`; reorder and reparent are explicit service operations
 - **External-ID binding** — link records 1:1 to your existing entities; point and bulk lookups; uniqueness enforced across all backends
 - **Tags and typed item relations** — free-form tags plus directed, typed item-to-item links (`covers`, `version_of`, …) with incoming/outgoing traversal
 - **Fuzzy search** — typo-tolerant, accent-insensitive, ranked search over names, slugs, and external IDs; no extra infrastructure
 - **Graph snapshots** — `get_graph()` returns an immutable, ordered view of the whole taxonomy for rendering and traversal
 - **Pluggable storage** — YAML, JSON, and Django ORM backends behind one repository interface; bring your own by implementing the same port
-- **Batteries-included integrations** — `taxomesh` CLI, Django admin (interactive graph view, drag-and-drop ordering), and framework-agnostic HTTP handlers/schemas
-- **Typed everywhere** — Pydantic v2 domain models, a complete exception hierarchy rooted at `TaxomeshError`, `mypy --strict` clean, `py.typed` shipped
+- **Integrations** — `taxomesh` CLI, Django admin (interactive graph view, drag-and-drop ordering), and framework-agnostic HTTP handlers/schemas
+- **Typing** — Pydantic v2 domain models, an exception hierarchy rooted at `TaxomeshError`, `mypy --strict` clean, `py.typed` shipped
 
 ## Installation
 
@@ -162,7 +162,8 @@ lookup. The call count is constant regardless of how many ids are passed.
 ### Fuzzy search
 
 Typo-tolerant, accent-insensitive, ranked (exact > prefix > substring > fuzzy).
-Optimized for per-keystroke autocomplete usage out of the box.
+Unfiltered searches reuse a pre-normalized candidate corpus, built once per
+service instance and invalidated on any item write; `limit` defaults to 20.
 
 ```python notest
 svc.search_items("piazola")                    # finds "Piazzolla"
@@ -221,7 +222,7 @@ See the [CLI reference](https://github.com/ediazpacheco/taxomesh/blob/main/docs/
 
 ### Django admin
 
-The optional Django integration ships a full admin: category/item/tag management,
+The optional Django integration ships an admin: category/item/tag management,
 an interactive graph view with drag-and-drop reordering and reparenting, lazy
 child loading, pluggable sort modes, autocomplete foreign keys, and a JSON editor
 for metadata fields.
@@ -305,13 +306,23 @@ your application ──┐
 
 ## Stability and versioning
 
-`taxomesh` follows [Semantic Versioning](https://semver.org/). As of **1.0.0**:
+`taxomesh` is pre-1.0 and is published as alpha releases (`0.1.0aN`). It follows
+[Semantic Versioning](https://semver.org/), but **the API guarantees below take
+effect at 1.0.0 and do not apply yet** — the API may change between alpha
+releases. Breaking changes are called out in the
+[changelog](https://github.com/ediazpacheco/taxomesh/blob/main/CHANGELOG.md);
+`0.1.0a48` and `0.1.0a50` each contain recent examples.
+
+Planned from 1.0.0:
 
 - The public API — everything importable from `taxomesh`, `taxomesh.contrib.api`,
-  and `taxomesh.contrib.django`, plus the repository port — is stable; breaking
-  changes only occur in major releases.
+  and `taxomesh.contrib.django`, plus the repository port — becomes stable;
+  breaking changes only occur in major releases.
 - Deprecations are announced at least one minor release before removal, with
   runtime `DeprecationWarning`s.
+
+True of the current alpha releases:
+
 - Supported Python versions: 3.13, 3.14. Django integration supports Django ≥ 6.0.
 - Every release passes `ruff`, `mypy --strict`, and the full test suite with
   ≥ 80% coverage.
@@ -358,8 +369,9 @@ uv run mypy --strict .
 
 ## Contributing
 
-Contributions are welcome. The project follows a spec-first workflow — please
-align implementation PRs with the `specs/` directory.
+Contributions are welcome. See
+[CONTRIBUTING.md](https://github.com/ediazpacheco/taxomesh/blob/main/CONTRIBUTING.md)
+for development setup, the quality gates, and the spec-first workflow.
 
 ## License
 

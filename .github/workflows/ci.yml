@@ -64,8 +64,13 @@ jobs:
           cd "$(mktemp -d)"
           /tmp/consumer/bin/python - <<'PY'
           from importlib.metadata import version
+          from pathlib import Path
           import taxomesh
           from taxomesh import TaxomeshService
+
+          # PEP 561: without this marker a consumer's mypy ignores every annotation we ship.
+          marker = Path(taxomesh.__file__).parent / "py.typed"
+          assert marker.is_file(), "py.typed missing from the installed package"
 
           svc = TaxomeshService()  # defaults to a YAML file backend in the cwd
           category = svc.create_category(name="Smoke")

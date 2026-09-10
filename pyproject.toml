@@ -1,13 +1,13 @@
 [project]
 name = "taxomesh"
-version = "0.1.0a49"
+version = "0.1.0a50"
 description = "Flexible taxonomy management for generic items — categories, tags, and multi-parent hierarchies with pluggable storage."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.13"
 keywords = ["taxonomy", "categorization", "tags", "dag", "hierarchy", "repository"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",

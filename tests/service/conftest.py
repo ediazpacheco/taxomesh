@@ -136,9 +136,20 @@ class InMemoryRepository:
                 return
         self._category_parent_links.append(link)
 
-    def list_category_parent_links(self) -> list[CategoryParentLink]:
-        """Return all category parent links."""
-        return list(self._category_parent_links)
+    def list_category_parent_links(
+        self,
+        *,
+        parent_category_ids: Collection[UUID] | None = None,
+    ) -> list[CategoryParentLink]:
+        """Return category parent links, optionally filtered by parent."""
+        links = self._category_parent_links
+        if parent_category_ids is not None:
+            wanted = set(parent_category_ids)
+            links = [lnk for lnk in links if lnk.parent_category_id in wanted]
+        return sorted(
+            links,
+            key=lambda lnk: (str(lnk.parent_category_id), lnk.sort_index, str(lnk.category_id)),
+        )
 
     # --- Tag delete ---
 
@@ -222,6 +233,20 @@ class InMemoryRepository:
             item = self._items.get(item_id)
             if item is not None and (enabled is None or item.enabled == enabled):
                 result[item_id] = item
+        return result
+
+    def get_categories_by_ids(
+        self,
+        category_ids: Collection[UUID],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[UUID, Category]:
+        """Return categories by id, missing ids silently absent."""
+        result: dict[UUID, Category] = {}
+        for category_id in category_ids:
+            category = self._categories.get(category_id)
+            if category is not None and (enabled is None or category.enabled == enabled):
+                result[category_id] = category
         return result
 
     def get_items_by_external_ids(

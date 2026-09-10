@@ -230,13 +230,50 @@ items_to_list([])            # []
 
 `errors.to_tuple(exc)` maps any `TaxomeshError` to `(status_code, {"detail": "..."})`:
 
-| Exception | HTTP status |
-|-----------|-------------|
-| `TaxomeshDuplicateSlugError` | 409 Conflict |
-| `TaxomeshNotFoundError` (+ subclasses) | 404 Not Found |
-| `TaxomeshValidationError` (+ subclasses) | 422 Unprocessable Entity |
-| `TaxomeshRepositoryError` | 500 Internal Server Error |
-| `TaxomeshError` (base fallback) | 500 Internal Server Error |
+| Exception | HTTP status | `detail` |
+|-----------|-------------|----------|
+| `TaxomeshDuplicateSlugError` | 409 Conflict | the exception message |
+| `TaxomeshExternalIdConflictError` | 409 Conflict | the exception message |
+| `TaxomeshNotFoundError` (+ subclasses) | 404 Not Found | the exception message |
+| `TaxomeshValidationError` (+ subclasses) | 422 Unprocessable Entity | the exception message |
+| `TaxomeshRepositoryError` | 500 Internal Server Error | generic — see below |
+| `TaxomeshError` (base fallback) | 500 Internal Server Error | generic — see below |
+
+### 500 bodies are generic
+
+Client errors (404/409/422) carry the exception's own message. It is written by taxomesh
+from your caller's own input, so it is safe to show and it is what lets the caller fix
+the request.
+
+Server errors do not. `TaxomeshRepositoryError` wraps the backend's message verbatim —
+ORM constraint, table and column names, or the absolute path of a JSON/YAML data file —
+so returning it would hand your storage layout to the client. Both 500 branches return a
+fixed string instead:
+
+```python notest
+from taxomesh.contrib.api.errors import GENERIC_SERVER_ERROR_DETAIL
+
+status, body = errors.to_tuple(exc)
+# (500, {"detail": "An internal error occurred."})
+assert body["detail"] == GENERIC_SERVER_ERROR_DETAIL
+```
+
+Compare against `GENERIC_SERVER_ERROR_DETAIL` rather than the literal, or better, branch
+on the status code — that was always the contract.
+
+The detail is not discarded, it is logged. Every 500 emits one `ERROR` record on the
+`taxomesh` logger with the original exception and its traceback attached, so attach a
+handler to see it:
+
+```python notest
+import logging
+
+logging.getLogger("taxomesh").addHandler(logging.StreamHandler())
+logging.getLogger("taxomesh").setLevel(logging.ERROR)
+```
+
+An application that configures no logging stays silent — taxomesh registers a
+`NullHandler` at import.
 
 ## Available handlers
 
