@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 django = [
-    "django>=6.0",  # Django integration is tested against 6.0 only
+    "django>=6.0",  # CI runs the matrix against 6.0; any 6.x is supported
 ]
 dev = [
     "pytest>=8.0",

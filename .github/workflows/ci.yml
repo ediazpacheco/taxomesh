@@ -84,7 +84,9 @@ jobs:
           /tmp/consumer/bin/python - <<'PY'
           import django
 
-          assert django.VERSION[:2] == (6, 0), django.VERSION
+          # Matches the declared floor in pyproject.toml (django>=6.0). Pinning the exact
+          # minor here broke CI the day Django 6.1.1 shipped, on a release we support.
+          assert django.VERSION >= (6, 0), django.VERSION
           import taxomesh  # noqa: F401  core still imports alongside the Django extra
           print("django extra OK — Django", django.get_version())
           PY
