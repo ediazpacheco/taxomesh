@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.1.0a50] — 2026-09-10
 
 ### Fixed
 
@@ -36,6 +36,34 @@ constants across two corpus sizes, and a spy asserts the call shape at the
 repository boundary. Reverting any of the three methods to per-row resolution
 fails CI, as does deleting the stable `sort_index` re-sort the ordering depends
 on.
+
+**One access pattern costs more, measured downstream after this text was first
+written.** The batch resolve is a repository call and sits outside the service
+memoize layer, while `get_category` and `list_categories` are both memoized. A
+caller that walks a tree node by node with a warm `get_category` cache therefore
+paid one query per non-empty `list_categories(parent_id=…)` call before this
+release and pays two now: the old per-row resolutions were cache hits, the new
+single batch query never is. On a 93-category tree the observed cost was 195 →
+222 queries across 27 non-empty calls. Wall time still *improved* on that same
+path (1460 → 1191 ms), because the unfiltered link scan this release removes was
+the heavier query — so this is a query-count regression, not a latency one. A
+batched read that resolves a whole tree level — or a subtree — in a constant
+number of queries is under consideration as a follow-up; the exact shape is not
+settled.
+
+#### `py.typed` was never shipped, so consumers got no types
+
+The package declared the `Typing :: Typed` classifier and the README advertised
+`py.typed`, but no marker file existed. Under PEP 561 a type checker running in a
+consuming project ignores every annotation in a package without that marker, so
+taxomesh's inline types — and `mypy --strict` compliance — had no effect downstream. The
+marker is now present and covered by three tests (`tests/test_packaging.py`): it exists
+in the package, the classifier and the file agree, and it survives into the built wheel.
+The CI wheel job additionally asserts it is present after installation into a clean
+consumer environment.
+
+No API change. Consumers running a type checker may see new errors that were previously
+suppressed, because taxomesh's types are now visible for the first time.
 
 ### Added
 
@@ -75,25 +103,16 @@ method, on both the filtered and unfiltered paths. Callers catching
 instead; anyone already catching `TaxomeshError` is unaffected. `TaxomeshService`
 never depended on the old behaviour.
 
----
-
-## [0.1.0a50] — 2026-09-09
-
-### Fixed
-
-#### `py.typed` was never shipped, so consumers got no types
-
-The package declared the `Typing :: Typed` classifier and the README advertised
-`py.typed`, but no marker file existed. Under PEP 561 a type checker running in a
-consuming project ignores every annotation in a package without that marker, so
-taxomesh's inline types — and `mypy --strict` compliance — had no effect downstream. The
-marker is now present and covered by three tests (`tests/test_packaging.py`): it exists
-in the package, the classifier and the file agree, and it survives into the built wheel.
-The CI wheel job additionally asserts it is present after installation into a clean
-consumer environment.
-
-No API change. Consumers running a type checker may see new errors that were previously
-suppressed, because taxomesh's types are now visible for the first time.
+- `CONTRIBUTING.md` — development setup, the four quality gates, the spec-first
+  workflow, and how the documented examples are tested.
+- `tests/docs/test_doc_examples.py` — extracts the runnable Python blocks from
+  `README.md` and the `docs/` pages, runs each as a script in an isolated working
+  directory, and smoke-tests the documented CLI commands. Illustrative fragments are
+  tagged `python notest`. Stale examples now fail the test suite instead of rotting
+  silently.
+- Single-query guard tests asserting that `get_items_by_external_ids` and
+  `get_categories_by_external_ids` each resolve a full batch in exactly one SQL query
+  on the Django backend.
 
 ### Changed
 
@@ -121,19 +140,6 @@ this per branch, so a future change cannot over-redact them.
 
 **Migration:** a client that displayed, logged, or parsed the 500 `detail` now sees a
 fixed string. Branch on the status code instead. See `specs/059-safe-error-bodies`.
-
-### Added
-
-- `CONTRIBUTING.md` — development setup, the four quality gates, the spec-first
-  workflow, and how the documented examples are tested.
-- `tests/docs/test_doc_examples.py` — extracts the runnable Python blocks from
-  `README.md` and the `docs/` pages, runs each as a script in an isolated working
-  directory, and smoke-tests the documented CLI commands. Illustrative fragments are
-  tagged `python notest`. Stale examples now fail the test suite instead of rotting
-  silently.
-- Single-query guard tests asserting that `get_items_by_external_ids` and
-  `get_categories_by_external_ids` each resolve a full batch in exactly one SQL query
-  on the Django backend.
 
 ### Documentation
 
