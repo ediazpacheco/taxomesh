@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+#### Batch reads no longer cost a later lookup of the same row
+
+Release 060 replaced per-row resolution with batch reads in three methods. The per-row
+calls it replaced went through the memoized accessors `get_category` / `get_item`; the
+batch reads go straight to the repository and bypass that layer. So resolving a row as a
+**result** stopped priming the entry a later call needs when that same row is passed as
+an **argument** — and every such lookup that used to be a free cache hit became a fresh
+read.
+
+A tree walk feels this directly, because each child becomes the next call's `parent_id`
+and `list_categories` validates its parent through `get_category`. Measured downstream
+on a 75-node, 3-level walk, reads split by table:
+
+| | link reads | category reads | total |
+|---|---:|---:|---:|
+| `0.1.0a49` | 75 | 76 | **151** |
+| `0.1.0a50` | 75 | 102 | **177** |
+| this release | 75 | 27 | **102** |
+
+The batch read was never the cost — 27 batch resolves are far cheaper than 76 per-row
+ones. The cost was the 75 validations that stopped being free. Priming does not merely
+undo the regression, it beats `0.1.0a49`, because the batch saving is kept *and* the
+free lookups come back.
+
+`list_categories(parent_id=…)` and `list_categories_by_item(item_id)` now prime
+`get_category` with the rows they already fetched, before the `enabled` filter is
+applied so a filtered-out row is still cached with its true value. A primed entry is
+indistinguishable from one the accessor wrote itself: same key, same 5-second TTL,
+cleared by the same `clear_all_caches()` on every write. No new staleness window, and no
+public signature changed.
+
+**A single cold call still costs exactly 3 reads**, so release 060's exact-constant gates
+pass unmodified — priming writes to a dict and reads nothing.
+
+**`list_items(category_id=…)` deliberately does NOT prime `get_item`.** It has the
+identical bypass, but the cache has no eviction, and items are large. Measured on a real
+corpus: priming one large item listing costs **98 MB** and the whole item corpus **108
+MB** (≈14 KB/row — the metadata column alone is 25.9 MB of JSON on disk), against **0.17
+MB** for all 93 categories. Nothing on the item path regressed in 060's measurements, so
+that is two orders of magnitude of memory for no measured benefit — and where the
+triggering endpoint is public and unauthenticated, an unbounded default is a
+memory-exhaustion vector rather than merely a large cache. A test asserts the item path
+stays unprimed, so adding it later as an "obvious symmetry" fails the build. Revisit only
+behind an eviction policy.
+
+### Added
+
+- `taxomesh.utils.memoize.prime(func, value, /, *args, **kwargs)` — inserts a value as
+  the cached result of a call. Typed against the target function's own signature, so
+  priming the wrong type or keying on the wrong arguments is a type error rather than a
+  silent extra read. A no-op on functions that are not memoized, and on arguments the
+  cache cannot key.
+- A repeated-access regression gate (`tests/service/test_memoize_priming.py`). Release
+  060's gates measure a single cold call per method, which structurally cannot see a cost
+  that only appears when a small result set is read many times — the shape of this
+  regression. The new gate walks a fixed tree and asserts exact constants, including that
+  the walk pays exactly **one** validation regardless of tree size.
+
+---
+
 ## [0.1.0a50] — 2026-09-10
 
 ### Fixed

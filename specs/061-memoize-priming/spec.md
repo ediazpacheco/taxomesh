@@ -38,10 +38,27 @@ ones. The cost is the 75 validations that stopped being free. Priming does not m
 restore the old behaviour, it beats it: the batch saving is kept **and** the free
 lookups come back.
 
-This affects the consumer's two highest-traffic pages, which are 67.1% of its traffic,
-and nothing absorbs it — the cache holds entries for five seconds in per-process
-memory, and that origin serves roughly one request an hour, so the walk is cold on
-essentially every render.
+The cache does not absorb it: entries live five seconds in per-process memory, and the
+origin where this was measured serves roughly one request an hour behind a CDN, so the
+walk is cold on essentially every render. The added cost is incurred within a single
+render in any case.
+
+### The motivating consumer no longer needs this
+
+Recorded because it changes why the feature exists. The consumer whose pages produced
+the measurements above has since replaced its per-node walk: the helper now reads the
+category-parent link table and the enabled categories — two reads — and assembles the
+tree in Python, verified byte-identical against the old implementation across its whole
+corpus. Its affected page went 195 reads to 48, and on `0.1.0a50` it is now *below* where
+it was on `0.1.0a49`.
+
+So this feature is **not** justified by that consumer's page, and no performance claim
+about that site should be attached to it. It is justified as a library defect in its own
+right: any caller that walks a tree node by node still pays the doubled cost, and the
+library offers no way to avoid it other than the rewrite that consumer performed for
+itself. Whether priming measurably helps the walks that consumer did *not* rewrite is
+being measured separately; a null result there does not invalidate the defect, it only
+removes the last consumer-specific argument for urgency.
 
 ### Why categories only
 
@@ -215,8 +232,11 @@ entry for any of them.
   Rationale is recorded in "Why categories only": measured at 108 MB against 0.17 MB for
   categories, for no measured benefit, and reachable through a public unauthenticated
   endpoint on at least one real deployment.
-- **FR-008**: All four storage backends MUST be covered by tests: the JSON file backend,
-  the YAML file backend, the Django backend, and the in-memory test fixture.
+- **FR-008**: Coverage MUST span all four storage backends, split by what each can
+  assert. Exact read counts MUST be asserted on the spy-instrumented in-memory backend,
+  which is the only one whose repository calls can be counted directly. The observable
+  contract — the value served after a batch read is the true row, and a write still
+  invalidates it — MUST be asserted on all four: JSON, YAML, Django and in-memory.
 - **FR-009**: The behaviour MUST be documented for consumers, including which reads
   prime, which deliberately do not and why, the interaction with the cache lifetime, and
   what a write invalidates.
@@ -239,9 +259,13 @@ entry for any of them.
 
 ### Measurable Outcomes
 
-- **SC-001**: A 75-node, 3-level tree walk costs materially fewer storage reads than
-  both the current release and the release before it — the measured target is 102,
-  against 177 today and 151 before release 060.
+- **SC-001**: A tree walk pays exactly **one** category validation — its own root, which
+  nothing returns as a child — regardless of how many nodes it visits or how deep the
+  tree is. Asserted at two sizes so the constant is shown to be size-invariant; without
+  priming this number tracks the node count, which is the regression. The downstream
+  figures that motivated the work (151 → 177 → 102 on a 75-node tree) are cited as
+  provenance, not as an acceptance target: they depend on that consumer's tree shape and
+  are not reproducible in a fixture.
 - **SC-002**: Looking up a category individually immediately after it was returned by
   either category batch method costs zero storage reads.
 - **SC-003**: A single cold call to each affected method costs exactly what it costs

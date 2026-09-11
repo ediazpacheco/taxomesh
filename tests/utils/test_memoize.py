@@ -2,7 +2,7 @@
 
 import time
 
-from taxomesh.utils.memoize import clear_all_caches, memoize
+from taxomesh.utils.memoize import clear_all_caches, memoize, prime
 
 
 class TestMemoizeCacheHit:
@@ -107,3 +107,115 @@ class TestClearCachePerFunction:
         counter.clear_cache()  # type: ignore[attr-defined]
         counter()
         assert call_count == 2
+
+
+class TestPrime:
+    def test_primed_value_is_served_without_calling(self) -> None:
+        call_count = 0
+
+        @memoize(ttl=5)
+        def counter(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        prime(counter, 999, 7)
+        assert counter(7) == 999
+        assert call_count == 0
+
+    def test_priming_one_key_does_not_serve_another(self) -> None:
+        @memoize(ttl=5)
+        def counter(x: int) -> int:
+            return x * 2
+
+        prime(counter, 999, 7)
+        assert counter(8) == 16
+
+    def test_priming_a_plain_function_is_a_noop(self) -> None:
+        call_count = 0
+
+        def plain(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        prime(plain, 999, 7)
+        assert plain(7) == 14
+        assert call_count == 1
+
+    def test_priming_unhashable_args_is_a_noop(self) -> None:
+        call_count = 0
+
+        @memoize(ttl=5)
+        def counter(x: list[int]) -> int:
+            nonlocal call_count
+            call_count += 1
+            return sum(x)
+
+        prime(counter, 999, [1, 2])
+        assert counter([1, 2]) == 3
+        assert call_count == 1
+
+    def test_priming_keyword_args(self) -> None:
+        call_count = 0
+
+        @memoize(ttl=5)
+        def counter(*, x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        prime(counter, 999, x=7)
+        assert counter(x=7) == 999
+        assert call_count == 0
+
+    def test_priming_twice_keeps_the_latest_value(self) -> None:
+        @memoize(ttl=5)
+        def counter(x: int) -> int:
+            return x * 2
+
+        prime(counter, 111, 7)
+        prime(counter, 222, 7)
+        assert counter(7) == 222
+
+    def test_primed_entry_expires_on_ttl(self) -> None:
+        call_count = 0
+
+        @memoize(ttl=0.1)
+        def counter(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        prime(counter, 999, 7)
+        assert counter(7) == 999
+        time.sleep(0.15)
+        assert counter(7) == 14
+        assert call_count == 1
+
+    def test_clear_all_caches_clears_a_primed_entry(self) -> None:
+        call_count = 0
+
+        @memoize(ttl=5)
+        def counter(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        prime(counter, 999, 7)
+        clear_all_caches()
+        assert counter(7) == 14
+        assert call_count == 1
+
+    def test_primed_entry_is_bound_to_the_instance(self) -> None:
+        """The cache key includes ``self``; priming one instance must not serve another."""
+
+        class Svc:
+            @memoize(ttl=5)
+            def get(self, x: int) -> str:
+                return f"real-{x}"
+
+        a, b = Svc(), Svc()
+        prime(Svc.get, "primed", a, 1)
+        assert a.get(1) == "primed"
+        assert b.get(1) == "real-1"

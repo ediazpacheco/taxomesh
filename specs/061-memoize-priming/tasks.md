@@ -18,8 +18,8 @@ paired test is written and observed failing.
 
 **Blocks every user story.** Nothing in Phase 3+ can be written until `prime` exists.
 
-- [ ] T002 Write failing unit tests for the insert path in `tests/unit/test_memoize.py`: priming a memoized function makes the next matching call a hit; the primed value is returned verbatim; priming a *non*-memoized function is a silent no-op rather than an error.
-- [ ] T003 Write failing unit tests for insert-path edge cases in `tests/unit/test_memoize.py`: priming with unhashable arguments is a no-op and does not raise; priming twice for the same key is idempotent in effect and refreshes the timestamp; a primed entry expires on TTL exactly as a normally written one; `clear_all_caches()` clears a primed entry.
+- [ ] T002 Write failing unit tests for the insert path in `tests/utils/test_memoize.py`: priming a memoized function makes the next matching call a hit; the primed value is returned verbatim; priming a *non*-memoized function is a silent no-op rather than an error.
+- [ ] T003 Write failing unit tests for insert-path edge cases in `tests/utils/test_memoize.py`: priming with unhashable arguments is a no-op and does not raise; priming twice for the same key is idempotent in effect and refreshes the timestamp; a primed entry expires on TTL exactly as a normally written one; `clear_all_caches()` clears a primed entry.
 - [ ] T004 Implement `prime(func, value, /, *args, **kwargs) -> None` in `taxomesh/utils/memoize.py` per [contracts/memoize-priming.md](./contracts/memoize-priming.md). Reuse the wrapper's own key construction — extract it to a shared closure rather than duplicating it (research.md R1). Keep `memoize`'s return type as `Callable[P, R]`; do **not** widen it to a Protocol (research.md R2 — that breaks method binding).
 - [ ] T005 Verify `uv run mypy --strict taxomesh/utils/memoize.py` passes with no `Any` and no new `type: ignore` beyond the one already present on `clear_cache`. If `Any` proves unavoidable, it MUST carry an inline justification per Constitution Principle IV.
 
@@ -37,7 +37,7 @@ individually, and assert zero storage reads.
 
 - [ ] T006 [P] [US1] Write a failing test in `tests/service/test_memoize_priming.py`: after `list_categories(parent_id=…)`, fetching a returned child by id costs zero repository reads (spy at the repository boundary).
 - [ ] T007 [P] [US1] Write a failing test in `tests/service/test_memoize_priming.py`: after `list_categories_by_item(item_id)`, fetching a returned category by id costs zero repository reads.
-- [ ] T008 [US1] Write a failing test in `tests/service/test_memoize_priming.py` asserting the headline number: a 3-level tree walk over a fixture of ~75 nodes costs an exact constant total, and that constant is strictly lower than the per-node walk's cost. Assert an **exact** value, not an upper bound (FR-006).
+- [ ] T008 [US1] Write a failing test in `tests/service/test_memoize_priming.py` asserting the headline property: a tree walk pays exactly **one** category validation — its own root, which nothing returns as a child — regardless of tree size. Assert at two sizes (a 12-node/3-deep and an 84-node/4-deep tree) so the constant is shown to be size-invariant, which is the real claim; a per-node cost would make it track the node count. Assert **exact** values, not upper bounds (FR-006).
 - [ ] T009 [US1] Implement priming in `list_categories(parent_id=…)` in `taxomesh/application/service.py` — prime `get_category` from the `get_categories_by_ids` batch already fetched, before the enabled filter is applied so the cached value stays unfiltered (FR-003, User Story 3 scenario 4).
 - [ ] T010 [US1] Implement priming in `list_categories_by_item(item_id)` in `taxomesh/application/service.py`, same shape as T009.
 - [ ] T011 [US1] Run `uv run pytest tests/service/test_memoize_priming.py -q` — T006–T008 pass.

@@ -186,6 +186,56 @@ Match quality tiers, from highest to lowest:
 The `external_id` field is only matched when it is non-empty. Pass `fuzzy=False` to
 restrict to the deterministic tiers only (no rapidfuzz scoring).
 
+## Read caching
+
+`TaxomeshService` caches its read methods in memory for **5 seconds**
+(`DEFAULT_CACHE_TTL`). The cache is per-process — under a multi-worker server each
+worker holds its own — and **every write clears every cache**, so creating, updating or
+deleting anything invalidates the lot at once. There is no per-key invalidation.
+
+### Batch reads prime the per-row cache
+
+Listing categories leaves those categories cached, so a later lookup of one of them is
+served from memory:
+
+| Read | Primes |
+|---|---|
+| `list_categories(parent_id=…)` | `get_category`, for every category returned |
+| `list_categories_by_item(item_id)` | `get_category`, for every category returned |
+| `list_items(category_id=…)` | **nothing** — see below |
+
+This matters most when walking a tree, because each child becomes the next call's
+`parent_id` and `list_categories` validates its parent through `get_category`:
+
+```python notest
+def walk(service, parent_id):
+    for child in service.list_categories(parent_id=parent_id):
+        yield child
+        yield from walk(service, child.category_id)   # `child` is not re-read
+```
+
+Such a walk pays exactly **one** category lookup — its own root, which nothing returned
+as a child — regardless of how many nodes it visits. On a measured 75-node, 3-level tree
+that is 102 storage reads against 177 without priming.
+
+A row is cached with the value storage returned, *before* any `enabled` filter is
+applied, so a category omitted from a filtered result is still cached with its true
+value and a later `get_category` on it returns the row rather than raising.
+
+### Why listing items does not prime
+
+`list_items(category_id=…)` deliberately leaves `get_item`'s cache alone. The cache has
+no eviction — an entry lives until the next write — and items are large. Measured on a
+real corpus, priming one big item listing costs **98 MB** and the whole item corpus
+**108 MB** (≈14 KB per row, driven by `metadata`), against **0.17 MB** for every
+category in the same corpus.
+
+If your application exposes an endpoint that lists a large category's items, priming it
+would let one request pin that much memory until the next write. On a read-mostly
+deployment, where writes are rare, that is effectively for the life of the process. If
+you want item priming for a small corpus, the prerequisite is an eviction policy in the
+cache rather than a flag.
+
 ## Error model
 
 All library exceptions inherit from `TaxomeshError`.

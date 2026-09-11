@@ -91,7 +91,7 @@ taxomesh/
                                    #   list_items(category_id=…)        → UNCHANGED (FR-007)
 
 tests/
-├── unit/
+├── utils/
 │   └── test_memoize.py            # MODIFIED — insert path, TTL, invalidation, unhashable
 ├── service/
 │   ├── test_memoize_priming.py    # NEW — read counts across a repeated-access pattern

@@ -8,7 +8,7 @@ contains no storage logic itself.
 import heapq
 import logging
 import tomllib
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar
@@ -33,7 +33,7 @@ from taxomesh.exceptions import (
     TaxomeshTagNotFoundError,
 )
 from taxomesh.ports.repository import TaxomeshRepositoryBase
-from taxomesh.utils.memoize import clear_all_caches, memoize
+from taxomesh.utils.memoize import clear_all_caches, memoize, prime
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +273,31 @@ class TaxomeshService:
         self._category_corpus = None
         return category
 
+    def _prime_category_cache(self, categories: Mapping[UUID, Category]) -> None:
+        """Populate ``get_category``'s cache with rows a batch read already fetched.
+
+        The batch reads added in 060 resolve rows through the repository, below the
+        memoize layer, so a row returned as a *result* no longer primes the entry the
+        next call needs when that row is passed as an *argument*. A tree walk feels this
+        directly: every child becomes the following call's ``parent_id``, and each of
+        those validations was a free cache hit before 060 and a fresh read after it.
+
+        The entries written here are indistinguishable from ones ``get_category`` would
+        have written itself — same key, same TTL, cleared by the same
+        ``clear_all_caches()`` on every write — so this restores an amortisation without
+        widening any staleness window.
+
+        Deliberately category-only. The item path has the identical bypass but is not
+        primed: measured on a real corpus, priming it costs 108 MB per process against
+        0.17 MB for every category, for no measured benefit, and the cache has no
+        eviction. See spec 061, FR-007.
+
+        Args:
+            categories: The rows just fetched, keyed by id, unfiltered by ``enabled``.
+        """
+        for category_id, category in categories.items():
+            prime(TaxomeshService.get_category, category, self, category_id)
+
     @memoize(DEFAULT_CACHE_TTL)
     def get_category(self, category_id: UUID) -> Category:
         """Retrieve a category by its identifier.
@@ -346,6 +371,9 @@ class TaxomeshService:
         # Resolved in ONE batch, deliberately unfiltered: a disabled category must
         # stay distinguishable from a deleted one, because an absent key raises below.
         category_map = self._repo.get_categories_by_ids({lnk.category_id for lnk in links}, enabled=None)
+        # Primed BEFORE the enabled filter below, so the cached row is the true one: a
+        # caller that later asks for a filtered-out category by id must still get it.
+        self._prime_category_cache(category_map)
         cats: list[Category] = []
         for lnk in links:
             found = category_map.get(lnk.category_id)
@@ -587,6 +615,9 @@ class TaxomeshService:
         # Resolved in ONE batch, deliberately unfiltered: a disabled category must
         # stay distinguishable from a deleted one, because an absent key raises below.
         category_map = self._repo.get_categories_by_ids({lnk.category_id for lnk in links}, enabled=None)
+        # Primed BEFORE the enabled filter below, so the cached row is the true one: a
+        # caller that later asks for a filtered-out category by id must still get it.
+        self._prime_category_cache(category_map)
         cats: list[Category] = []
         for lnk in links:
             found = category_map.get(lnk.category_id)
