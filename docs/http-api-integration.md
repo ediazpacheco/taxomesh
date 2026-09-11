@@ -275,6 +275,52 @@ logging.getLogger("taxomesh").setLevel(logging.ERROR)
 An application that configures no logging stays silent — taxomesh registers a
 `NullHandler` at import.
 
+### On Django, this logger is the only copy of the traceback
+
+Worth stating plainly, because the obvious alternative does not work. When a
+taxomesh error reaches a Django view and your middleware turns it into a 500
+response, Django's own `log_response` emits a record on the `django.request`
+logger for that response. If you route `django.request` to `mail_admins`, that
+email arrives with **`Traceback: None`** and no exception type: by the time
+`log_response` runs, `sys.exc_info()` has already been cleared, so there is no
+exception left for it to format.
+
+So after this release the failure mode is two half-records — an alert with no
+traceback on `django.request`, and the real traceback on the `taxomesh` logger
+going wherever you pointed it. If you pointed it nowhere, Python's
+`logging.lastResort` writes it to stderr unformatted, with no timestamp and no
+context.
+
+Route the `taxomesh` logger somewhere you actually read, and if that destination
+is email, rate-limit it — a database outage emits one record per request:
+
+```python notest
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "taxomesh_rate_limit": {
+            "()": "myapp.logging.RateLimitFilter",  # your own; one per interval
+            "rate_seconds": 3600,
+        },
+    },
+    "handlers": {
+        "taxomesh_mail": {
+            "class": "django.utils.log.AdminEmailHandler",
+            "level": "ERROR",
+            "filters": ["taxomesh_rate_limit"],
+            "include_html": False,
+        },
+    },
+    "loggers": {
+        "taxomesh": {"handlers": ["taxomesh_mail"], "level": "ERROR", "propagate": False},
+    },
+}
+```
+
+`AdminEmailHandler` formats `exc_info`, so this email names the actual fault —
+the one the `django.request` email cannot.
+
 ## Available handlers
 
 | Group | Handlers |
