@@ -1,4 +1,4 @@
-# Feature Specification: Memoize priming for batch reads
+# Feature Specification: Memoize priming for batch category reads
 
 **Feature Branch**: `061-memoize-priming`
 **Created**: 2026-09-10
@@ -43,30 +43,66 @@ and nothing absorbs it — the cache holds entries for five seconds in per-proce
 memory, and that origin serves roughly one request an hour, so the walk is cold on
 essentially every render.
 
+### Why categories only
+
+The same bypass exists on the item path: `list_items(category_id=…)` resolves through a
+batch read and skips `get_item`'s cache identically. Priming it is nevertheless **out of
+scope**, for two measured reasons.
+
+**It buys nothing observed.** The regression is entirely on the category path. On the
+consumer's traffic-weighted measurements nothing on the item path got worse — one page
+was flat at 25 reads, the landings were flat, and the item-heavy surfaces improved
+sharply without any priming (search 434 → 218, one detail page 160 → 12, the public API
+endpoint 5,226 → 6).
+
+**It is expensive and exposed.** The cache has no eviction and no size cap, so a primed
+row is held until a write clears everything. Measured on the consumer's corpus:
+
+| Primed set | Rows | Memory |
+|---|---:|---:|
+| All categories | 93 | **0.17 MB** |
+| One large item listing | 7,334 | **98.1 MB** |
+| Whole item corpus | 8,351 | **108.1 MB** |
+
+Items are not small — the metadata column alone is 25.9 MB of JSON on disk, averaging
+3,258 bytes per row, which expands roughly fourfold once parsed. On that deployment 108
+MB is 21.6% of a worker's resident size, across two workers, on a host already
+swapping. And because the endpoint that triggers the largest listing is public and
+unauthenticated, a single anonymous request would pin ~98 MB until a write or a worker
+recycle — on a read-mostly deployment, effectively for the life of the worker. As a
+library default that is a memory-exhaustion vector for any consumer with a large,
+metadata-heavy corpus, not merely a large cache.
+
+Priming categories costs 0.17 MB and captures the entire measured win. Priming items
+costs two orders of magnitude more for no measured win. The item path stays unprimed
+until the cache has an eviction policy, which is separate work.
+
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - A second read does not re-fetch what the first already returned (Priority: P1)
+### User Story 1 - A second read does not re-fetch a category the first already returned (Priority: P1)
 
-An application reads a set of rows through one of the three batch methods, then looks
-up some of those same rows individually — or passes one of them as the argument to
-another read. It should not pay storage again for rows the library just held in memory.
+An application reads a set of categories through one of the two category batch methods,
+then passes one of them as the argument to another read — most commonly by walking a
+tree, where each node returned as a child becomes the parent of the next call. It should
+not pay storage again for rows the library just held in memory.
 
 **Why this priority**: This is the regression and its remedy. Every other story here
 exists to keep this one from breaking something else.
 
-**Independent Test**: Perform a batch read, then look up a returned row individually,
-and assert the second lookup costs zero storage reads.
+**Independent Test**: Perform a category batch read, then look up a returned category
+individually, and assert the second lookup costs zero storage reads.
 
 **Acceptance Scenarios**:
 
 1. **Given** a category with children, **When** the caller lists those children and
    then fetches one of them by id, **Then** the fetch costs no storage read.
-2. **Given** a category holding items, **When** the caller lists those items and then
-   fetches one of them by id, **Then** the fetch costs no storage read.
-3. **Given** a multi-level tree, **When** the caller walks it node by node, **Then**
-   the total read count is materially lower than both the current release and the one
-   before it, and the walk's per-node validation costs nothing.
-4. **Given** the cache has been cleared, **When** any of the three methods runs once,
+2. **Given** an item placed in several categories, **When** the caller lists those
+   categories and then fetches one of them by id, **Then** the fetch costs no storage
+   read.
+3. **Given** a multi-level tree, **When** the caller walks it node by node, **Then** the
+   total read count is materially lower than both the current release and the one before
+   it, and the per-node parent validation costs nothing.
+4. **Given** the cache has been cleared, **When** either category method runs once,
    **Then** its cost is unchanged from the current release.
 
 ---
@@ -86,9 +122,9 @@ written to catch.
 
 1. **Given** the 060 read-count gates, **When** priming is added, **Then** every gate
    passes with its constants unchanged and no test is edited to accommodate the change.
-2. **Given** a single cold call to any of the three methods, **When** priming is added,
-   **Then** it costs exactly what it costs today — priming writes to memory, it does
-   not read from storage.
+2. **Given** a single cold call to either category method, **When** priming is added,
+   **Then** it costs exactly what it costs today — priming writes to memory, it does not
+   read from storage.
 
 ---
 
@@ -111,30 +147,49 @@ next read reflects the mutation rather than the primed value.
    invalidated exactly as a normally cached entry would be.
 2. **Given** a primed entry, **When** its lifetime expires, **Then** it is refreshed
    exactly as a normally cached entry would be.
-3. **Given** a row that does not exist, **When** a batch read omits it, **Then** a
-   later individual lookup still raises the same not-found error as today — priming
-   must never manufacture a hit for an absent row.
+3. **Given** a category that does not exist, **When** a batch read omits it, **Then** a
+   later individual lookup still raises the same not-found error as today — priming must
+   never manufacture a hit for an absent row.
 4. **Given** a batch read that deliberately ignores the enabled filter, **When** its
    results are primed, **Then** a later individual lookup returns exactly what a direct
    read would return, with no filter leaking into the cached value.
 
 ---
 
+### User Story 4 - The item path is left measurably alone (Priority: P2)
+
+An application reading a large category listing must not acquire a large resident cache
+as a side effect. `list_items(category_id=…)` keeps its current behaviour exactly.
+
+**Why this priority**: P2 because it is a constraint rather than a capability — but it
+is the constraint that keeps this feature from introducing a worse problem than it
+solves, so it is tested rather than assumed.
+
+**Independent Test**: List a large category's items, then assert the cache holds no
+entry for any of them.
+
+**Acceptance Scenarios**:
+
+1. **Given** a category holding many items, **When** the caller lists them, **Then** no
+   item entry is added to the cache and memory does not grow with the result size.
+2. **Given** a category holding many items, **When** the caller lists them and then
+   fetches one by id, **Then** that fetch costs one storage read, exactly as today.
+
+---
+
 ### Edge Cases
 
-- **A batch returns a very large number of rows.** The cache has no size limit and no
-  eviction: entries are written and only removed when cleared wholesale by a write, so
-  an expired entry that is never accessed again is never reclaimed. Priming a listing of
-  several thousand rows inserts that many entries and holds them until the next write.
-  Per FR-007 this is accepted rather than bounded; the requirement is that it be
-  measured and documented, not avoided.
-- **The same row appears in two batches.** Priming must be idempotent; the second write
-  must not extend or shorten the entry's life in a way a direct read would not.
-- **A row is deleted between the batch read and the later lookup.** A write clears the
-  cache, so the later lookup must miss and behave exactly as it does today.
+- **The same category appears in two batches.** Priming must be idempotent; the second
+  write must not extend or shorten the entry's life in a way a direct read would not.
+- **A category is deleted between the batch read and the later lookup.** A write clears
+  the cache, so the later lookup must miss and behave exactly as it does today.
 - **A batch read returns nothing.** Priming must be a no-op, not an error.
 - **Unhashable arguments.** The cache already declines to store entries it cannot key;
   priming must decline in exactly the same circumstances rather than raising.
+- **A very large category tree.** Priming is bounded by the number of categories, which
+  is small in every corpus measured. The bound is documented rather than enforced; if a
+  corpus ever makes it material, the answer is eviction in the cache, not a special case
+  here.
 
 ## Requirements *(mandatory)*
 
@@ -143,31 +198,28 @@ next read reflects the mutation rather than the primed value.
 - **FR-001**: The caching utility MUST provide a way to insert a value for a given set
   of arguments, so that a later call with those arguments is served without reading
   storage.
-- **FR-002**: The three batch-reading methods MUST prime the corresponding per-row
-  accessor with the rows they already fetched.
+- **FR-002**: `list_categories(parent_id=…)` and `list_categories_by_item(item_id)` MUST
+  prime the per-category accessor with the categories they already fetched.
 - **FR-003**: A primed entry MUST be indistinguishable from a normally cached one in
   value, lifetime and invalidation. No new staleness window may be introduced.
 - **FR-004**: Priming MUST NOT create an entry for a row that was not actually read, and
   MUST NOT suppress the not-found error a later lookup of an absent row raises today.
-- **FR-005**: The cost of a single cold call to any of the three methods MUST be
-  unchanged. Release 060's exact-constant gates MUST pass with their constants
-  unmodified and no test edited.
+- **FR-005**: The cost of a single cold call to either method MUST be unchanged. Release
+  060's exact-constant gates MUST pass with their constants unmodified and no test
+  edited.
 - **FR-006**: The reduction MUST be asserted by tests that count storage reads across a
-  repeated-access pattern — the case the 060 gates deliberately do not measure — so
-  that removing priming later fails the build.
-- **FR-007**: Priming MUST apply to all three methods with no size cap and no
-  threshold. The memory cost is accepted as a deliberate tradeoff: a batch of any size
-  is primed in full, and those entries are held until the next write clears the cache.
-  Worst case on the largest measured corpus is the full item set — 8,352 rows — resident
-  per process, and on a read-mostly deployment where writes are rare that is effectively
-  for the life of the process. This is a decision, not an oversight, and MUST be
-  documented as such for consumers under FR-009 so that an operator sizing a deployment
-  can see it. Note that the cache is already unbounded today; priming increases how
-  quickly it fills, not whether it is capped.
+  repeated-access pattern — the case the 060 gates deliberately do not measure — so that
+  removing priming later fails the build.
+- **FR-007**: `list_items(category_id=…)` MUST NOT prime the per-item accessor, and a
+  test MUST assert that listing a category's items adds no item entry to the cache.
+  Rationale is recorded in "Why categories only": measured at 108 MB against 0.17 MB for
+  categories, for no measured benefit, and reachable through a public unauthenticated
+  endpoint on at least one real deployment.
 - **FR-008**: All four storage backends MUST be covered by tests: the JSON file backend,
   the YAML file backend, the Django backend, and the in-memory test fixture.
-- **FR-009**: The behaviour MUST be documented for consumers, including its interaction
-  with the cache lifetime and what a write invalidates.
+- **FR-009**: The behaviour MUST be documented for consumers, including which reads
+  prime, which deliberately do not and why, the interaction with the cache lifetime, and
+  what a write invalidates.
 
 ### Non-Functional Requirements
 
@@ -190,17 +242,15 @@ next read reflects the mutation rather than the primed value.
 - **SC-001**: A 75-node, 3-level tree walk costs materially fewer storage reads than
   both the current release and the release before it — the measured target is 102,
   against 177 today and 151 before release 060.
-- **SC-002**: Looking up a row individually immediately after it was returned by one of
-  the three batch methods costs zero storage reads.
-- **SC-003**: A single cold call to each of the three methods costs exactly what it
-  costs today, verified by release 060's unmodified gates.
+- **SC-002**: Looking up a category individually immediately after it was returned by
+  either category batch method costs zero storage reads.
+- **SC-003**: A single cold call to each affected method costs exactly what it costs
+  today, verified by release 060's unmodified gates.
 - **SC-004**: A write invalidates a primed entry exactly as it invalidates a normally
   cached one, verified per backend.
 - **SC-005**: Removing priming fails the build.
-- **SC-006**: Worst-case memory for the largest measured corpus is measured and
-  recorded — priming a listing of several thousand rows, then reporting resident entry
-  count and footprint — so the accepted cost in FR-007 is a known number rather than an
-  estimate.
+- **SC-006**: Listing a category's items adds zero entries to the per-item cache,
+  verified by test, so the 108 MB worst case cannot reappear unnoticed.
 
 ## Assumptions
 
@@ -212,23 +262,25 @@ next read reflects the mutation rather than the primed value.
   filter either.
 - Cache invalidation stays exactly as it is today: every write clears everything.
   Priming introduces no new invalidation path.
-- Unbounded priming was chosen over the alternatives (categories only, a row threshold,
-  or adding eviction to the cache) with the memory cost understood and accepted. Adding
-  a size limit to the caching utility remains available later if a deployment reports
-  pressure; it is deliberately not bundled here because it would touch all nine memoized
-  reads and needs gates of its own.
-- The tree-walk access pattern — a public call that resolves a whole tree level or
-  subtree in a constant number of reads — remains worth exposing eventually, but is out
-  of scope here and stops being urgent once priming lands, because it requires the
-  consumer to migrate whereas this does not.
+- Category counts are small in every corpus measured (93 in the largest), so unbounded
+  priming of categories needs no cap. This is an assumption about scale, not a
+  guarantee; if a consumer reports a category corpus large enough to matter, the answer
+  is eviction in the cache rather than a threshold here.
+- The tree-walk access pattern — a public call resolving a whole tree level or subtree in
+  a constant number of reads — remains worth exposing eventually, but is out of scope and
+  stops being urgent once priming lands, because it requires the consumer to migrate
+  whereas this does not.
 
 ## Out of Scope
 
+- Priming the per-item accessor. Revisit only after the cache has an eviction policy.
+- Adding eviction or a size limit to the caching utility. Worth doing — the cache is
+  already unbounded today and priming does not change that — but it touches all nine
+  memoized reads and needs its own gates, so bundling it would put this fix behind
+  unrelated risk.
 - Reverting or re-tuning any part of release 060.
 - Any new public API, including a batched tree-level or subtree read.
 - Changing the cache lifetime or the invalidate-everything-on-write policy.
-- Any change to items, placements, tags or relations beyond priming the accessor for
-  rows the three named methods already read.
 
 ## Dependencies
 
