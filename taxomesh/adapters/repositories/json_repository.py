@@ -372,15 +372,29 @@ class JsonRepository:
         self._category_parent_links.append(link)
         self._flush()
 
-    def list_category_parent_links(self) -> list[CategoryParentLink]:
-        """Return all stored category-parent relationships grouped by parent then sort_index.
+    def list_category_parent_links(
+        self,
+        *,
+        parent_category_ids: Collection[UUID] | None = None,
+    ) -> list[CategoryParentLink]:
+        """Return stored category-parent relationships, optionally filtered by parent.
+
+        Args:
+            parent_category_ids: When given, only links whose
+                ``parent_category_id`` is a member are returned. An EMPTY
+                collection returns ``[]`` — it is NOT treated as "no filter".
+                ``None`` (default) applies no filter.
 
         Returns:
-            List of all CategoryParentLink records ordered by
+            List of matching CategoryParentLink records ordered by
             ``(parent_category_id ASC, sort_index ASC, category_id ASC)``.
         """
+        links = self._category_parent_links
+        if parent_category_ids is not None:
+            wanted = set(parent_category_ids)
+            links = [lnk for lnk in links if lnk.parent_category_id in wanted]
         return sorted(
-            self._category_parent_links,
+            links,
             key=lambda lnk: (str(lnk.parent_category_id), lnk.sort_index, str(lnk.category_id)),
         )
 
@@ -644,6 +658,31 @@ class JsonRepository:
             item = self._items.get(item_id)
             if item is not None and (enabled is None or item.enabled == enabled):
                 result[item_id] = item
+        return result
+
+    def get_categories_by_ids(
+        self,
+        category_ids: Collection[UUID],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[UUID, Category]:
+        """Return categories whose category_id is in category_ids.
+
+        Args:
+            category_ids: A collection of internal category UUIDs to look up.
+                Pre-normalised: no duplicates expected.
+            enabled: ``True`` returns only enabled categories; ``False`` only
+                disabled; ``None`` (default) returns all matching categories.
+
+        Returns:
+            A dict mapping each found category_id to its Category. Missing IDs
+            are silently absent — no error is raised.
+        """
+        result: dict[UUID, Category] = {}
+        for category_id in category_ids:
+            category = self._categories.get(category_id)
+            if category is not None and (enabled is None or category.enabled == enabled):
+                result[category_id] = category
         return result
 
     def get_items_by_external_ids(

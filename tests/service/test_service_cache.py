@@ -566,3 +566,85 @@ class TestListRelatedItemsBulkResolution:
 
         assert svc.list_related_items(uuid4()) == []
         repo.get_items_by_ids.assert_not_called()
+
+
+class TestPlacementReadCaching:
+    """Spec 060: batching the placement reads must not change their cache behaviour.
+
+    FR-018 — results stay cached for the TTL and stay invalidated on write. These
+    run against a real in-memory backend rather than a mock, because what is being
+    checked is that the rewritten call path still sits behind the memoize decorator.
+    """
+
+    def setup_method(self) -> None:
+        clear_all_caches()
+
+    @staticmethod
+    def _service_with_one_placement() -> tuple[TaxomeshService, UUID, UUID]:
+        from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
+
+        service = TaxomeshService(repository=InMemoryRepository())
+        category = service.create_category("Cached")
+        item = service.create_item(name="Cached Item")
+        service.place_item_in_category(item.item_id, category.category_id)
+        clear_all_caches()
+        return service, category.category_id, item.item_id
+
+    def test_list_items_by_category_is_served_from_cache_on_repeat(self) -> None:
+        service, category_id, _ = self._service_with_one_placement()
+
+        first = service.list_items(category_id=category_id)
+        with patch.object(service.repository, "list_item_parent_links") as spy:
+            second = service.list_items(category_id=category_id)
+
+        assert spy.call_count == 0, "the second call reached storage — memoization was lost"
+        assert [item.item_id for item in first] == [item.item_id for item in second]
+
+    def test_list_items_by_category_is_invalidated_by_a_write(self) -> None:
+        service, category_id, _ = self._service_with_one_placement()
+        assert len(service.list_items(category_id=category_id)) == 1
+
+        added = service.create_item(name="Added Later")
+        service.place_item_in_category(added.item_id, category_id, sort_index=1)
+
+        assert len(service.list_items(category_id=category_id)) == 2, "a write did not invalidate the cache"
+
+    def test_list_items_by_category_reflects_a_removal(self) -> None:
+        service, category_id, item_id = self._service_with_one_placement()
+        assert len(service.list_items(category_id=category_id)) == 1
+
+        service.remove_item_from_category(item_id, category_id)
+
+        assert service.list_items(category_id=category_id) == []
+
+    def test_list_categories_by_parent_is_served_from_cache_on_repeat(self) -> None:
+        """FR-018 for the children path."""
+        from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
+
+        service = TaxomeshService(repository=InMemoryRepository())
+        parent = service.create_category("Cached Parent")
+        child = service.create_category("Cached Child")
+        service.add_category_parent(child.category_id, parent.category_id)
+        clear_all_caches()
+
+        first = service.list_categories(parent_id=parent.category_id)
+        with patch.object(service.repository, "list_category_parent_links") as spy:
+            second = service.list_categories(parent_id=parent.category_id)
+
+        assert spy.call_count == 0
+        assert [c.category_id for c in first] == [c.category_id for c in second]
+
+    def test_list_categories_by_parent_is_invalidated_by_a_write(self) -> None:
+        from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
+
+        service = TaxomeshService(repository=InMemoryRepository())
+        parent = service.create_category("Cached Parent")
+        child = service.create_category("Cached Child")
+        service.add_category_parent(child.category_id, parent.category_id)
+        clear_all_caches()
+        assert len(service.list_categories(parent_id=parent.category_id)) == 1
+
+        added = service.create_category("Added Later")
+        service.add_category_parent(added.category_id, parent.category_id, sort_index=1)
+
+        assert len(service.list_categories(parent_id=parent.category_id)) == 2

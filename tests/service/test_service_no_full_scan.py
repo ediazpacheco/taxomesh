@@ -45,6 +45,32 @@ class RecordingRepository(InMemoryRepository):
         self.calls.append(("list_item_parent_links", {"item_id": item_id, "category_ids": recorded_categories}))
         return super().list_item_parent_links(item_id=item_id, category_ids=category_ids)
 
+    def get_categories_by_ids(
+        self,
+        category_ids: Collection[UUID],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[UUID, Category]:
+        self.calls.append(("get_categories_by_ids", {"category_ids": set(category_ids), "enabled": enabled}))
+        return super().get_categories_by_ids(category_ids, enabled=enabled)
+
+    def list_category_parent_links(
+        self,
+        *,
+        parent_category_ids: Collection[UUID] | None = None,
+    ) -> list[CategoryParentLink]:
+        recorded = set(parent_category_ids) if parent_category_ids is not None else None
+        self.calls.append(("list_category_parent_links", {"parent_category_ids": recorded}))
+        return super().list_category_parent_links(parent_category_ids=parent_category_ids)
+
+    def get_item(self, item_id: UUID) -> Item | None:
+        self.calls.append(("get_item", {"item_id": item_id}))
+        return super().get_item(item_id)
+
+    def get_category(self, category_id: UUID) -> Category | None:
+        self.calls.append(("get_category", {"category_id": category_id}))
+        return super().get_category(category_id)
+
     def list_item_relation_links_for_items(
         self,
         item_ids: Collection[UUID],
@@ -58,6 +84,14 @@ class RecordingRepository(InMemoryRepository):
     def names(self) -> list[str]:
         """Return the recorded method names in call order."""
         return [name for name, _ in self.calls]
+
+    def count_of(self, name: str) -> int:
+        """Return how many times *name* was called."""
+        return sum(1 for called, _ in self.calls if called == name)
+
+    def reset(self) -> None:
+        """Discard recorded calls, so a measurement excludes fixture setup."""
+        self.calls.clear()
 
     def kwargs_of(self, name: str) -> list[dict[str, object]]:
         """Return the recorded kwargs of every call to *name*."""
@@ -419,3 +453,126 @@ def test_related_items_disabled_source_renders_unknown_in_warning(
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warning_records) == 1
     assert f"<unknown source item {source.item_id}>" in warning_records[0].getMessage()
+
+
+# ---------------------------------------------------------------------------
+# Site 5 — the three placement read paths (spec 060, finding F1)
+# ---------------------------------------------------------------------------
+#
+# These assert the *shape* of the calls the service makes: one batch resolve,
+# never one resolve per returned row. The gate runs on the in-memory backend
+# only, and that is sufficient — the service layer has no backend-conditional
+# branching, so the sequence of port calls is identical whichever adapter sits
+# underneath (FR-020). Per-backend evidence is the query-count module under
+# tests/contrib/django/ and the parity assertions under tests/service/.
+
+
+def test_list_items_by_category_resolves_in_one_batch(spy: RecordingRepository, spy_service: TaxomeshService) -> None:
+    """FR-020: zero single-row item reads, one batch call carrying every id."""
+    category = spy_service.create_category("Jazz")
+    placed = [spy_service.create_item(f"Album {i}") for i in range(4)]
+    for index, item in enumerate(placed):
+        spy_service.place_item_in_category(item.item_id, category.category_id, sort_index=index)
+    other = spy_service.create_item("Elsewhere")
+    spy.reset()
+
+    result = spy_service.list_items(category_id=category.category_id)
+
+    assert spy.count_of("get_item") == 0, "an item was resolved one row at a time — finding F1 has returned"
+    assert spy.count_of("list_items") == 0, "the whole item table was scanned"
+    bulk_calls = spy.kwargs_of("get_items_by_ids")
+    assert len(bulk_calls) == 1
+    assert bulk_calls[0]["item_ids"] == {item.item_id for item in placed}
+    assert other.item_id not in bulk_calls[0]["item_ids"]  # type: ignore[operator]
+    # Unfiltered by design: a disabled endpoint must stay distinguishable from a
+    # missing one, because an absent key raises (FR-011, FR-012).
+    assert bulk_calls[0]["enabled"] is None
+    assert result == placed
+
+
+def test_list_items_by_category_checks_existence_exactly_once(
+    spy: RecordingRepository, spy_service: TaxomeshService
+) -> None:
+    """FR-013: the existence check survives the rewrite, and costs exactly one read."""
+    category = spy_service.create_category("Rock")
+    item = spy_service.create_item("Album")
+    spy_service.place_item_in_category(item.item_id, category.category_id)
+    spy.reset()
+
+    spy_service.list_items(category_id=category.category_id)
+
+    assert spy.count_of("get_category") == 1
+
+
+def test_list_items_by_category_skips_the_batch_when_empty(
+    spy: RecordingRepository, spy_service: TaxomeshService
+) -> None:
+    """FR-016: no links means no batch resolve at all."""
+    category = spy_service.create_category("Empty")
+    spy.reset()
+
+    assert spy_service.list_items(category_id=category.category_id) == []
+    assert spy.count_of("get_items_by_ids") == 0
+
+
+def test_list_categories_by_parent_resolves_in_one_batch(
+    spy: RecordingRepository, spy_service: TaxomeshService
+) -> None:
+    """FR-020: one batch resolve, and the link read is pushed down to this parent only."""
+    parent = spy_service.create_category("Parent")
+    children = [spy_service.create_category(f"Child {i}") for i in range(4)]
+    for index, child in enumerate(children):
+        spy_service.add_category_parent(child.category_id, parent.category_id, sort_index=index)
+    elsewhere = spy_service.create_category("Elsewhere")
+    spy_service.add_category_parent(elsewhere.category_id, spy_service.create_category("Other").category_id)
+    spy.reset()
+
+    result = spy_service.list_categories(parent_id=parent.category_id)
+
+    bulk_calls = spy.kwargs_of("get_categories_by_ids")
+    assert len(bulk_calls) == 1
+    assert bulk_calls[0]["category_ids"] == {child.category_id for child in children}
+    assert bulk_calls[0]["enabled"] is None
+    # SC-003: the whole link table must not be read to answer one parent.
+    link_calls = spy.kwargs_of("list_category_parent_links")
+    assert len(link_calls) == 1
+    assert link_calls[0]["parent_category_ids"] == {parent.category_id}
+    assert result == children
+
+
+def test_list_categories_by_parent_checks_existence_exactly_once(
+    spy: RecordingRepository, spy_service: TaxomeshService
+) -> None:
+    """FR-020/R4: EXACTLY one single-row category read — the existence check — never zero.
+
+    A blanket "zero" assertion is wrong for this path: the check and the
+    resolution concern the same entity type. Asserting zero here would fail on a
+    correct implementation.
+    """
+    parent = spy_service.create_category("Parent")
+    child = spy_service.create_category("Child")
+    spy_service.add_category_parent(child.category_id, parent.category_id)
+    spy.reset()
+
+    spy_service.list_categories(parent_id=parent.category_id)
+
+    assert spy.count_of("get_category") == 1
+
+
+def test_list_categories_by_item_resolves_in_one_batch(spy: RecordingRepository, spy_service: TaxomeshService) -> None:
+    """FR-020: zero single-row CATEGORY reads here — the existence check reads an item."""
+    item = spy_service.create_item("Placed")
+    categories = [spy_service.create_category(f"Cat {i}") for i in range(4)]
+    for index, category in enumerate(categories):
+        spy_service.place_item_in_category(item.item_id, category.category_id, sort_index=index)
+    spy.reset()
+
+    result = spy_service.list_categories_by_item(item.item_id)
+
+    assert spy.count_of("get_category") == 0, "a category was resolved one row at a time"
+    assert spy.count_of("get_item") == 1, "the existence check must remain, and cost exactly one read"
+    bulk_calls = spy.kwargs_of("get_categories_by_ids")
+    assert len(bulk_calls) == 1
+    assert bulk_calls[0]["category_ids"] == {category.category_id for category in categories}
+    assert bulk_calls[0]["enabled"] is None
+    assert result == categories

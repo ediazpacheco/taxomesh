@@ -594,19 +594,43 @@ class DjangoRepository:
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
 
-    def list_category_parent_links(self) -> list[CategoryParentLink]:
-        """Return all category parent links ordered by parent then sort_index then category.
+    def list_category_parent_links(
+        self,
+        *,
+        parent_category_ids: Collection[UUID] | None = None,
+    ) -> list[CategoryParentLink]:
+        """Return category parent links ordered by parent then sort_index then category.
+
+        The filter is pushed into the database query (``parent_category_id__in``)
+        — no client-side filtering of a full result set.
+
+        Args:
+            parent_category_ids: When given, only links whose
+                ``parent_category_id`` is a member are returned. An EMPTY
+                collection returns ``[]`` — it is NOT treated as "no filter".
+                ``None`` (default) applies no filter.
 
         Returns:
             A list of CategoryParentLink domain objects ordered by
             ``(parent_category_id ASC, sort_index ASC, category_id ASC)``.
+
+        Raises:
+            TaxomeshRepositoryError: On database error.
         """
-        return [
-            self._row_to_category_parent_link(row)
-            for row in self._CategoryParentLinkModel.objects.using(self._using).order_by(
-                "parent_category_id", "sort_index", "category_id"
-            )
-        ]
+        from django.db import DatabaseError  # noqa: PLC0415
+
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+        try:
+            qs = self._CategoryParentLinkModel.objects.using(self._using)
+            if parent_category_ids is not None:
+                qs = qs.filter(parent_category_id__in=parent_category_ids)
+            return [
+                self._row_to_category_parent_link(row)
+                for row in qs.order_by("parent_category_id", "sort_index", "category_id")
+            ]
+        except DatabaseError as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Item parent links
@@ -809,6 +833,43 @@ class DjangoRepository:
             if enabled is not None:
                 qs = qs.filter(enabled=enabled)
             return {row.item_id: self._row_to_item(row) for row in qs}
+        except DatabaseError as exc:
+            raise TaxomeshRepositoryError(str(exc)) from exc
+
+    def get_categories_by_ids(
+        self,
+        category_ids: Collection[UUID],
+        *,
+        enabled: bool | None = None,
+    ) -> dict[UUID, "Category"]:
+        """Return categories whose category_id is in category_ids.
+
+        The lookup is pushed into the database query (``category_id__in``) — no
+        client-side filtering of a full result set, and no internal splitting of
+        the id collection.
+
+        Args:
+            category_ids: A collection of internal category UUIDs to look up.
+                Pre-normalised: no duplicates expected.
+            enabled: ``True`` returns only enabled categories; ``False`` only
+                disabled; ``None`` (default) returns all matching categories.
+
+        Returns:
+            A dict mapping each found category_id to its Category. Missing IDs
+            are silently absent — no error is raised.
+
+        Raises:
+            TaxomeshRepositoryError: On database error.
+        """
+        from django.db import DatabaseError  # noqa: PLC0415
+
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
+
+        try:
+            qs = self._CategoryModel.objects.using(self._using).filter(category_id__in=category_ids)
+            if enabled is not None:
+                qs = qs.filter(enabled=enabled)
+            return {row.category_id: self._row_to_category(row) for row in qs}
         except DatabaseError as exc:
             raise TaxomeshRepositoryError(str(exc)) from exc
 

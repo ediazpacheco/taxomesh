@@ -222,19 +222,33 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
-    def list_category_parent_links(self) -> list[CategoryParentLink]:
-        """Return all stored category-parent relationships grouped by parent then sort_index.
+    def list_category_parent_links(
+        self,
+        *,
+        parent_category_ids: Collection[UUID] | None = None,
+    ) -> list[CategoryParentLink]:
+        """Return stored category-parent relationships, optionally filtered by parent.
 
         Results are ordered by ``(parent_category_id ASC, sort_index ASC,
         category_id ASC)``.  Links are grouped so that all children of the same
         parent appear together, ordered by their ``sort_index`` within that
         group.  When two links share the same parent and ``sort_index``, they
-        are further ordered by ``category_id`` for deterministic output.
+        are further ordered by ``category_id`` for deterministic output.  The
+        ordering contract holds under every filter combination.
+
+        Args:
+            parent_category_ids: When given, only links whose
+                ``parent_category_id`` is a member are returned. An EMPTY
+                collection returns ``[]`` — it is NOT treated as "no filter".
+                ``None`` (default) applies no filter and returns every link.
 
         Returns:
-            List of all CategoryParentLink records ordered by
+            List of matching CategoryParentLink records ordered by
             ``(parent_category_id ASC, sort_index ASC, category_id ASC)``;
-            empty list if none exist.
+            empty list if none match.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
         """
         ...
 
@@ -352,6 +366,40 @@ class TaxomeshRepositoryBase(Protocol):
         Returns:
             A dict mapping each found item_id to its Item. Missing IDs are
             silently absent from the result — no error is raised.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
+        """
+        ...
+
+    def get_categories_by_ids(
+        self,
+        category_ids: Collection[UUID],
+        *,
+        enabled: bool | None = None,
+    ) -> "dict[UUID, Category]":
+        """Return categories whose category_id matches any value in category_ids.
+
+        The input is pre-normalised: duplicates have already been removed by
+        the caller (e.g. ``TaxomeshService``). The adapter MUST NOT perform
+        any further normalisation.
+
+        The collection is passed to the store as a single request; adapters
+        MUST NOT split it internally. Where a store imposes a per-query limit,
+        that limit is the library's limit and exceeding it surfaces as
+        ``TaxomeshRepositoryError`` like any other storage failure.
+
+        Args:
+            category_ids: A collection of internal category UUIDs to look up.
+                Guaranteed to contain no duplicates. An empty collection
+                returns an empty dict without reaching storage.
+            enabled: ``True`` returns only enabled categories; ``False`` only
+                disabled; ``None`` (default) returns all matching categories
+                regardless of enabled state.
+
+        Returns:
+            A dict mapping each found category_id to its Category. Missing IDs
+            are silently absent from the result — no error is raised.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.

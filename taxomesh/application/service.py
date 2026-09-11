@@ -329,9 +329,7 @@ class TaxomeshService:
             if parent_id is not None:
                 self.get_category(parent_id)
                 child_ids = {
-                    lnk.category_id
-                    for lnk in self._repo.list_category_parent_links()
-                    if lnk.parent_category_id == parent_id
+                    lnk.category_id for lnk in self._repo.list_category_parent_links(parent_category_ids=[parent_id])
                 }
                 results = [c for c in results if c.category_id in child_ids]
             return results
@@ -340,10 +338,20 @@ class TaxomeshService:
         else:
             self.get_category(parent_id)
         links = sorted(
-            [lnk for lnk in self._repo.list_category_parent_links() if lnk.parent_category_id == parent_id],
+            self._repo.list_category_parent_links(parent_category_ids=[parent_id]),
             key=lambda lnk: lnk.sort_index,
         )
-        cats = [self.get_category(lnk.category_id) for lnk in links]
+        if not links:
+            return []
+        # Resolved in ONE batch, deliberately unfiltered: a disabled category must
+        # stay distinguishable from a deleted one, because an absent key raises below.
+        category_map = self._repo.get_categories_by_ids({lnk.category_id for lnk in links}, enabled=None)
+        cats: list[Category] = []
+        for lnk in links:
+            found = category_map.get(lnk.category_id)
+            if found is None:
+                raise TaxomeshCategoryNotFoundError(f"Category not found: {lnk.category_id}")
+            cats.append(found)
         if enabled is not None:
             cats = [c for c in cats if c.enabled == enabled]
         return cats
@@ -515,6 +523,8 @@ class TaxomeshService:
 
         Raises:
             TaxomeshCategoryNotFoundError: If category_id is provided but not found.
+            TaxomeshItemNotFoundError: If a placement link points at an item row
+                that no longer exists.
         """
         if category_id is None:
             return self._repo.list_items(enabled=enabled)
@@ -523,7 +533,17 @@ class TaxomeshService:
             self._repo.list_item_parent_links(category_ids=[category_id]),
             key=lambda lnk: lnk.sort_index,
         )
-        items = [self.get_item(lnk.item_id) for lnk in links]
+        if not links:
+            return []
+        # Resolved in ONE batch, deliberately unfiltered: a disabled item must stay
+        # distinguishable from a deleted one, because an absent key raises below.
+        item_map = self._repo.get_items_by_ids({lnk.item_id for lnk in links}, enabled=None)
+        items: list[Item] = []
+        for lnk in links:
+            found = item_map.get(lnk.item_id)
+            if found is None:
+                raise TaxomeshItemNotFoundError(f"Item not found: {lnk.item_id}")
+            items.append(found)
         if enabled is not None:
             items = [i for i in items if i.enabled == enabled]
         return items
@@ -555,11 +575,24 @@ class TaxomeshService:
             # — ordered by sort_index assigned at placement time
         """
         self.get_item(item_id)
+        # The links arrive ordered by category_id (filtered to one item); this STABLE
+        # re-sort by sort_index produces the composite order callers observe. Removing
+        # it as redundant silently changes tie ordering.
         links = sorted(
             self._repo.list_item_parent_links(item_id=item_id),
             key=lambda lnk: lnk.sort_index,
         )
-        cats = [self.get_category(lnk.category_id) for lnk in links]
+        if not links:
+            return []
+        # Resolved in ONE batch, deliberately unfiltered: a disabled category must
+        # stay distinguishable from a deleted one, because an absent key raises below.
+        category_map = self._repo.get_categories_by_ids({lnk.category_id for lnk in links}, enabled=None)
+        cats: list[Category] = []
+        for lnk in links:
+            found = category_map.get(lnk.category_id)
+            if found is None:
+                raise TaxomeshCategoryNotFoundError(f"Category not found: {lnk.category_id}")
+            cats.append(found)
         if enabled is not None:
             cats = [c for c in cats if c.enabled == enabled]
         return cats

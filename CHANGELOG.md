@@ -7,6 +7,214 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+#### N+1 removed from the three placement read paths (finding F1)
+
+`list_items(category_id=…)`, `list_categories(parent_id=…)` and
+`list_categories_by_item(item_id)` resolved one stored row per result row. On the
+Django adapter, listing a category holding 5,218 placements cost **5,220 queries
+and 705 ms** — while the *unfiltered* `list_items()` over a larger result set cost
+one query and was 2.7× faster. All three now cost a constant **3 queries** (2 when
+the result is empty), whatever the row count.
+
+`list_categories(parent_id=…)` carried a second, independent defect: it read
+**every** category-parent link in the store and filtered by parent in memory. It
+now pushes the filter into storage, so an unrelated branch growing elsewhere in
+the tree no longer costs anything. The `external_id` branch of the same method
+ran its own copy of that scan and is fixed with it.
+
+Behaviour is unchanged: ordering (including tie-breaks), the `enabled` filter,
+empty results, and every raised exception type and message are identical. A
+placement link whose endpoint row is missing still raises, exactly as before —
+this release does not introduce cascade or skip semantics.
+
+Regression gates were the point of the work: query counts are asserted as exact
+constants across two corpus sizes, and a spy asserts the call shape at the
+repository boundary. Reverting any of the three methods to per-row resolution
+fails CI, as does deleting the stable `sort_index` re-sort the ordering depends
+on.
+
+### Added
+
+#### `get_categories_by_ids` and a parent filter on `list_category_parent_links`
+
+Two additions to `TaxomeshRepositoryBase`, implemented in `JsonRepository`,
+`YAMLRepository` and `DjangoRepository`:
+
+- `get_categories_by_ids(category_ids, *, enabled=None) -> dict[UUID, Category]`
+  — mirrors the existing `get_items_by_ids`: pre-normalised input, missing ids
+  silently absent, `TaxomeshRepositoryError` on storage failure.
+- `list_category_parent_links(*, parent_category_ids=None)` — an EMPTY collection
+  means "match nothing", not "no filter", matching the rule already documented
+  for `category_ids` on `list_item_parent_links`.
+
+**Breaking for custom repository implementations.** `TaxomeshRepositoryBase` is a
+`typing.Protocol`, so conformance is structural: if you pass your own repository
+to `TaxomeshService`, it must now implement `get_categories_by_ids` and accept the
+new keyword on `list_category_parent_links` or `mypy --strict` will reject it in
+your project. Runtime is unaffected — Protocols are not enforced at runtime — so
+this surfaces at type-check time, not as a crash. Nothing in taxomesh's own public
+facade changed.
+
+Neither batch primitive splits an oversized id collection: the store's own
+per-query limit is the library's limit, and exceeding it surfaces as
+`TaxomeshRepositoryError`. Modern SQLite allows roughly 32k parameters and the
+project floor is Python 3.13, so this is well clear of realistic corpus sizes.
+
+#### `list_category_parent_links` now wraps database errors on the Django adapter
+
+A side effect of adding the filter, recorded because it is observable: the
+Django implementation previously issued its query in a bare list comprehension
+with no error handling, so a `django.db.DatabaseError` escaped the port raw.
+It now surfaces as `TaxomeshRepositoryError` like every other repository
+method, on both the filtered and unfiltered paths. Callers catching
+`DatabaseError` around this method directly should catch `TaxomeshRepositoryError`
+instead; anyone already catching `TaxomeshError` is unaffected. `TaxomeshService`
+never depended on the old behaviour.
+
+---
+
+## [0.1.0a50] — 2026-09-09
+
+### Fixed
+
+#### `py.typed` was never shipped, so consumers got no types
+
+The package declared the `Typing :: Typed` classifier and the README advertised
+`py.typed`, but no marker file existed. Under PEP 561 a type checker running in a
+consuming project ignores every annotation in a package without that marker, so
+taxomesh's inline types — and `mypy --strict` compliance — had no effect downstream. The
+marker is now present and covered by three tests (`tests/test_packaging.py`): it exists
+in the package, the classifier and the file agree, and it survives into the built wheel.
+The CI wheel job additionally asserts it is present after installation into a clean
+consumer environment.
+
+No API change. Consumers running a type checker may see new errors that were previously
+suppressed, because taxomesh's types are now visible for the first time.
+
+### Changed
+
+#### **Breaking — HTTP 500 bodies no longer contain the backend's error message**
+
+`errors.to_tuple` returned `{"detail": str(exc)}` for every status, including its two
+500 branches. `DjangoRepository` raises `TaxomeshRepositoryError(str(exc))` in 14 places,
+passing the backend message through verbatim, so ORM constraint, table and column names —
+and, on the JSON and YAML backends, the absolute path of the data file — were returned to
+the HTTP client of any application built on `taxomesh.contrib.api`.
+
+Both 500 branches now return a fixed `GENERIC_SERVER_ERROR_DETAIL`
+(`"An internal error occurred."`), exported from `taxomesh.contrib.api.errors` so callers
+can compare against it rather than duplicate the literal. `TaxomeshConfigError` and
+`TaxomeshRootCategoryError` reach the same fallback branch and are redacted with it.
+
+The detail is relocated, not discarded: every 500 emits exactly one `ERROR` record on the
+`taxomesh` logger carrying the original exception and its traceback. An application that
+configures no logging stays silent, as before.
+
+Client errors are deliberately untouched. 404, 409, and 422 bodies still carry the
+exception's own message byte-for-byte — those messages are authored inside taxomesh from
+the caller's own input and are the reason a client can correct its request. A test asserts
+this per branch, so a future change cannot over-redact them.
+
+**Migration:** a client that displayed, logged, or parsed the 500 `detail` now sees a
+fixed string. Branch on the status code instead. See `specs/059-safe-error-bodies`.
+
+### Added
+
+- `CONTRIBUTING.md` — development setup, the four quality gates, the spec-first
+  workflow, and how the documented examples are tested.
+- `tests/docs/test_doc_examples.py` — extracts the runnable Python blocks from
+  `README.md` and the `docs/` pages, runs each as a script in an isolated working
+  directory, and smoke-tests the documented CLI commands. Illustrative fragments are
+  tagged `python notest`. Stale examples now fail the test suite instead of rotting
+  silently.
+- Single-query guard tests asserting that `get_items_by_external_ids` and
+  `get_categories_by_external_ids` each resolve a full batch in exactly one SQL query
+  on the Django backend.
+
+### Documentation
+
+- **README "Stability and versioning" rewritten.** The section previously opened with
+  "As of **1.0.0**" while the package was published as `0.1.0a49`, which read as though
+  1.0.0 already existed. It now states that the package is pre-1.0, that the API
+  guarantees take effect at 1.0.0 and do not apply to the current alpha releases, and
+  which properties do hold today.
+- **`Development Status` classifier: `2 - Pre-Alpha` → `3 - Alpha`.** Pre-Alpha
+  indicates that no usable release exists; 43 releases have been published. `3 - Alpha`
+  matches the `a` in the `0.1.0aN` version scheme and continues to signal that
+  breaking changes occur between releases.
+- README "Contributing" now points at `CONTRIBUTING.md` rather than at the `specs/`
+  directory.
+- `docs/http-api-integration.md` documents the generic 500 body and how to attach a
+  handler to retrieve the detail. Its error-mapping table also gained the
+  `TaxomeshExternalIdConflictError` → 409 row, which was missing since `0.1.0a47`
+  introduced that mapping.
+- Repaired every primary documented example so it runs in a clean environment: stale
+  `enabled_only` → `enabled` in the Python and HTTP API references, corrected CLI option
+  syntax in the README, unified the Django bridge delete-helper name to
+  `delete_item_for_external_id`, and fixed the quick-start output comment.
+
+---
+
+## [0.1.0a49] — 2026-07-17
+
+### Added
+
+#### `atomic()` repository boundary for multi-write service operations
+
+`TaxomeshRepositoryBase` gains `atomic() -> AbstractContextManager[None]`. The five
+`TaxomeshService` operations that perform more than one write — `create_category`,
+`reorder_subcategories`, `reorder_items_in_category`, `reparent_category`, and
+`reparent_item` — now run their write sequence inside it, so those writes commit or roll
+back as a unit.
+
+- The guarantee is **two-tier and backend-dependent**. `DjangoRepository` implements
+  `atomic()` with `transaction.atomic(using=...)`, giving real rollback; inner
+  per-method blocks nest as savepoints. `JsonRepository`, `YAMLRepository`, and the
+  in-memory test repository return `nullcontext()` — a documented best-effort no-op with
+  no rollback.
+- Only the write sequence is wrapped. Pre-write validation and object construction stay
+  outside the boundary, so `pydantic.ValidationError`, builtin `ValueError`, and
+  `TaxomeshError` subclasses propagate unchanged. A raw error escaping the boundary is
+  re-raised as `TaxomeshRepositoryError`, chained to its cause.
+- `taxomesh.__version__` is now resolved via `importlib.metadata` rather than being
+  hard-coded.
+
+See `specs/058-atomic-operations`. The cross-model bridge case — atomicity spanning a
+taxomesh write and a write to the consuming application's own models — remains the
+consumer's responsibility by design.
+
+---
+
+## [0.1.0a48] — 2026-07-16
+
+Narrows the declared runtime support matrix to the combinations CI actually exercises.
+The classifiers previously claimed 3.11–3.13 while CI tested only 3.11/3.12, and the sole
+production consumer runs Python 3.14 with Django 6.0 — a combination that was never
+tested.
+
+### Changed
+
+**Breaking — the supported Python floor is now 3.13.** `requires-python` moves from
+`>=3.11` to `>=3.13`; Python 3.11 and 3.12 are dropped. `ruff` `target-version` and
+`mypy` `python_version` move to 3.13 alongside it. Installing on 3.11 or 3.12 now fails
+at resolution time rather than at runtime.
+
+**Breaking — the `django` extra now requires Django ≥ 6.0** (was ≥ 4.2), matching the
+only version under test.
+
+- Internals moved to PEP 695 syntax (`type` aliases, class and function type parameters),
+  as required by the `py313` ruff target. No public API change.
+- CI: static checks on 3.13; a test matrix of Python 3.13 and 3.14 against Django 6.0;
+  and a wheel job that installs the built artifact — including the `[django]` extra —
+  into a clean virtual environment and smoke-tests the import, a service operation, and
+  the CLI.
+
+---
+
 ## [0.1.0a47] — 2026-07-16
 
 Aligns the public request contract in `taxomesh.contrib.api` with the external-identifier
