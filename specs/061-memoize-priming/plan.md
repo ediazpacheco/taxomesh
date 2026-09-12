@@ -1,65 +1,67 @@
-# Implementation Plan: Memoize priming for batch reads
+# Implementation Plan: Category priming and read-through after 060
 
-**Branch**: `061-memoize-priming` | **Date**: 2026-09-10 | **Spec**: [spec.md](./spec.md)
+**Branch**: `061-memoize-priming` | **Date**: 2026-09-12 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/061-memoize-priming/spec.md`
+
+Regenerated 2026-09-12 for the narrowed, re-scoped spec. The 2026-09-10 plan described a
+priming-only design behind a module-level helper; commit `238cd12` implemented it and is
+**superseded**, to be replaced in new commits rather than rewritten out of history.
 
 ## Summary
 
 Release 060 replaced per-row resolution with batch reads in three service methods. The
 per-row calls went through the memoized accessors `get_category` / `get_item`; the batch
-reads call the repository directly and bypass that layer, so a row resolved as a
-**result** no longer primes the entry a later call needs when that row is passed as an
-**argument**.
+reads call the repository directly and bypass that layer. Two things were lost, and only
+the first was visible without measuring:
 
-The fix is to give `memoize` an insert path and have the two **category** methods prime
-`get_category` with rows they have already fetched. Nothing about the batch reads
-themselves changes, so 060's exact-constant gates hold: a single cold call still costs 3
-storage reads, because priming writes to a dict rather than reading from storage.
+1. A row resolved as a **result** no longer primes the entry a later call needs when that
+   row is passed as an **argument**. On a tree walk every child becomes the next call's
+   `parent_id`, so every validation became a miss.
+2. **The batch ignores the cache even when every row it needs is already in it.** Priming
+   alone does not touch this, and measurement (research.md R6) shows priming alone is still
+   *above* `0.1.0a49` on two patterns — 8 vs 7, and 120 vs 85 on the
+   `list_categories_by_item`-per-item shape the consumer measured and rejected.
 
-`list_items(category_id=…)` has the identical bypass but is deliberately excluded. It
-buys nothing measured — nothing on the item path regressed — and it is expensive and
-exposed: 108 MB measured against 0.17 MB for categories, reachable through a public
-unauthenticated endpoint on at least one real deployment. See the spec's "Why categories
-only".
+So this release ships **both**: the two category methods prime `get_category` with rows
+they fetch, and they resolve rows through `get_category`'s cache first, reading only the
+misses. That is at or below `0.1.0a49` on every category pattern measured, and a single
+cold call still costs exactly 3.
+
+`list_items(category_id=…)` has the identical bypass and is deliberately excluded (FR-007).
+The residual is bounded and stated: at most one read per `list_items(category_id=…)` call.
+
+The caching utility becomes a pair of descriptor classes so that insert and lookup are
+typed methods on the decorated callable rather than a module-level helper reaching into a
+closure with `getattr` and `cast`.
 
 ## Technical Context
 
 **Language/Version**: Python 3.13 (`requires-python = ">=3.13"`, ruff `target-version = "py313"`)
-**Primary Dependencies**: None new — stdlib `time` and `typing` only. Pydantic v2 and the existing `taxomesh/utils/memoize.py` are already present.
+**Primary Dependencies**: None new — stdlib `time` and `typing` only
 **Storage**: N/A — pure in-process cache behaviour. No stored-data change, no migration.
-**Testing**: pytest, with `CaptureQueriesContext` on the Django backend for exact read counts and a repository call spy for the file/in-memory backends
+**Testing**: pytest, with `CaptureQueriesContext` on Django and a repository call spy on the file/in-memory backends (research.md R3)
 **Target Platform**: Library consumed by Python applications; Django backend optional
-**Project Type**: Single library
-**Performance Goals**: A 75-node, 3-level walk costs 102 storage reads, against 177 today and 151 before release 060. An individual lookup of a category just returned by either category method costs 0.
-**Constraints**: 060's exact-constant gates must pass with their constants unmodified and no test edited. Priming is bounded by the category count (93 / 0.17 MB measured); the item path is excluded by FR-007 and a test asserts it stays excluded.
-**Scale/Scope**: Two service methods, one utility function. No public signature changes.
+**Performance Goals**: The consumer-shaped 75-node walk costs **103** storage reads, against 177 on `0.1.0a50` and 150 on `0.1.0a49`. A batch needing only cached rows costs 0. A single cold call to each batched method still costs exactly 3.
+**Constraints**: 060's exact-constant gates must pass with their constants unmodified and no test edited. `get_item` must never be primed, and a test must fail if it is.
+**Scale/Scope**: One utility module rewritten, two service methods changed. No public method added or changed; the decorator's return type changes from a plain callable to a typed callable object.
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+*GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design — verdicts below are the post-design ones.*
 
 | Principle | Verdict | Notes |
 |---|---|---|
-| I. Hexagonal architecture | ✅ Pass | Changes are confined to `application/` and `utils/`. No new imports cross a layer boundary; the service already calls both the repository batch reads and its own memoized accessors. |
-| II. `TaxomeshService` single facade | ✅ Pass | No new public entry point. The three methods keep their signatures and return types. |
-| III. Repository as Protocol | ✅ Pass | `TaxomeshRepositoryBase` is untouched. No port change, so no downstream `mypy --strict` break for custom repositories — unlike 060. |
-| IV. Pydantic + mypy strict | ⚠️ Justified | The priming entry point takes the decorated function's own arguments, which are only expressible generically. Resolved in research.md R2 using `Concatenate[R, P]` rather than `Any`; if that proves unworkable, any `Any` must carry an inline justification per the principle. |
-| V. Exception hierarchy | ✅ Pass | No new error path. FR-004 requires that priming never suppresses the existing not-found error, which is asserted by test. |
+| I. Hexagonal architecture | ✅ Pass | Changes confined to `application/` and `utils/`. No new cross-layer import. |
+| II. `TaxomeshService` single facade | ✅ Pass | No new public entry point; the subtree read that would have added one left the feature on 2026-09-12. |
+| III. Repository as Protocol | ✅ Pass | `TaxomeshRepositoryBase` untouched. No port change, so no downstream `mypy --strict` break for custom repositories — unlike 060. |
+| IV. Pydantic + mypy strict | ⚠️ Justified | One gradual `MemoizedFunction[..., R]` on a private attribute. No `Any`, no `cast`, no `type: ignore` anywhere. See Complexity Tracking and research.md R2. |
+| V. Exception hierarchy | ✅ Pass | No new error path. FR-005 requires priming never changes a not-found error or its message; asserted by test. |
 | VI. DAG integrity | ✅ Pass | Not touched. |
-| VII. Spec-driven | ✅ Pass | Spec and this plan precede implementation; TDD ordering enforced in tasks.md. |
-| VIII. Quality gates | ✅ Pass | ruff, ruff format, `mypy --strict`, pytest ≥ 80% all required before PR. |
+| VII. Spec-driven | ✅ Pass | Spec, clarifications and this plan precede implementation; TDD ordering enforced in tasks.md. |
+| VIII. Quality gates | ✅ Pass | ruff, ruff format, `mypy --strict`, pytest ≥ 80% required before PR. |
 | IX. Framework-agnostic handlers | ✅ Pass | Not touched. |
 | X. Named constants | ✅ Pass | No new literals. FR-007 excludes the item path outright rather than thresholding it, so there is deliberately no constant to name. |
-| XI. Object-oriented by default | ⚠️ Justified | See below. |
-
-**Principle XI justification.** `memoize` is an existing module-level decorator holding
-its cache in a closure and registering clear-functions in a module-level
-`_cache_registry` list. This feature adds a second attribute (`prime`) beside the
-existing `clear_cache` attribute, following the established pattern exactly. Converting
-the utility to a class is a real improvement — it would remove the module-level mutable
-registry the principle disfavours — but it would touch all nine memoized reads and needs
-gates of its own. Per the project's task-scope rule ("do NOT refactor beyond what was
-asked"), it stays out of scope here and is recorded in research.md R4 as follow-up.
+| XI. Object-oriented by default | ⚠️ Justified | The redesign *satisfies* the principle for the cache itself — closure state becomes a class. The module-level `_cache_registry` and `clear_all_caches()` stay by the user's decision. See Complexity Tracking. |
 
 ## Project Structure
 
@@ -68,14 +70,15 @@ asked"), it stays out of scope here and is recorded in research.md R4 as follow-
 ```text
 specs/061-memoize-priming/
 ├── plan.md              # This file
-├── research.md          # Phase 0 output
-├── data-model.md        # Phase 1 output
-├── quickstart.md        # Phase 1 output
+├── research.md          # Phase 0 — R1–R4 carried forward, R5–R8 fold in the measurements
+├── data-model.md        # Phase 1
+├── quickstart.md        # Phase 1
 ├── contracts/
-│   └── memoize-priming.md
+│   └── memoize-cache.md # Phase 1 — the cache's contract
 ├── checklists/
-│   └── requirements.md  # From /speckit.specify
-└── tasks.md             # Phase 2 output (/speckit.tasks — not created here)
+│   └── requirements.md  # From /speckit.specify, re-validated 2026-09-12
+├── measurements/        # Provenance harnesses; excluded from ruff and mypy
+└── tasks.md             # Phase 2 (/speckit.tasks)
 ```
 
 ### Source Code (repository root)
@@ -83,47 +86,91 @@ specs/061-memoize-priming/
 ```text
 taxomesh/
 ├── utils/
-│   └── memoize.py                 # MODIFIED — add the insert path
+│   └── memoize.py          # REWRITTEN — MemoizedFunction / MemoizedMethod / Miss;
+│                           #   prime + cached; the module-level prime() helper is removed
 └── application/
-    └── service.py                 # MODIFIED — two methods prime get_category
-                                   #   list_categories(parent_id=…)     → get_category
-                                   #   list_categories_by_item(item_id) → get_category
-                                   #   list_items(category_id=…)        → UNCHANGED (FR-007)
+    └── service.py          # MODIFIED — _prime_category_cache becomes _resolve_categories
+                            #   list_categories(parent_id=…)     → prime + read through
+                            #   list_categories_by_item(item_id) → prime + read through
+                            #   list_items(category_id=…)        → UNCHANGED (FR-007)
 
 tests/
 ├── utils/
-│   └── test_memoize.py            # MODIFIED — insert path, TTL, invalidation, unhashable
+│   └── test_memoize.py                    # MODIFIED — prime, cached, TTL, unhashable,
+│                                          #   every decorated shape, introspection
 ├── service/
-│   ├── test_memoize_priming.py    # NEW — read counts across a repeated-access pattern
-│   ├── test_batch_placement_reads.py   # UNCHANGED — 060's gates must still pass
-│   └── test_service_cache.py      # UNCHANGED
-└── adapters/django/
-    └── test_django_placement_queries.py  # UNCHANGED — 060's Django gates
+│   ├── test_memoize_priming.py            # REWRITTEN — exact read counts per pattern
+│   ├── test_batch_placement_reads.py      # UNCHANGED — 060's gates
+│   ├── test_service_cache.py              # UNCHANGED
+│   └── test_parity_*.py                   # UNCHANGED — behaviour parity
+└── contrib/django/
+    └── test_django_placement_queries.py   # UNCHANGED — 060's Django gates
 ```
 
-**Structure Decision**: Single library, existing layout. Two production files change and
-one new test module is added. The two files carrying 060's regression gates are listed
-explicitly as unchanged, because FR-005 requires they pass unmodified — if either needs
-editing, the change is wrong.
+**Structure Decision**: Single library, existing layout. Two production files change. The
+files carrying 060's regression gates are listed explicitly as unchanged, because FR-006
+requires they pass unmodified — **if either needs editing, the change is wrong.**
 
 ## Phase 0 — Research
 
-See [research.md](./research.md). Open questions carried in:
+See [research.md](./research.md).
 
-- **R1** — the cache key shape the accessors use, and how priming must reproduce it
-- **R2** — how to type the insert path under `mypy --strict` without `Any`
-- **R3** — how to assert a read count of zero across all four backends
-- **R4** — why cache eviction is deliberately not bundled
+- **R1** — the cache key shape, and how priming must reproduce it
+- **R2** — typing insert and lookup under `mypy --strict` without `Any`; keeps the Protocol
+  dead end, records why a class with `__get__` is a different mechanism that works, and
+  where precision stops on `MemoizedMethod`'s owner
+- **R3** — asserting exact read counts across all four backends
+- **R4** — why eviction is not bundled, and why invalidation stays as it is
+- **R5** — the consumer's own walk (external provenance; not reproducible here)
+- **R6** — read counts per access pattern, re-run 2026-09-12, every figure reproduced
+- **R7** — retained memory, re-run 2026-09-12
+- **R8** — the read ladder; now provenance the API refactor inherits
 
 ## Phase 1 — Design & Contracts
 
-- [data-model.md](./data-model.md) — the cached entry, and what priming adds
-- [contracts/memoize-priming.md](./contracts/memoize-priming.md) — the insert path's contract
-- [quickstart.md](./quickstart.md) — what a consumer observes, and the memory cost
+- [data-model.md](./data-model.md) — the cached entry, and the two new ways to touch it
+- [contracts/memoize-cache.md](./contracts/memoize-cache.md) — the cache's contract
+- [quickstart.md](./quickstart.md) — what a consumer observes, and what it costs
+
+### The service change, in one shape
+
+Both category methods route their batch through one private resolver. `list_items` does
+not, and that asymmetry is the feature:
+
+```python
+def _resolve_categories(self, category_ids: set[UUID]) -> dict[UUID, Category]:
+    """Resolve rows through get_category's cache first; fetch only the misses, in one read."""
+    found: dict[UUID, Category] = {}
+    missing: set[UUID] = set()
+    for category_id in category_ids:
+        hit = self.get_category.cached(category_id)
+        if isinstance(hit, Miss):
+            missing.add(category_id)
+        else:
+            found[category_id] = hit
+    if missing:
+        fetched = self._repo.get_categories_by_ids(missing, enabled=None)
+        for category_id, category in fetched.items():
+            self.get_category.prime(category, category_id)
+        found.update(fetched)
+    return found
+```
+
+Four properties this has to preserve, each with its own gate:
+
+1. **Cold cost is unchanged.** Every id misses, so there is exactly one
+   `get_categories_by_ids` call — what 060's gates fix at 3 for the whole method.
+2. **All-cached costs nothing.** `missing` is empty, so no repository call is made at all.
+3. **Not-found parity.** A row absent from storage is in `missing`, comes back absent from
+   `fetched`, and is therefore absent from `found` — so the caller's existing
+   `TaxomeshCategoryNotFoundError` raise fires on the same row with the same message.
+4. **Priming is unfiltered and fetch-only.** The batch reads with `enabled=None`, so a
+   primed row is the true row; and only rows in `fetched` are primed, so a read-through hit
+   never refreshes a timestamp (Clarifications 2026-09-12, FR-002/FR-004).
 
 ## Complexity Tracking
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| Principle XI — module-level cache state extended rather than encapsulated in a class | The insert path has to live where the cache lives, and the cache is a closure inside an existing module-level decorator. Adding `prime` beside `clear_cache` matches the established pattern. | Refactoring `memoize` into a class would touch all nine memoized reads and require its own regression gates. The project's task-scope rule forbids refactoring beyond the ask, and bundling it would put the measured fix behind unrelated risk. Recorded as follow-up in research.md R4. |
-| Principle IV — generic typing at the insert path | The insert path accepts whatever arguments the decorated function accepts, which cannot be spelled concretely. | A concrete signature per call site would mean a separate priming helper for `get_category` and `get_item`, duplicating the key construction that `memoize` already owns — a DRY violation and a second place for the key shape to drift. `Concatenate[R, P]` expresses it without `Any`. |
+| **Principle IV** — one gradual `MemoizedFunction[..., R]` as `MemoizedMethod`'s private owner attribute | `__get__`'s body is checked once and generically, so constructing a precisely-typed bound view from it is not expressible. Measured: mypy rejects it with `Overloaded function implementation cannot produce return type of signature 2` plus an `arg-type` error (research.md R2). | Making `MemoizedMethod` generic in the instance type `S` requires a `cast` in `__get__` to compile — which Principle IV and the project's elegance rule both forbid — and buys nothing: `S` appears in no caller-visible signature, so it would be a phantom parameter. The gradual form is confined to one private attribute; `__call__`, `prime`, `cached` and `clear_cache` are all precise in `P` and `R`, so nothing gradual reaches a call site. Not `Any`: `...` is the ParamSpec analogue of a gradual type, and no `Any`, `cast` or `type: ignore` appears in the design. |
+| **Principle XI** — the module-level `_cache_registry` and `clear_all_caches()` stay | Every write path in the service calls `clear_all_caches()`. The user decided to leave invalidation exactly as it is (spec Clarifications, 2026-09-11). | Encapsulating the registry is tempting now that the cache is a class, but it is a behaviour surface this feature has no gate for, and the project's task-scope rule forbids refactoring beyond the ask. Note the redesign *reduces* the violation rather than extending it: the per-callable cache moves from closure state into a class. Recorded as follow-up in research.md R4. |

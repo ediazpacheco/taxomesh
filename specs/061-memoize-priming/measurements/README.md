@@ -5,6 +5,11 @@ harnesses are provenance, not shipped code: they are excluded from ruff and mypy
 `pyproject.toml`, are never imported by the package or the suite, and two of them
 (`descriptor_misuse.py`, `unified_misuse.py`) must **fail** type checking on purpose.
 
+**Re-run 2026-09-12** against branch `HEAD`. R6 and R8 reproduced every recorded figure
+exactly; R7 reproduced a50 and itemprime exactly and a49 within `tracemalloc` noise (see
+R7). R5 was **not** re-run — its database is not committed — so it keeps external
+provenance under FR-014.
+
 **Environment**: Python 3.13.13, macOS (darwin 25.6.0), SQLite. Repository releases compared
 by extracting each into its own directory and importing it via `PYTHONPATH` — note that
 running a script *by path* puts the script's own directory on `sys.path` first, so
@@ -85,11 +90,21 @@ Django backend (fresh objects per query, as in production), 2,000 items at ~3.3 
 metadata JSON each, 10% disabled. `tracemalloc` bytes still held after the caller drops its
 own reference to the result.
 
+```bash
+for v in a49 a50 itemprime; do
+  (cd $V/$v && PYTHONPATH=$V/$v python <repo>/specs/061-memoize-priming/measurements/memory.py $v 2000)
+done
+```
+
 | version | one `list_items(category_id=…)`, `enabled=True` | `enabled=None` |
 |---|---:|---:|
-| a49 | 20.09 MB | 20.08 MB |
+| a49 | 20.06 MB *(2026-09-11: 20.09)* | 20.07 MB *(2026-09-11: 20.08)* |
 | a50 | 17.44 MB | 19.37 MB |
-| itemprime | 19.81 MB | 19.81 MB |
+| itemprime | 19.81 MB | 19.80 MB *(2026-09-11: 19.81)* |
+
+`tracemalloc` totals carry ~±0.03 MB of run-to-run noise, which accounts for the whole a49
+drift. The figure the argument rests on is a difference measured within one run shape and
+is exact either way: **+2.37 MB** (19.81 − 17.44).
 
 `list_items` is itself memoized, so a50 already retains the listing until the next write;
 priming `get_item` adds 2.37 MB on top. The consumer's own corpus figures (108 MB, ≈13.6 KB
@@ -106,9 +121,13 @@ priming. Measured on the same trees as R6.
 | 84 nodes, depth 3 | 8 | 3 |
 | 75 nodes, consumer-shaped | 8 | 3 |
 
-The per-level cost grows with depth; the subtree cost does not grow at all. The prototype
-validates the root with a separate read; folding that validation into the batch — the
-subtree read has no 060 gate fixing its constant — is what the plan evaluates.
+The per-level cost grows with depth; the subtree cost does not grow at all.
+
+**No longer a 061 decision.** The subtree read left this feature on 2026-09-12 because its
+name repeats the defect the API-UX refactor exists to fix — a `list_*` that returns a
+mapping. This table is the measured provenance that refactor inherits; see
+`docs/backlog/prompt-api-refactor.md` (defect 6) and the spec's 2026-09-11 revision for the
+behaviour already specified for it.
 
 ## Typing prototypes (`descriptor_proto.py`, `unified_proto.py`)
 
@@ -121,12 +140,22 @@ python <file>.py                                   # runtime behaviour
 mypy --strict --python-version 3.13 <file>.py <matching misuse file>.py
 ```
 
-- `descriptor_proto.py` — methods only. Binds correctly; `svc.get_category` reveals as
-  `BoundMemoized[[category_id: int], str]`; all 4 deliberate misuses reported.
-- `unified_proto.py` — one class for plain functions *and* methods, via a `__get__` overload
-  that narrows its own `self` type. Needed because the consumer decorates six of its own
-  functions, two of them zero-argument. All 6 deliberate misuses reported, no `Any`, no
-  `cast`, no `type: ignore`. Its `BoundMemoized` holds a gradual `Memoized[..., R]`; making
-  that precise, or justifying it under Principle IV, is a plan item.
+- `descriptor_proto.py` — methods only, kept as the intermediate step. Binds correctly;
+  `svc.get_category` reveals as `BoundMemoized[[category_id: int], str]`; all 4 deliberate
+  misuses reported.
+- `unified_proto.py` — **the shipped shape**, updated 2026-09-12. One class for plain
+  functions *and* methods, via a `__get__` overload that narrows its own `self` type —
+  needed because the consumer decorates six of its own functions, two zero-argument and
+  three keyword-only. Now also carries `cached` and the `Miss` sentinel, and the
+  read-through shape the two batch reads use. Passes `mypy --strict` with **no issues**; no
+  `Any`, no `cast`, no `type: ignore`. `unified_misuse.py` reports **13 errors**, one per
+  deliberate misuse.
+
+`MemoizedMethod` holds its owner as `MemoizedFunction[..., R]` — gradual in the parameters.
+The plan item to make that precise was resolved 2026-09-12: it **cannot** be made precise
+without a `cast`, because mypy checks `__get__`'s body once and generically. The
+justification under Principle IV — the gradual form is confined to one private attribute,
+and `S` would be a phantom parameter — is recorded in research.md R2 and the plan's
+Complexity Tracking.
 
 The misuse files are expected to fail. Their errors are the result.
