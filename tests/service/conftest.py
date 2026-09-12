@@ -3,6 +3,7 @@
 import contextlib
 from collections.abc import Collection
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
@@ -22,6 +23,7 @@ from taxomesh.domain.models import (
     ItemTagLink,
     Tag,
 )
+from taxomesh.utils.memoize import clear_all_caches
 
 
 class InMemoryRepository:
@@ -373,6 +375,22 @@ class InMemoryRepository:
         return "InMemoryRepository (test)"
 
 
+def _build_repository(request: pytest.FixtureRequest, tmp_path: Path) -> Any:
+    """Return a fresh repository for the backend named by ``request.param``."""
+    if request.param == "in_memory":
+        return InMemoryRepository()
+    if request.param == "json":
+        return JsonRepository(tmp_path / "test.json")
+    if request.param == "yaml":
+        return YAMLRepository(tmp_path / "test.yaml")
+    # django
+    pytest.importorskip("django", reason="django not installed")
+    request.getfixturevalue("db")
+    from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+
+    return DjangoRepository()
+
+
 @pytest.fixture(
     params=["in_memory", "json", "yaml", "django"],
     ids=["in_memory", "json", "yaml", "django"],
@@ -384,18 +402,83 @@ def service(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshService:
     DjangoRepository (optional — skips when Django is not configured) so that every
     behavioral test runs once per backend, ensuring parity.
     """
-    if request.param == "in_memory":
-        return TaxomeshService(repository=InMemoryRepository())
-    if request.param == "json":
-        return TaxomeshService(repository=JsonRepository(tmp_path / "test.json"))
-    if request.param == "yaml":
-        return TaxomeshService(repository=YAMLRepository(tmp_path / "test.yaml"))
-    # django
-    pytest.importorskip("django", reason="django not installed")
-    request.getfixturevalue("db")
-    from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+    return TaxomeshService(repository=_build_repository(request, tmp_path))
 
-    return TaxomeshService(repository=DjangoRepository())
+
+class CountingRepository:
+    """Wrap any backend and count the repository reads a service call issues.
+
+    One repository call counts as one storage read — the equivalence spec 060 established
+    against ``CaptureQueriesContext`` on Django. Delegation is generic, so a single set of
+    exact constants holds on every backend. ``RecordingRepository`` in
+    ``test_service_no_full_scan.py`` cannot do that: it subclasses ``InMemoryRepository``
+    and overrides a fixed list of eight methods, so it counts nothing on the file or Django
+    backends.
+
+    A read is any callable whose name starts with ``get_`` or ``list_``, minus
+    ``get_config_summary``, which reports configuration rather than reading storage.
+    """
+
+    _READ_PREFIXES = ("get_", "list_")
+    _NOT_READS = frozenset({"get_config_summary"})
+
+    def __init__(self, wrapped: Any) -> None:
+        self._wrapped = wrapped
+        self.calls: list[str] = []
+
+    @property
+    def total(self) -> int:
+        """Total storage reads recorded since the last :meth:`reset`."""
+        return len(self.calls)
+
+    def count_of(self, name: str) -> int:
+        """Return how many times the named read was issued."""
+        return self.calls.count(name)
+
+    def reset(self) -> None:
+        """Discard recorded calls, so a measurement excludes fixture setup."""
+        self.calls.clear()
+
+    def __getattr__(self, name: str) -> Any:
+        # Only reached for names not found on the instance or class, so `_wrapped` and
+        # `calls` (set in __init__) cannot recurse. Writes and `atomic()` fall through
+        # untouched — they are not reads.
+        attr = getattr(self._wrapped, name)
+        if not callable(attr) or not name.startswith(self._READ_PREFIXES) or name in self._NOT_READS:
+            return attr
+
+        def proxy(*args: Any, **kwargs: Any) -> Any:
+            self.calls.append(name)
+            return attr(*args, **kwargs)
+
+        return proxy
+
+
+@dataclass(frozen=True, slots=True)
+class CountedService:
+    """A service whose storage reads can be counted, and the counter itself."""
+
+    service: TaxomeshService
+    reads: CountingRepository
+
+    def cold(self) -> None:
+        """Drop every cache entry and every recorded read, so the next measurement is cold."""
+        clear_all_caches()
+        self.reads.reset()
+
+
+@pytest.fixture(
+    params=["in_memory", "json", "yaml", "django"],
+    ids=["in_memory", "json", "yaml", "django"],
+)
+def counting_service(request: pytest.FixtureRequest, tmp_path: Path) -> CountedService:
+    """Return a read-counting service for each backend.
+
+    Parametrized exactly like :func:`service`, so a read-count assertion written once is
+    asserted on all four backends (spec 061 FR-011).
+    """
+    counter = CountingRepository(_build_repository(request, tmp_path))
+    return CountedService(service=TaxomeshService(repository=counter), reads=counter)
 
 
 @pytest.fixture

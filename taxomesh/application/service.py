@@ -33,7 +33,7 @@ from taxomesh.exceptions import (
     TaxomeshTagNotFoundError,
 )
 from taxomesh.ports.repository import TaxomeshRepositoryBase
-from taxomesh.utils.memoize import clear_all_caches, memoize
+from taxomesh.utils.memoize import Miss, clear_all_caches, memoize
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +273,57 @@ class TaxomeshService:
         self._category_corpus = None
         return category
 
+    def _resolve_categories(self, category_ids: set[UUID]) -> dict[UUID, Category]:
+        """Resolve category rows through ``get_category``'s cache, fetching only the misses.
+
+        The batch reads added in 060 go straight to the repository, below the memoize
+        layer. That cost two things, and this method restores both:
+
+        * **Priming.** A row returned as a *result* no longer populated the entry the next
+          call needs when that row is passed as an *argument*. A tree walk feels this
+          directly: every child becomes the following call's ``parent_id``, and each of
+          those validations was a free cache hit before 060 and a fresh read after it.
+        * **Read-through.** The batch paid for rows it already held. Priming alone does not
+          fix this, and measured on fixed fixtures it still cost more than ``0.1.0a49`` on
+          two access patterns — 8 reads against 7, and 120 against 85.
+
+        Only rows actually fetched are primed. A row served from the cache keeps its
+        original timestamp, so repeated access cannot extend an entry's lifetime; expiry
+        stays measured from the fetch. Entries written here are indistinguishable from ones
+        ``get_category`` would have written itself, and every write clears them alike.
+
+        A single cold call is unchanged: every id misses, so there is exactly one batch
+        read — which is what spec 060's exact-constant gates fix at 3.
+
+        Deliberately category-only. The item path has the identical bypass and does neither,
+        by decision: the cache has no eviction and items are large — priming ``get_item``
+        measured +2.37 MB per listing on a 2,000-item fixture, against 0.17 MB for every
+        category in the largest corpus available. See spec 061, FR-007.
+
+        Args:
+            category_ids: The ids to resolve.
+
+        Returns:
+            The rows found, keyed by id, unfiltered by ``enabled`` — a disabled row must stay
+            distinguishable from a deleted one, because callers raise on an absent key. An id
+            with no stored row is simply absent.
+        """
+        accessor = self.get_category
+        found: dict[UUID, Category] = {}
+        missing: set[UUID] = set()
+        for category_id in category_ids:
+            hit = accessor.cached(category_id)
+            if isinstance(hit, Miss):
+                missing.add(category_id)
+            else:
+                found[category_id] = hit
+        if missing:
+            fetched = self._repo.get_categories_by_ids(missing, enabled=None)
+            for category_id, category in fetched.items():
+                accessor.prime(category, category_id)
+            found.update(fetched)
+        return found
+
     @memoize(DEFAULT_CACHE_TTL)
     def get_category(self, category_id: UUID) -> Category:
         """Retrieve a category by its identifier.
@@ -343,9 +394,10 @@ class TaxomeshService:
         )
         if not links:
             return []
-        # Resolved in ONE batch, deliberately unfiltered: a disabled category must
-        # stay distinguishable from a deleted one, because an absent key raises below.
-        category_map = self._repo.get_categories_by_ids({lnk.category_id for lnk in links}, enabled=None)
+        # Resolved through the cache, then in ONE batch for whatever is missing. Primed
+        # BEFORE the enabled filter below, so the cached row is the true one: a caller that
+        # later asks for a filtered-out category by id must still get it.
+        category_map = self._resolve_categories({lnk.category_id for lnk in links})
         cats: list[Category] = []
         for lnk in links:
             found = category_map.get(lnk.category_id)
@@ -584,9 +636,10 @@ class TaxomeshService:
         )
         if not links:
             return []
-        # Resolved in ONE batch, deliberately unfiltered: a disabled category must
-        # stay distinguishable from a deleted one, because an absent key raises below.
-        category_map = self._repo.get_categories_by_ids({lnk.category_id for lnk in links}, enabled=None)
+        # Resolved through the cache, then in ONE batch for whatever is missing. Primed
+        # BEFORE the enabled filter below, so the cached row is the true one: a caller that
+        # later asks for a filtered-out category by id must still get it.
+        category_map = self._resolve_categories({lnk.category_id for lnk in links})
         cats: list[Category] = []
         for lnk in links:
             found = category_map.get(lnk.category_id)

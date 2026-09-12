@@ -186,6 +186,118 @@ Match quality tiers, from highest to lowest:
 The `external_id` field is only matched when it is non-empty. Pass `fuzzy=False` to
 restrict to the deterministic tiers only (no rapidfuzz scoring).
 
+## Read caching
+
+`TaxomeshService` caches its read methods in memory for **5 seconds**
+(`DEFAULT_CACHE_TTL`). The cache is per-process — under a multi-worker server each
+worker holds its own — and **every write clears every cache**, so creating, updating or
+deleting anything invalidates the lot at once. There is no per-key invalidation.
+
+### Category reads prime the per-row cache, and read through it
+
+Two reads do both:
+
+| Read | Primes | Reads through |
+|---|---|---|
+| `list_categories(parent_id=…)` | `get_category`, for every row it fetches | ✅ |
+| `list_categories_by_item(item_id)` | `get_category`, for every row it fetches | ✅ |
+| `list_items(category_id=…)` | **nothing** | **no** — see below |
+
+**Priming** means a category returned by one of those reads is left in the cache, so a
+later `get_category` on it costs nothing. **Reading through** means the call consults that
+cache first and fetches only the rows not already in it — when every row is cached it
+reads nothing at all.
+
+This matters most when walking a tree, because each child becomes the next call's
+`parent_id` and `list_categories` validates its parent through `get_category`:
+
+```python notest
+def walk(service, parent_id):
+    for child in service.list_categories(parent_id=parent_id):
+        yield child
+        yield from walk(service, child.category_id)   # `child` is not re-read
+```
+
+Such a walk pays exactly **one** category validation — its own root, which nothing returns
+as a child — regardless of how many nodes it visits. Measured per pattern:
+
+| pattern | `0.1.0a49` | `0.1.0a50` | now |
+|---|---:|---:|---:|
+| walk, 12 nodes, depth 2 | 26 | 30 | **18** |
+| walk, 84 nodes, depth 3 | 170 | 191 | **107** |
+| walk, 75 nodes, 3 levels | 150 | 177 | **103** |
+| walk over a multi-parent tree | 12 | 16 | **9** |
+| fetch children by id, then list them | 7 | 8 | **7** |
+| `list_categories_by_item` × 40 over 5 categories | 85 | 120 | **84** |
+
+No category access pattern costs more than it did on `0.1.0a49`. A single cold call is
+unchanged at 3 reads — the saving is on repeated access.
+
+Every read count on this page is reproduced as an exact constant, on all four backends, by
+`tests/service/test_memoize_priming.py`. They are asserted rather than documented: if a
+change makes any of them wrong, the build fails.
+
+A row is cached with the value storage returned, *before* any `enabled` filter is applied,
+so a category omitted from a filtered result is still cached with its true value and a
+later `get_category` on it returns the row rather than raising.
+
+Lifetime is measured from the fetch: neither a cache hit nor a read-through lookup extends
+it, so a frequently-read row still expires 5 seconds after it was loaded.
+
+### Why listing items does neither
+
+`list_items(category_id=…)` deliberately leaves `get_item`'s cache alone. The cache has no
+eviction — an entry lives until the next write — and items are large. Priming `get_item`
+measured **+2.37 MB** per listing on a 2,000-item fixture at ~3.3 KB of metadata per row
+(measured by `specs/061-memoize-priming/measurements/memory.py`). Against that, **0.17 MB**
+for all 93 categories and **108 MB per worker** for the item corpus — both measured by this
+library's one production consumer on its own data, and relayed here rather than reproduced.
+
+If your application exposes an endpoint that lists a large category's items, priming would
+let one request pin that much memory until the next write. On a read-mostly deployment
+that is effectively the life of the process. If you want item priming for a small corpus,
+the prerequisite is an eviction policy in the cache rather than a flag.
+
+The cost of leaving it out is small and bounded — **at most one extra read per
+`list_items(category_id=…)` call**:
+
+| pattern | `0.1.0a49` | now |
+|---|---:|---:|
+| `list_items`, then `list_categories_by_item` per item (20) | 45 | 46 |
+| `list_items`, then `get_item` per item (20) | 22 | 23 |
+| 10 small `list_items` calls sharing 3 items | 23 | 30 |
+
+Every other item pattern is *cheaper* than `0.1.0a49` by the batch saving itself — a cold
+`list_items` over 20 items went from 22 reads to 3.
+
+Note that not priming items does not mean a listing is not retained: `list_items` is itself
+memoized, so its result list — the same `Item` objects — is held until the next write
+regardless. Not priming avoids only the increment.
+
+### If you decorate your own functions
+
+`taxomesh.utils.memoize.memoize(ttl)` is not part of the documented public API, but it is
+importable and is used that way. Its name and call syntax are unchanged; what it returns is
+now a typed object rather than a plain function, which gains you two operations:
+
+```python notest
+from taxomesh.utils.memoize import Miss, memoize
+
+@memoize(5)
+def paths_from_main() -> dict[int, str]:
+    ...
+
+hit = paths_from_main.cached()        # -> dict[int, str] | Miss; never touches the cache
+if isinstance(hit, Miss):
+    paths_from_main.prime(computed)   # value and arguments are type-checked
+paths_from_main.clear_cache()         # unchanged
+```
+
+`cached` returns the `Miss` sentinel rather than `None`, so a genuinely cached `None` stays
+distinguishable from a miss, and it is strictly read-only — it never writes, refreshes or
+evicts an entry. Zero-argument and keyword-only functions are supported and type-checked,
+and a decorated callable still reports its own `__name__`, `__doc__` and signature.
+
 ## Error model
 
 All library exceptions inherit from `TaxomeshError`.

@@ -486,8 +486,8 @@ of which already past their 5s TTL and still resident: 0
 
 The second line reads `0` only because the whole loop completed inside the
 5-second TTL. The point is structural, not empirical: `memoize` checks the TTL
-only inside the `if key in cache` branch
-([`memoize.py:47-50`](../../taxomesh/utils/memoize.py)), so an entry is
+only when an entry for that key exists
+([`memoize.py:124-129`](../../taxomesh/utils/memoize.py)), so an entry is
 re-validated only when the *same key* is requested again. Nothing sweeps, and
 there is no `maxsize`. The only thing that ever removes an entry is a global
 `clear_all_caches()` triggered by a write — so the more read-heavy the process,

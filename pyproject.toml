@@ -62,6 +62,10 @@ build-backend = "hatchling.build"
 [tool.ruff]
 target-version = "py313"
 line-length = 119
+# Measurement harnesses recorded alongside a spec are provenance, not shipped code: they
+# pin old releases, patch throwaway variants, and two of them must fail type checking on
+# purpose. They are never imported by the package or the suite.
+exclude = ["specs/*/measurements"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
@@ -81,7 +85,7 @@ python_version = "3.13"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-exclude = ["taxomesh/contrib/django/", "tests/contrib/django/", "tests/django_urls.py"]
+exclude = ["taxomesh/contrib/django/", "tests/contrib/django/", "tests/django_urls.py", "specs/[^/]*/measurements/"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"

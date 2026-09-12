@@ -317,6 +317,8 @@ Do NOT update README during implement — only after
 - N/A — this feature touches only the error-mapping primitive (059-safe-error-bodies)
 - Python 3.13 (`requires-python = ">=3.13"`, ruff `target-version = "py313"`) + Pydantic v2 (domain models), Django ≥ 6.0 (optional adapter), pyyaml ≥ 6.0 — **no new dependencies** (060-batch-placement-reads)
 - `JsonRepository`, `YAMLRepository`, `DjangoRepository`, plus the `InMemoryRepository` test fixture — all four must implement both port additions (060-batch-placement-reads)
+- Python 3.13 (`requires-python = ">=3.13"`, ruff `target-version = "py313"`) + None new — stdlib `time` and `typing` only. Pydantic v2 and the existing `taxomesh/utils/memoize.py` are already present. (061-memoize-priming)
+- N/A — pure in-process cache behaviour. No stored-data change, no migration. (061-memoize-priming)
 
 **Runtime**: Python 3.11 (`requires-python = ">=3.11"`), FastAPI ≥ 0.110, Pydantic v2 (transitive via FastAPI), Typer (CLI), stdlib `json`
 
