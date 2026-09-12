@@ -33,7 +33,7 @@ from taxomesh.exceptions import (
     TaxomeshTagNotFoundError,
 )
 from taxomesh.ports.repository import TaxomeshRepositoryBase
-from taxomesh.utils.memoize import clear_all_caches, memoize, prime
+from taxomesh.utils.memoize import clear_all_caches, memoize
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +296,7 @@ class TaxomeshService:
             categories: The rows just fetched, keyed by id, unfiltered by ``enabled``.
         """
         for category_id, category in categories.items():
-            prime(TaxomeshService.get_category, category, self, category_id)
+            self.get_category.prime(category, category_id)
 
     @memoize(DEFAULT_CACHE_TTL)
     def get_category(self, category_id: UUID) -> Category:
