@@ -146,7 +146,7 @@ run strict type checking over deliberate misuse.
 - [X] T041 Update `docs/python-api.md` and any docstring that describes `taxomesh.utils.memoize`, so `prime`/`cached`/`Miss` are documented and the removed module-level helper is not.
 - [X] T042 Run the four quality gates in the 3.13 venv: `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy --strict .`, `uv run pytest --cov=taxomesh --cov-fail-under=80`. All must pass; coverage at or above the baseline recorded in T001.
 - [X] T043 Re-read [quickstart.md](./quickstart.md) and [contracts/memoize-cache.md](./contracts/memoize-cache.md) against the implementation and correct any statement that no longer matches.
-- [ ] T044 Run `/speckit.analyze` and fix until it returns zero deviations, re-running it after **every** fix, per the project workflow. Only then propose the PR.
+- [X] T044 Run `/speckit.analyze` and fix until it returns zero deviations, re-running it after **every** fix, per the project workflow. Only then propose the PR.
 
 ---
 

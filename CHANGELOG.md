@@ -60,11 +60,12 @@ call still costs exactly 3 reads**, so release 060's exact-constant gates pass u
 
 **`list_items(category_id=…)` deliberately does neither.** It has the identical bypass, but
 the cache has no eviction and items are large: priming `get_item` measured **+2.37 MB** per
-listing on a 2,000-item fixture (~3.3 KB of metadata per row), against **0.17 MB** for all
-93 categories in the largest corpus available. The one production consumer measured
-**108 MB per worker** on its own corpus, on a host already swapping, behind a public
-unauthenticated endpoint — its figures, relayed rather than reproduced here. Nothing on the
-item path regressed in 060's measurements, so there is no win to weigh against that.
+listing on a 2,000-item fixture (~3.3 KB of metadata per row) — measured by
+`specs/061-memoize-priming/measurements/memory.py`, not reproduced by the suite. Against
+that, **0.17 MB** for all 93 categories, and **108 MB per worker** on the item corpus: both
+the one production consumer's own figures on its own corpus, on a host already swapping,
+behind a public unauthenticated endpoint — relayed here rather than reproduced. Nothing on
+the item path regressed in 060's measurements, so there is no win to weigh against that.
 
 The price is stated rather than hidden. Three patterns cost slightly more than `0.1.0a49`
 — **at most one extra read per `list_items(category_id=…)` call in the pattern**:

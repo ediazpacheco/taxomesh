@@ -233,6 +233,10 @@ as a child — regardless of how many nodes it visits. Measured per pattern:
 No category access pattern costs more than it did on `0.1.0a49`. A single cold call is
 unchanged at 3 reads — the saving is on repeated access.
 
+Every read count on this page is reproduced as an exact constant, on all four backends, by
+`tests/service/test_memoize_priming.py`. They are asserted rather than documented: if a
+change makes any of them wrong, the build fails.
+
 A row is cached with the value storage returned, *before* any `enabled` filter is applied,
 so a category omitted from a filtered result is still cached with its true value and a
 later `get_category` on it returns the row rather than raising.
@@ -244,9 +248,10 @@ it, so a frequently-read row still expires 5 seconds after it was loaded.
 
 `list_items(category_id=…)` deliberately leaves `get_item`'s cache alone. The cache has no
 eviction — an entry lives until the next write — and items are large. Priming `get_item`
-measured **+2.37 MB** per listing on a 2,000-item fixture at ~3.3 KB of metadata per row,
-against **0.17 MB** for all 93 categories in the largest corpus available; on a real
-corpus the library's one production consumer measured **108 MB per worker**.
+measured **+2.37 MB** per listing on a 2,000-item fixture at ~3.3 KB of metadata per row
+(measured by `specs/061-memoize-priming/measurements/memory.py`). Against that, **0.17 MB**
+for all 93 categories and **108 MB per worker** for the item corpus — both measured by this
+library's one production consumer on its own data, and relayed here rather than reproduced.
 
 If your application exposes an endpoint that lists a large category's items, priming would
 let one request pin that much memory until the next write. On a read-mostly deployment
