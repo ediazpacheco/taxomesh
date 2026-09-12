@@ -564,15 +564,20 @@ A3 identified the shape of the problem correctly and without measurements; this
 finding supplies reproductions for three concrete consequences so the work can
 be scoped and gated by tests.
 
-**Mechanism.** [`utils/memoize.py`](../../taxomesh/utils/memoize.py) is a
-module-level TTL decorator with a global registry. Sixteen service methods are
-decorated with `@memoize(DEFAULT_CACHE_TTL)` where the TTL is 5 seconds
-([`service.py:43`](../../taxomesh/application/service.py)), and roughly twenty
-write methods call `clear_all_caches()`.
+**Mechanism.** [`utils/memoize.py`](../../taxomesh/utils/memoize.py) is a TTL
+decorator returning a `MemoizedFunction` — since spec 061 a class holding its own
+cache, rather than a closure — still registered in a module-level global registry.
+Sixteen service methods are decorated with `@memoize(DEFAULT_CACHE_TTL)` where the
+TTL is 5 seconds ([`service.py:43`](../../taxomesh/application/service.py)), and
+roughly twenty write methods call `clear_all_caches()`.
+
+Spec 061 moved the per-callable cache into a class but deliberately left the registry
+and the invalidate-everything-on-write policy untouched, so this finding stands as
+written: the retention and the multi-worker staleness window are unchanged.
 
 **Consequence 1 — service instances are leaked.** The cache key is
-`(args, tuple(sorted(kwargs.items())))` ([`memoize.py:42`](../../taxomesh/utils/memoize.py)),
-and for a bound method `args[0]` is `self`. The cache therefore holds a strong
+`(args, tuple(sorted(kwargs.items())))` ([`memoize.py:117`](../../taxomesh/utils/memoize.py)),
+and for a bound method the instance is the leading positional argument. The cache therefore holds a strong
 reference to every service that has ever been called, and through it to the
 repository — which, on a file backend, is the entire dataset in memory:
 

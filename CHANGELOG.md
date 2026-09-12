@@ -11,63 +11,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-#### Batch reads no longer cost a later lookup of the same row
+#### Repeated category reads stopped paying for rows already in memory (061)
 
 Release 060 replaced per-row resolution with batch reads in three methods. The per-row
 calls it replaced went through the memoized accessors `get_category` / `get_item`; the
-batch reads go straight to the repository and bypass that layer. So resolving a row as a
-**result** stopped priming the entry a later call needs when that same row is passed as
-an **argument** — and every such lookup that used to be a free cache hit became a fresh
-read.
+batch reads go straight to the repository and bypass that layer. That cost two things:
 
-A tree walk feels this directly, because each child becomes the next call's `parent_id`
-and `list_categories` validates its parent through `get_category`. Measured downstream
-on a 75-node, 3-level walk, reads split by table:
+1. Resolving a row as a **result** stopped priming the entry a later call needs when that
+   same row is passed as an **argument**. A tree walk feels this directly, because each
+   child becomes the next call's `parent_id` and `list_categories` validates its parent
+   through `get_category` — every one of those validations was free before 060.
+2. **The batch ignored the cache even when every row it needed was already in it.**
 
-| | link reads | category reads | total |
-|---|---:|---:|---:|
-| `0.1.0a49` | 75 | 76 | **151** |
-| `0.1.0a50` | 75 | 102 | **177** |
-| this release | 75 | 27 | **102** |
+`list_categories(parent_id=…)` and `list_categories_by_item(item_id)` now do both:
+they resolve rows through `get_category`'s cache and fetch only the misses, in one batch,
+then prime exactly the rows they fetched.
 
-The batch read was never the cost — 27 batch resolves are far cheaper than 76 per-row
-ones. The cost was the 75 validations that stopped being free. Priming does not merely
-undo the regression, it beats `0.1.0a49`, because the batch saving is kept *and* the
-free lookups come back.
+Both were needed. Priming alone was measured and rejected — it still cost *more* than
+`0.1.0a49` on two access patterns. Reads per pattern, counted on fixed fixtures with each
+release behind its own repository:
 
-`list_categories(parent_id=…)` and `list_categories_by_item(item_id)` now prime
-`get_category` with the rows they already fetched, before the `enabled` filter is
-applied so a filtered-out row is still cached with its true value. A primed entry is
-indistinguishable from one the accessor wrote itself: same key, same 5-second TTL,
-cleared by the same `clear_all_caches()` on every write. No new staleness window, and no
-public signature changed.
+| pattern | `0.1.0a49` | `0.1.0a50` | priming only | **this release** |
+|---|---:|---:|---:|---:|
+| walk, 12 nodes, depth 2 | 26 | 30 | 18 | **18** |
+| walk, 84 nodes, depth 3 | 170 | 191 | 107 | **107** |
+| walk, 75 nodes, consumer-shaped | 150 | 177 | 103 | **103** |
+| walk over a multi-parent tree | 12 | 16 | 11 | **9** |
+| fetch children by id, then list them | 7 | 8 | 8 | **7** |
+| `list_categories_by_item` × 40 over 5 categories | 85 | 120 | 120 | **84** |
+| a single cold call to each batched method | 22 / 7 / 8 | 3 / 3 / 3 | 3 / 3 / 3 | **3 / 3 / 3** |
 
-**A single cold call still costs exactly 3 reads**, so release 060's exact-constant gates
-pass unmodified — priming writes to a dict and reads nothing.
+No category access pattern measured costs more than it did on `0.1.0a49`, and the batch
+saving 060 delivered is kept in full. The walk costs 103 rather than 0 because the walk's
+own root is nobody's child, so nothing primes it: its single validation is a genuine read.
 
-**`list_items(category_id=…)` deliberately does NOT prime `get_item`.** It has the
-identical bypass, but the cache has no eviction, and items are large. Measured on a real
-corpus: priming one large item listing costs **98 MB** and the whole item corpus **108
-MB** (≈14 KB/row — the metadata column alone is 25.9 MB of JSON on disk), against **0.17
-MB** for all 93 categories. Nothing on the item path regressed in 060's measurements, so
-that is two orders of magnitude of memory for no measured benefit — and where the
-triggering endpoint is public and unauthenticated, an unbounded default is a
-memory-exhaustion vector rather than merely a large cache. A test asserts the item path
-stays unprimed, so adding it later as an "obvious symmetry" fails the build. Revisit only
-behind an eviction policy.
+Every figure above is reproduced by `tests/service/test_memoize_priming.py` as an exact
+constant on all four backends — in-memory, JSON, YAML and Django. The corresponding
+measurement on the one production consumer's own database (`0.1.0a49` 150, `0.1.0a50` 177,
+this release 103) is external provenance and is not reproducible here, since that database
+is not committed.
+
+A primed entry is indistinguishable from one the accessor wrote itself: same key, same
+5-second TTL, cleared by the same `clear_all_caches()` on every write. Rows are primed
+before the `enabled` filter is applied, so a filtered-out row is still cached with its true
+value. Only rows actually fetched are primed — a row served from the cache keeps its
+original timestamp, so repeated access cannot extend an entry's lifetime. **A single cold
+call still costs exactly 3 reads**, so release 060's exact-constant gates pass unmodified.
+
+**`list_items(category_id=…)` deliberately does neither.** It has the identical bypass, but
+the cache has no eviction and items are large: priming `get_item` measured **+2.37 MB** per
+listing on a 2,000-item fixture (~3.3 KB of metadata per row), against **0.17 MB** for all
+93 categories in the largest corpus available. The one production consumer measured
+**108 MB per worker** on its own corpus, on a host already swapping, behind a public
+unauthenticated endpoint — its figures, relayed rather than reproduced here. Nothing on the
+item path regressed in 060's measurements, so there is no win to weigh against that.
+
+The price is stated rather than hidden. Three patterns cost slightly more than `0.1.0a49`
+— **at most one extra read per `list_items(category_id=…)` call in the pattern**:
+
+| pattern | `0.1.0a49` | this release |
+|---|---:|---:|
+| `list_items`, then `list_categories_by_item` per item (20) | 45 | 46 |
+| `list_items`, then `get_item` per item (20) | 22 | 23 |
+| 10 small `list_items` calls sharing 3 items | 23 | 30 |
+
+Every other item pattern is cheaper than `0.1.0a49` by 060's batch saving itself. A test
+asserts the item path stays unprimed — observed through `get_item.cached()` — so adding it
+later as an "obvious symmetry" fails the build. Revisit only behind an eviction policy.
+Note that not priming items avoids only the *increment*: `list_items` is itself memoized,
+so its result list is retained until the next write regardless.
+
+See `specs/061-memoize-priming`.
+
+### Changed
+
+#### ⚠ `memoize` returns a typed object instead of a plain function
+
+`taxomesh.utils.memoize.memoize(ttl)` now returns a `MemoizedFunction`; accessing one on an
+instance yields a `MemoizedMethod`. **The decorator's name and call syntax are unchanged**,
+so `@memoize(ttl)` needs no edit at any call site, and calling a decorated function behaves
+exactly as before — including for zero-argument and keyword-only functions.
+
+What changes is that the decorated callable now carries typed operations:
+
+- `prime(value, /, *args, **kwargs)` — insert a value as the cached result of a call.
+- `cached(*args, **kwargs) -> R | Miss` — return the fresh cached value, or the `Miss`
+  sentinel. Strictly read-only: it never writes, refreshes or evicts an entry. `Miss` rather
+  than `None` so a genuinely cached `None` stays distinguishable from a miss.
+- `clear_cache()` — unchanged.
+
+Both are checked against the decorated callable's own parameters and return type, so
+priming the wrong type or keying on the wrong arguments is a type error rather than a
+silent extra read. A decorated callable keeps its own `__name__`, `__qualname__`,
+`__module__`, `__doc__`, `__wrapped__` and signature, so `help()` and `inspect.signature`
+behave as they did under `functools.wraps`.
+
+**Migration:** none for `@memoize(ttl)` itself. The only breaking change is the removal
+below, of a symbol that never appeared in a release.
+
+### Removed
+
+- `taxomesh.utils.memoize.prime(func, value, /, *args, **kwargs)`, the module-level helper.
+  Priming is a method now. The helper reached the cache through `getattr` plus a `cast`,
+  which defeated the argument checking it existed to provide. **It was never released** —
+  it existed only between unreleased commits on the `061` branch — so no published version
+  exposed it and no consumer can depend on it. Priming a callable that is not memoized is
+  now a static type error rather than a silent no-op.
 
 ### Added
 
-- `taxomesh.utils.memoize.prime(func, value, /, *args, **kwargs)` — inserts a value as
-  the cached result of a call. Typed against the target function's own signature, so
-  priming the wrong type or keying on the wrong arguments is a type error rather than a
-  silent extra read. A no-op on functions that are not memoized, and on arguments the
-  cache cannot key.
 - A repeated-access regression gate (`tests/service/test_memoize_priming.py`). Release
   060's gates measure a single cold call per method, which structurally cannot see a cost
   that only appears when a small result set is read many times — the shape of this
-  regression. The new gate walks a fixed tree and asserts exact constants, including that
-  the walk pays exactly **one** validation regardless of tree size.
+  regression. The new gate asserts exact constants, each next to its `0.1.0a49` value, on
+  all four backends.
+- A type-level gate (`tests/utils/test_memoize_typing.py`). Runs `mypy --strict` over a
+  fixture of deliberate misuses and asserts each one is reported, plus a counterpart
+  asserting correct use type-checks clean — static guarantees are exactly what a runtime
+  test cannot check.
+- `CountingRepository` and the `counting_service` fixture in `tests/service/conftest.py` —
+  a generic delegating read counter that wraps any backend, so one exact constant is
+  asserted on all four rather than on the in-memory one alone.
 
 ---
 

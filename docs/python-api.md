@@ -193,16 +193,20 @@ restrict to the deterministic tiers only (no rapidfuzz scoring).
 worker holds its own — and **every write clears every cache**, so creating, updating or
 deleting anything invalidates the lot at once. There is no per-key invalidation.
 
-### Batch reads prime the per-row cache
+### Category reads prime the per-row cache, and read through it
 
-Listing categories leaves those categories cached, so a later lookup of one of them is
-served from memory:
+Two reads do both:
 
-| Read | Primes |
-|---|---|
-| `list_categories(parent_id=…)` | `get_category`, for every category returned |
-| `list_categories_by_item(item_id)` | `get_category`, for every category returned |
-| `list_items(category_id=…)` | **nothing** — see below |
+| Read | Primes | Reads through |
+|---|---|---|
+| `list_categories(parent_id=…)` | `get_category`, for every row it fetches | ✅ |
+| `list_categories_by_item(item_id)` | `get_category`, for every row it fetches | ✅ |
+| `list_items(category_id=…)` | **nothing** | **no** — see below |
+
+**Priming** means a category returned by one of those reads is left in the cache, so a
+later `get_category` on it costs nothing. **Reading through** means the call consults that
+cache first and fetches only the rows not already in it — when every row is cached it
+reads nothing at all.
 
 This matters most when walking a tree, because each child becomes the next call's
 `parent_id` and `list_categories` validates its parent through `get_category`:
@@ -214,27 +218,80 @@ def walk(service, parent_id):
         yield from walk(service, child.category_id)   # `child` is not re-read
 ```
 
-Such a walk pays exactly **one** category lookup — its own root, which nothing returned
-as a child — regardless of how many nodes it visits. On a measured 75-node, 3-level tree
-that is 102 storage reads against 177 without priming.
+Such a walk pays exactly **one** category validation — its own root, which nothing returns
+as a child — regardless of how many nodes it visits. Measured per pattern:
 
-A row is cached with the value storage returned, *before* any `enabled` filter is
-applied, so a category omitted from a filtered result is still cached with its true
-value and a later `get_category` on it returns the row rather than raising.
+| pattern | `0.1.0a49` | `0.1.0a50` | now |
+|---|---:|---:|---:|
+| walk, 12 nodes, depth 2 | 26 | 30 | **18** |
+| walk, 84 nodes, depth 3 | 170 | 191 | **107** |
+| walk, 75 nodes, 3 levels | 150 | 177 | **103** |
+| walk over a multi-parent tree | 12 | 16 | **9** |
+| fetch children by id, then list them | 7 | 8 | **7** |
+| `list_categories_by_item` × 40 over 5 categories | 85 | 120 | **84** |
 
-### Why listing items does not prime
+No category access pattern costs more than it did on `0.1.0a49`. A single cold call is
+unchanged at 3 reads — the saving is on repeated access.
 
-`list_items(category_id=…)` deliberately leaves `get_item`'s cache alone. The cache has
-no eviction — an entry lives until the next write — and items are large. Measured on a
-real corpus, priming one big item listing costs **98 MB** and the whole item corpus
-**108 MB** (≈14 KB per row, driven by `metadata`), against **0.17 MB** for every
-category in the same corpus.
+A row is cached with the value storage returned, *before* any `enabled` filter is applied,
+so a category omitted from a filtered result is still cached with its true value and a
+later `get_category` on it returns the row rather than raising.
 
-If your application exposes an endpoint that lists a large category's items, priming it
-would let one request pin that much memory until the next write. On a read-mostly
-deployment, where writes are rare, that is effectively for the life of the process. If
-you want item priming for a small corpus, the prerequisite is an eviction policy in the
-cache rather than a flag.
+Lifetime is measured from the fetch: neither a cache hit nor a read-through lookup extends
+it, so a frequently-read row still expires 5 seconds after it was loaded.
+
+### Why listing items does neither
+
+`list_items(category_id=…)` deliberately leaves `get_item`'s cache alone. The cache has no
+eviction — an entry lives until the next write — and items are large. Priming `get_item`
+measured **+2.37 MB** per listing on a 2,000-item fixture at ~3.3 KB of metadata per row,
+against **0.17 MB** for all 93 categories in the largest corpus available; on a real
+corpus the library's one production consumer measured **108 MB per worker**.
+
+If your application exposes an endpoint that lists a large category's items, priming would
+let one request pin that much memory until the next write. On a read-mostly deployment
+that is effectively the life of the process. If you want item priming for a small corpus,
+the prerequisite is an eviction policy in the cache rather than a flag.
+
+The cost of leaving it out is small and bounded — **at most one extra read per
+`list_items(category_id=…)` call**:
+
+| pattern | `0.1.0a49` | now |
+|---|---:|---:|
+| `list_items`, then `list_categories_by_item` per item (20) | 45 | 46 |
+| `list_items`, then `get_item` per item (20) | 22 | 23 |
+| 10 small `list_items` calls sharing 3 items | 23 | 30 |
+
+Every other item pattern is *cheaper* than `0.1.0a49` by the batch saving itself — a cold
+`list_items` over 20 items went from 22 reads to 3.
+
+Note that not priming items does not mean a listing is not retained: `list_items` is itself
+memoized, so its result list — the same `Item` objects — is held until the next write
+regardless. Not priming avoids only the increment.
+
+### If you decorate your own functions
+
+`taxomesh.utils.memoize.memoize(ttl)` is not part of the documented public API, but it is
+importable and is used that way. Its name and call syntax are unchanged; what it returns is
+now a typed object rather than a plain function, which gains you two operations:
+
+```python notest
+from taxomesh.utils.memoize import Miss, memoize
+
+@memoize(5)
+def paths_from_main() -> dict[int, str]:
+    ...
+
+hit = paths_from_main.cached()        # -> dict[int, str] | Miss; never touches the cache
+if isinstance(hit, Miss):
+    paths_from_main.prime(computed)   # value and arguments are type-checked
+paths_from_main.clear_cache()         # unchanged
+```
+
+`cached` returns the `Miss` sentinel rather than `None`, so a genuinely cached `None` stays
+distinguishable from a miss, and it is strictly read-only — it never writes, refreshes or
+evicts an entry. Zero-argument and keyword-only functions are supported and type-checked,
+and a decorated callable still reports its own `__name__`, `__doc__` and signature.
 
 ## Error model
 

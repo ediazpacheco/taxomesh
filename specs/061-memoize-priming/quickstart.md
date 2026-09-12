@@ -109,7 +109,7 @@ pre-existing property of the unbounded cache.
 `memoize(ttl)` keeps its name and call syntax; you change nothing. What it *returns* is now
 a typed object rather than a plain function, which gains you two operations:
 
-```python
+```python notest
 from taxomesh.utils.memoize import Miss, memoize
 
 @memoize(5)
