@@ -1,8 +1,8 @@
-# Feature Specification: Repeated-access read costs after 060 — category priming, read-through, and a descendant read
+# Feature Specification: Repeated-access read costs after 060 — category priming and read-through
 
 **Feature Branch**: `061-memoize-priming`
 **Created**: 2026-09-10
-**Updated**: 2026-09-11 — re-scoped; see Clarifications
+**Updated**: 2026-09-12 — narrowed; re-scoped 2026-09-11. See Clarifications
 **Status**: Draft
 **Input**: User description (2026-09-10): "Restore the cache priming that release 060 removed, so repeated reads stop paying for rows the previous read already fetched."
 Re-scope (2026-09-11): "A release that keeps every improvement 0.1.0a50 delivered AND has no query-count regression against 0.1.0a49 on any access pattern. Breaking changes are permitted. Do not prime `get_item` without eviction, and keep a gate that fails if anyone adds it."
@@ -120,11 +120,53 @@ sites was not available when this spec was written.
 ### Session 2026-09-11
 
 - Q: How should the item path be handled, given the goal needs item priming and the hard constraint allows it only behind eviction? → A: Categories only — priming and read-through for categories; no eviction work; the item residual is accepted and documented.
-- Q: Should this release add a new public read for tree walks? → A: Yes, a subtree read. A per-level read is not added.
 - Q: How should the cache gain its new operations? → A: A descriptor class, so insert and lookup are typed methods on the decorated callable rather than a module-level helper reaching into a closure.
-- Q: Name and shape of the subtree read? → A: `list_descendant_categories(category_id, *, enabled=True) -> dict[UUID, list[Category]]`.
 - Q: Class names in the caching utility? → A: `MemoizedFunction` (what `memoize(ttl)` returns) and `MemoizedMethod` (what accessing it on an instance returns). The decorator keeps its name.
 - Q: Cache invalidation (module-level registry and `clear_all_caches()`)? → A: Leave as is. The Principle XI exception is recorded in the plan.
+
+### Session 2026-09-12
+
+- Q: The 2026-09-11 session added a subtree read, `list_descendant_categories(category_id, *,
+  enabled=True) -> dict[UUID, list[Category]]`. Does it still belong in this feature? → A: No.
+  Its name repeats the defect the API refactor exists to fix — a `list_*` that returns a
+  mapping — so shipping it here would cement a name already known to be wrong. It moves out of
+  061 in full: User Story 4, FR-008, FR-009, SC-004, the "Descendant map" entity and every
+  clause naming it are removed, and the read is now owned by the API-UX and documentation
+  refactor (see Out of Scope). Its behaviour and measurements are not lost: they survive in
+  this file's 2026-09-11 revision and in `measurements/README.md` R8. Nothing else about the
+  feature changes — priming, read-through, the item exception and the cache's typed operations
+  are untouched.
+- Q: Read-through means some rows are now resolved from the cache itself. Does a read-through
+  hit re-prime the entry, refreshing its timestamp? → A: No. Priming is confined to rows
+  actually fetched from storage; a row served from the cache leaves its timestamp untouched,
+  exactly as a `get_category` cache hit does. The cache keeps fixed expiry from the fetch, not
+  sliding expiry from the last access — re-priming hits would give a hot row an unbounded
+  lifetime, which is a behaviour change nothing here asks for and which would make "its
+  lifetime expires" untestable.
+- Q: What are the two new cache operations called? → A: `prime(value, /, *args, **kwargs)` for
+  the insert — already the vocabulary of the spec, the docstrings and the measurement
+  scripts — and `cached(*args, **kwargs)` for the lookup, which names the question the call
+  site asks rather than the mechanism. Not `get`/`set`: mapping vocabulary would advertise
+  `dict` semantics the cache does not offer and would hide that a stale entry is a miss.
+- Q: Other service reads also resolve full category rows without priming — `get_graph`, the
+  search corpus builder, `get_category_by_slug`, `get_category_by_external_id`,
+  `get_categories_by_external_ids`. Do they prime too? → A: No. Exactly the two reads FR-002
+  names. None of the others primed on `0.1.0a49` either, so leaving them costs no parity;
+  priming them would be a new improvement rather than a regression fix, with no measured
+  caller that benefits, and each path added is another exact-count gate on four backends.
+- Q: How does the FR-007 gate observe that nothing was added to the per-item cache? → A:
+  Through the new public lookup — after `list_items(category_id=…)`, `get_item`'s `cached` must
+  report a miss for every listed item. It gates the requirement with the API this feature
+  already adds, is precise per item rather than an aggregate count, and needs no public
+  surface that exists only for a test. No entry-count member is added, and no test reads the
+  cache's internals.
+- Q: `functools.wraps` currently gives a decorated method its own `__name__`, `__doc__` and
+  signature; a class instance inherits none of that. What must survive? → A: All of it. The
+  memoized object carries the decorated callable's `__name__`, `__qualname__`, `__module__`,
+  `__doc__` and `__wrapped__`, gated by a test. Sixteen public service methods are memoized and
+  each is required to carry a Google-style docstring; losing introspection would silently show
+  the cache class's docstring in `help()` and every IDE, and degrade `inspect.signature` to
+  `(*args, **kwargs)` — the exact failure an existing drift guard was written to catch.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -196,47 +238,13 @@ reflects the mutation.
 
 ---
 
-### User Story 4 - A caller can read a whole subtree in a constant number of reads (Priority: P2)
-
-An application that needs a category's whole subtree — to build breadcrumbs, a path map or
-a navigation menu — gets it in one call whose cost does not grow with the subtree, instead
-of one call per node.
-
-**Why this priority**: P2 because it is additive: callers that keep walking node by node are
-already served by User Story 1. It exists for callers willing to migrate, and it is the
-access pattern the consumer rebuilt privately for want of it.
-
-**Independent Test**: Compare the result with a node-by-node walk over the same tree, and
-count reads at two sizes and two depths.
-
-**Acceptance Scenarios**:
-
-1. **Given** any tree, **When** the caller reads a category's descendants, **Then** the result
-   maps the category and every category a depth-first node-by-node walk with the same
-   enabled filter would visit to exactly the children that walk would receive for it, in
-   the same order.
-2. **Given** a category placed under two parents in the subtree, **When** the descendants are
-   read, **Then** it appears in both parents' child lists — no relationship is lost.
-3. **Given** a disabled category and an enabled filter, **When** the descendants are read,
-   **Then** that category and whatever is reachable only through it are excluded, exactly as
-   the walk would exclude them.
-4. **Given** stored data containing a cycle, **When** the descendants are read, **Then** the
-   call terminates and returns the same result as a cycle-safe walk.
-5. **Given** a category that does not exist, **When** its descendants are read, **Then** the
-   same not-found error and message are raised as `list_categories(parent_id=…)` raises.
-6. **Given** subtrees of different sizes and depths, **When** each is read cold, **Then** each
-   costs the same exact number of storage reads.
-7. **Given** a descendant read, **When** the caller then fetches any returned category by id,
-   **Then** the fetch costs no storage read.
-
----
-
 ### User Story 5 - The item path is left alone, and its cost is stated (Priority: P2)
 
 **Why this priority**: P2 because it is a constraint rather than a capability — but it is the
 constraint the only production consumer asked for, so it is tested rather than assumed.
 
-**Independent Test**: List a category's items, then assert the per-item cache holds no entry.
+**Independent Test**: List a category's items, then assert the per-item accessor's `cached`
+lookup reports a miss for every one of them.
 
 **Acceptance Scenarios**:
 
@@ -261,7 +269,8 @@ function's own signature and return type.
 break here would cost it more than this feature saves it.
 
 **Independent Test**: Decorate a zero-argument, a keyword-only and a positional function
-and a method; call, prime and clear each; run strict type checking over deliberate misuse.
+and a method; call, prime, look up and clear each; inspect each one's name, docstring and
+signature; run strict type checking over deliberate misuse.
 
 **Acceptance Scenarios**:
 
@@ -271,13 +280,18 @@ and a method; call, prime and clear each; run strict type checking over delibera
    priming use that instance's cache entries exactly as calls do today.
 3. **Given** priming with a value of the wrong type or arguments of the wrong type, **When**
    strict type checking runs, **Then** it reports an error.
+4. **Given** a decorated function or method, **When** its name, docstring or signature is
+   inspected, **Then** each is the decorated callable's own, not the cache object's.
 
 ---
 
 ### Edge Cases
 
-- **The same category appears in two batches.** Priming is idempotent; a second write
-  refreshes the timestamp exactly as a second real call would.
+- **The same category appears in two batches.** The second batch finds the row cached, serves
+  it through read-through and does not fetch or re-prime it, so its timestamp is untouched —
+  exactly what a second `get_category` call does. Once the entry has expired, the next batch
+  fetches the row again and primes it afresh, as a second real call after expiry would.
+  Priming itself stays idempotent: writing the same key twice overwrites rather than raising.
 - **An entry expires between the read-through check and its use.** The check is the
   decision: a row found fresh is served, a row found expired is re-read. No row is served
   that the accessor itself would have refused.
@@ -287,8 +301,7 @@ and a method; call, prime and clear each; run strict type checking over delibera
 - **Unhashable arguments.** The cache already declines to store entries it cannot key;
   priming and lookup decline in exactly the same circumstances rather than raising.
 - **A placement link points at a category row that no longer exists.** Every read raises the
-  same not-found error it raises today; the descendant read raises it for the same missing
-  row the node-by-node walk would have hit first.
+  same not-found error it raises today.
 - **Ties in sort order.** Children with equal sort positions come back in the same relative
   order as from `list_categories(parent_id=…)`, on every backend.
 - **A very large category tree.** Priming is bounded by the number of categories (93 in the
@@ -300,38 +313,37 @@ and a method; call, prime and clear each; run strict type checking over delibera
 ### Functional Requirements
 
 - **FR-001**: The caching utility MUST let a caller insert a value for a given set of
-  arguments and look up whether a fresh value exists for them, keyed exactly as a call with
-  those arguments is keyed. Both MUST be statically checked against the decorated
-  callable's own parameters and return type.
-- **FR-002**: `list_categories(parent_id=…)`, `list_categories_by_item(item_id)` and
-  `list_descendant_categories(category_id)` MUST prime the per-category accessor with every
-  category row they resolve, before any enabled filter is applied.
+  arguments (`prime`) and look up whether a fresh value exists for them (`cached`), keyed
+  exactly as a call with those arguments is keyed. Both MUST be statically checked against
+  the decorated callable's own parameters and return type. `cached` MUST report a stale entry
+  as a miss, and MUST distinguish a miss from a cached value that is itself falsy or `None`.
+- **FR-002**: `list_categories(parent_id=…)` and `list_categories_by_item(item_id)` MUST prime
+  the per-category accessor with every category row they **fetch from storage**, before any
+  enabled filter is applied. A row they resolve from the cache instead MUST NOT be re-primed.
 - **FR-003**: Those same reads MUST resolve category rows through the per-category cache
   first and read from storage only the rows not freshly cached, in at most one read; when
-  every row is cached they MUST read no category row.
+  every row is cached they MUST read no category row. The cache consultation MUST be
+  read-only: it MUST NOT write, refresh or evict any entry.
 - **FR-004**: A primed entry MUST be indistinguishable from a normally cached one in value,
-  lifetime and invalidation. No new staleness window may be introduced.
+  lifetime and invalidation. No new staleness window may be introduced. Lifetime is measured
+  from the fetch that produced the entry and MUST NOT be extended by later access, whether
+  that access is a call or a read-through lookup.
 - **FR-005**: Priming MUST NOT create an entry for a row that was not read, and MUST NOT
   change any not-found error or its message.
 - **FR-006**: The cost of a single cold call to each of the three batched methods MUST be
   unchanged. Release 060's exact-constant gates MUST pass with their constants unmodified
   and no test edited.
 - **FR-007**: `list_items(category_id=…)` MUST NOT prime the per-item accessor, and a test
-  MUST fail if it ever does.
-- **FR-008**: `list_descendant_categories(category_id, *, enabled=True)` MUST return a mapping
-  from the given category and every category a node-by-node walk with the same filter would
-  visit, to the children `list_categories(parent_id=…, enabled=…)` returns for it. The
-  reference walk is depth-first from `category_id`, expands each category once, and visits
-  children in the order `list_categories` returns them. The read MUST be cycle-safe, MUST
-  keep every parent–child relationship of a multi-parent category, and MUST raise the error
-  the reference walk would raise first, with the same message.
-- **FR-009**: `list_descendant_categories` MUST cost a constant number of storage reads,
-  independent of the subtree's size and depth.
+  MUST fail if it ever does. The gate MUST observe this through the per-item accessor's own
+  `cached` lookup — a miss for every listed item — not through an entry count and not by
+  reading the cache's internals.
+- **FR-008**: *(removed 2026-09-12 — the descendant read moved to the API refactor; see
+  Clarifications and Out of Scope.)*
+- **FR-009**: *(removed 2026-09-12 — same.)*
 - **FR-010**: Repeated-access gates MUST assert exact read counts, not bounds, for: the
   node-by-node walk at two sizes and two depths; the multi-parent walk; fetch-then-list;
-  repeated `list_categories_by_item`; the three item patterns in Context; and the
-  descendant read at two sizes and two depths. Removing priming, read-through or the
-  descendant read's constant cost MUST fail the build.
+  repeated `list_categories_by_item`; and the three item patterns in Context. Removing
+  priming or read-through MUST fail the build.
 - **FR-011**: Exact read counts MUST be asserted on all four storage backends — in-memory,
   JSON, YAML and Django — and the observable contract (true values served, writes
   invalidate) MUST hold on all four.
@@ -339,9 +351,9 @@ and a method; call, prime and clear each; run strict type checking over delibera
   positional) and methods MUST keep working unchanged, including the per-callable manual
   clear and `clear_all_caches()`.
 - **FR-013**: Consumer documentation MUST state which reads prime and read through, that
-  listing items does neither and what that costs relative to `0.1.0a49`, how the
-  descendant read maps to a walk, the cache lifetime, that every write clears everything, and
-  that `list_items`'s own result cache retains a listing until the next write.
+  listing items does neither and what that costs relative to `0.1.0a49`, the cache lifetime,
+  that every write clears everything, and that `list_items`'s own result cache retains a
+  listing until the next write.
 - **FR-014**: Every read-count or memory figure cited in documentation or the changelog MUST
   either be reproduced by a test in this repository or carry its external provenance.
 
@@ -349,9 +361,11 @@ and a method; call, prime and clear each; run strict type checking over delibera
 
 - **NFR-001**: No new runtime dependency.
 - **NFR-002**: No change to stored data and no migration.
-- **NFR-003**: No existing public method changes signature or return type. The one public
-  addition is `list_descendant_categories`. The caching decorator's return type changes from
-  a plain callable to a typed callable object; calling behaviour is unchanged.
+- **NFR-003**: No existing public method changes signature or return type, and no public
+  method is added. The caching decorator's return type changes from a plain callable to a
+  typed callable object; calling behaviour is unchanged, and so is introspection — a decorated
+  callable MUST still report its own `__name__`, `__qualname__`, `__module__`, `__doc__` and
+  its own signature, exactly as it does today under `functools.wraps`.
 - **NFR-004**: The existing quality gates MUST pass: linting, formatting, strict type
   checking, and the test suite at or above its coverage floor.
 - **NFR-005**: No new type-checker suppression, no unjustified `Any`, and no new
@@ -363,8 +377,6 @@ and a method; call, prime and clear each; run strict type checking over delibera
   timestamp governing its lifetime, cleared wholesale on any write. This feature adds a
   second way for one to come into existence (priming) and a way to consult it without
   calling the accessor (lookup).
-- **Descendant map**: The result of `list_descendant_categories` — each visited category's id
-  mapped to its ordered children; leaves map to an empty list.
 
 ## Success Criteria *(mandatory)*
 
@@ -379,11 +391,9 @@ and a method; call, prime and clear each; run strict type checking over delibera
   `0.1.0a49` (8 vs 7, 120 vs 85) come in at 7 and 84.
 - **SC-003**: A single cold call to each batched method costs exactly what it costs on
   `0.1.0a50`, verified by 060's unmodified gates.
-- **SC-004**: A descendant read costs the same exact number of reads at two sizes and two
-  depths, and equals the node-by-node walk's result on all four backends for trees with a
-  multi-parent category, a disabled category, tied sort positions and a stored cycle.
-- **SC-005**: Removing priming, read-through or the descendant read's constant cost fails
-  the build.
+- **SC-004**: *(removed 2026-09-12 — the descendant read moved to the API refactor; see
+  Clarifications and Out of Scope.)*
+- **SC-005**: Removing priming or read-through fails the build.
 - **SC-006**: Listing a category's items adds zero entries to the per-item cache.
 - **SC-007**: Each item pattern in Context costs exactly its recorded value, and none exceeds
   `0.1.0a49` by more than one read per `list_items(category_id=…)` call it contains.
@@ -404,8 +414,6 @@ and a method; call, prime and clear each; run strict type checking over delibera
 - Cache invalidation stays exactly as it is today: every write clears everything.
 - Category counts are small in every corpus measured (93 in the largest), so unbounded
   priming of categories needs no cap. This is an assumption about scale, not a guarantee.
-- The domain prevents cycles on every write through the service, but stored data written
-  outside it can still contain one; the descendant read must terminate regardless.
 
 ## Out of Scope
 
@@ -414,9 +422,21 @@ and a method; call, prime and clear each; run strict type checking over delibera
   retention `list_items`'s own result cache already has (Context). Reclaiming expired
   entries is the candidate fix: an expired entry is never served, so dropping it cannot
   change any read count. Recorded as follow-up.
-- A per-level read keyed by parent.
-- A descendant read from the implicit taxonomy root; `get_graph` already covers the whole
-  taxonomy.
+- Priming, or reading through, any category read other than the two FR-002 names — including
+  `get_graph`, the search corpus builder, `get_category_by_slug`, `get_category_by_external_id`
+  and `get_categories_by_external_ids`. None of them primed on `0.1.0a49`, so none of them is
+  a regression; extending to them is a separate improvement and needs its own evidence.
+- **Any new public read for tree walks — the subtree read included.** The 2026-09-11 revision
+  of this spec specified one as `list_descendant_categories(category_id, *, enabled=True) ->
+  dict[UUID, list[Category]]`; it is removed here because that name is an instance of the
+  defect the API-UX refactor exists to fix — a `list_*` that returns a mapping — and naming
+  it correctly needs the convention that refactor will decide. Ownership, and the behaviour
+  and measurements already established for it, are carried in
+  `docs/backlog/prompt-api-refactor.md` (defect 6), which points back at this file's
+  2026-09-11 revision and at `measurements/README.md` R8. Two shapes stay out regardless of
+  what that refactor decides: a per-level read keyed by parent, whose cost grows with depth
+  (`measurements/README.md` R8), and a descendant read from the implicit taxonomy root, which
+  `get_graph` already covers.
 - Reverting or re-tuning any part of release 060.
 - Changing the cache lifetime, the invalidate-everything-on-write policy, the module-level
   cache registry, or how method caches are keyed.
