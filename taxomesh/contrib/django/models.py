@@ -1,15 +1,21 @@
-"""Django ORM models for the taxomesh contrib app.
+"""The Django ORM models of the taxomesh app.
 
-Defines six ORM models that mirror the taxomesh domain entities:
+The module defines seven models, one for each kind of entity and each kind of link:
+
 - :class:`CategoryModel`
 - :class:`ItemModel`
 - :class:`TagModel`
 - :class:`CategoryParentLinkModel`
 - :class:`ItemParentLinkModel`
 - :class:`ItemTagLinkModel`
+- :class:`ItemRelationLinkModel`
 
-All models carry ``Meta.app_label = APP_LABEL`` and ``Meta.db_table`` set to
-the corresponding ``*_TABLE`` constant defined in this module.
+It also defines two proxy models of ``CategoryModel``, :class:`CategoryGraphProxy` and
+:class:`TaxomeshDebugProxy`, which only add entries to the admin.
+
+Each of the seven models sets ``Meta.app_label`` to ``APP_LABEL`` and ``Meta.db_table`` to its
+``*_TABLE`` constant in this module. The two proxies set ``app_label`` only, and use the table of
+``CategoryModel``.
 """
 
 from typing import Final
@@ -34,7 +40,7 @@ from taxomesh.domain.constants import (
 # ---------------------------------------------------------------------------
 
 APP_LABEL: Final[str] = "taxomesh_contrib_django"
-"""Django app label. Must be unique across all INSTALLED_APPS."""
+"""The Django app label. It must be unique among the ``INSTALLED_APPS``."""
 
 CATEGORY_TABLE: Final[str] = "taxomesh_category"
 ITEM_TABLE: Final[str] = "taxomesh_item"
@@ -45,7 +51,7 @@ ITEM_TAG_LINK_TABLE: Final[str] = "taxomesh_item_tag_link"
 ITEM_RELATION_LINK_TABLE: Final[str] = "taxomesh_item_relation_link"
 
 DJANGO_REPO_USING_DEFAULT: Final[str] = "default"
-"""Default Django database alias used by DjangoRepository."""
+"""The default Django database alias, ``"default"``: the same value as the default of ``DjangoRepository``."""
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +60,7 @@ DJANGO_REPO_USING_DEFAULT: Final[str] = "default"
 
 
 class CategoryModel(models.Model):
-    """ORM representation of a taxomesh Category."""
+    """The ORM model of a category."""
 
     category_id = models.UUIDField(primary_key=True, default=uuid4)
     name = models.CharField(max_length=MAX_CATEGORY_NAME_LENGTH)
@@ -70,7 +76,7 @@ class CategoryModel(models.Model):
     version = models.IntegerField(default=0)
 
     def __str__(self) -> str:
-        """Return a human-readable label used in admin dropdowns."""
+        """Return the label that the admin shows in its selects."""
         slug_part = f"s: {self.slug} - " if self.slug else ""
         return f"📂 {self.name} ({slug_part}id: {self.category_id})"
 
@@ -92,7 +98,7 @@ class CategoryModel(models.Model):
 
 
 class ItemModel(models.Model):
-    """ORM representation of a taxomesh Item."""
+    """The ORM model of an item."""
 
     item_id = models.UUIDField(primary_key=True, default=uuid4)
     name = models.CharField(max_length=MAX_ITEM_NAME_LENGTH, blank=True, default="")
@@ -128,7 +134,7 @@ class ItemModel(models.Model):
 
 
 class TagModel(models.Model):
-    """ORM representation of a taxomesh Tag."""
+    """The ORM model of a tag."""
 
     tag_id = models.UUIDField(primary_key=True)
     name = models.CharField(max_length=MAX_TAG_NAME_LENGTH)
@@ -142,7 +148,7 @@ class TagModel(models.Model):
 
 
 class CategoryParentLinkModel(models.Model):
-    """ORM representation of a directed edge in the category DAG."""
+    """The ORM model of a parent link: one category under one parent."""
 
     category = models.ForeignKey(
         CategoryModel,
@@ -168,7 +174,7 @@ class CategoryParentLinkModel(models.Model):
 
 
 class ItemParentLinkModel(models.Model):
-    """ORM representation of an item's placement in a category."""
+    """The ORM model of a placement: one item in one category."""
 
     item = models.ForeignKey(
         ItemModel,
@@ -197,7 +203,7 @@ class ItemParentLinkModel(models.Model):
 
 
 class ItemTagLinkModel(models.Model):
-    """ORM representation of a tag assignment to an item."""
+    """The ORM model of a tag link: one tag on one item."""
 
     tag = models.ForeignKey(
         TagModel,
@@ -219,7 +225,7 @@ class ItemTagLinkModel(models.Model):
 
 
 class ItemRelationLinkModel(models.Model):
-    """ORM representation of a directed typed relation between two items."""
+    """The ORM model of a relation: a directed, typed link from a source item to a target item."""
 
     source_item = models.ForeignKey(
         ItemModel,
@@ -257,17 +263,17 @@ class ItemRelationLinkModel(models.Model):
 
 
 class CategoryGraphProxy(CategoryModel):
-    """Proxy of CategoryModel used solely to surface the Graph link in admin."""
+    """A proxy of ``CategoryModel`` that exists only to show the Graph entry in the admin."""
 
     class Meta:
         proxy = True
         verbose_name = "Graph"
-        verbose_name_plural = " Graph"  # leading space forces top position in alphabetical app list
+        verbose_name_plural = " Graph"  # the leading space puts it first in the alphabetical app list
         app_label = APP_LABEL
 
 
 class TaxomeshDebugProxy(CategoryModel):
-    """Proxy model used solely to surface the Debug admin page in the TAXOMESH section."""
+    """A proxy of ``CategoryModel`` that exists only to show the Debug page in the admin's taxomesh section."""
 
     class Meta:
         proxy = True

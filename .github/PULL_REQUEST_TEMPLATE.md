@@ -11,23 +11,24 @@
 
 ## Description
 
-<!-- What does this PR do? Why? -->
+<!-- Say what the change does and why. -->
+
+<!-- CONTRIBUTING.md says what a change needs: https://github.com/ediazpacheco/taxomesh/blob/main/CONTRIBUTING.md -->
 
 ## Quality gates
 
-All four gates must pass before merging. Confirm each has been run locally:
+All four gates must pass before the merge. Run each one locally, and check its box:
 
 - [ ] `ruff check .` — no lint errors
 - [ ] `ruff format --check .` — no formatting issues
 - [ ] `mypy --strict .` — no type errors
 - [ ] `pytest --cov=taxomesh --cov-fail-under=80` — tests pass, coverage ≥ 80%
 
-## Spec artifacts
+## Public API
 
-- [ ] This PR has an associated spec (spec.md, plan.md, tasks.md under `specs/`)
-- [ ] All spec artifacts are committed and up to date
-- [ ] N/A — CI / tooling / docs change with no feature spec required
+- [ ] Not changed, or changed with `tests/surface/public_surface.txt`, `llms.txt`, the regenerated
+      references and `CHANGELOG.md` updated
 
-## Notes for reviewers
+## Notes
 
-<!-- Anything that needs special attention, known limitations, follow-up work, etc. -->
+<!-- Anything that needs attention: known limitations, or work left for later. -->

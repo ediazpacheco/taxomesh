@@ -1,12 +1,15 @@
-"""Tests for the bundled example YAML data file (US3 — 007-yaml-repository)."""
+"""Tests for the example taxonomy, ``examples/taxomesh_example.yaml``, whose header documents how to
+load it.
+"""
 
 from pathlib import Path
 
-from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+from taxomesh.adapters.repositories.yaml_repository import YamlRepository
 from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.graph import CategoryNode
 
-EXAMPLE = Path(__file__).parent.parent / "data" / "taxomesh_example.yaml"
+REPO_ROOT = Path(__file__).parent.parent
+EXAMPLE = REPO_ROOT / "examples" / "taxomesh_example.yaml"
 
 
 def _max_depth(node: CategoryNode) -> int:
@@ -21,26 +24,26 @@ def test_example_file_exists() -> None:
 
 
 def test_example_file_loads_without_error() -> None:
-    YAMLRepository(EXAMPLE)
+    YamlRepository(EXAMPLE)
 
 
 def test_example_file_has_at_least_six_categories() -> None:
-    repo = YAMLRepository(EXAMPLE)
-    # root + ≥5 top-level = ≥6 total category records
+    repo = YamlRepository(EXAMPLE)
+    # root + ≥5 top-level = ≥6 total category rows
     cats = repo.list_categories()
     assert len(cats) >= 6, f"Expected ≥6 categories, got {len(cats)}"
 
 
 def test_example_file_graph_has_at_least_five_roots() -> None:
-    repo = YAMLRepository(EXAMPLE)
+    repo = YamlRepository(EXAMPLE)
     svc = TaxomeshService(repository=repo)
-    graph = svc.get_graph()
-    assert len(graph.roots) >= 5, f"Expected ≥5 root nodes, got {len(graph.roots)}"
+    graph = svc.graph()
+    assert len(graph.roots) >= 5, f"Expected ≥5 top-level nodes, got {len(graph.roots)}"
 
 
 def test_example_file_graph_has_four_level_deep_chain() -> None:
-    repo = YAMLRepository(EXAMPLE)
+    repo = YamlRepository(EXAMPLE)
     svc = TaxomeshService(repository=repo)
-    graph = svc.get_graph()
+    graph = svc.graph()
     max_chain = max((_max_depth(node) for node in graph.roots), default=0)
     assert max_chain >= 4, f"Expected at least one chain of depth ≥4, got max depth {max_chain}"

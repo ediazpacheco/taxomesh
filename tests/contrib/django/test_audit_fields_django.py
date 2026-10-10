@@ -19,7 +19,7 @@ def repo() -> DjangoRepository:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 / US1 — Timestamp round-trips (T013)
+# Timestamp round-trips
 # ---------------------------------------------------------------------------
 
 
@@ -28,7 +28,7 @@ def test_django_category_timestamps_roundtrip(repo: DjangoRepository) -> None:
     cat = Category(category_id=uuid4(), name="Roundtrip", created_at=ts, updated_at=ts)
     repo.save_category(cat)
 
-    reloaded = repo.get_category(cat.category_id)
+    reloaded = repo.find_category(cat.category_id)
     assert reloaded is not None
     assert reloaded.created_at == ts
     assert reloaded.updated_at == ts
@@ -39,14 +39,14 @@ def test_django_item_timestamps_roundtrip(repo: DjangoRepository) -> None:
     item = Item(item_id=uuid4(), name="Roundtrip", created_at=ts, updated_at=ts)
     repo.save_item(item)
 
-    reloaded = repo.get_item(item.item_id)
+    reloaded = repo.find_item(item.item_id)
     assert reloaded is not None
     assert reloaded.created_at == ts
     assert reloaded.updated_at == ts
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 / US2 — Version round-trips (T019)
+# Version round-trips
 # ---------------------------------------------------------------------------
 
 
@@ -57,7 +57,7 @@ def test_django_category_version_roundtrip(repo: DjangoRepository) -> None:
     repo.save_category(cat)  # update → version 2
     repo.save_category(cat)  # update → version 3
 
-    reloaded = repo.get_category(cat.category_id)
+    reloaded = repo.find_category(cat.category_id)
     assert reloaded is not None
     assert reloaded.version == 3
 
@@ -69,6 +69,6 @@ def test_django_item_version_roundtrip(repo: DjangoRepository) -> None:
     repo.save_item(item)  # update → version 2
     repo.save_item(item)  # update → version 3
 
-    reloaded = repo.get_item(item.item_id)
+    reloaded = repo.find_item(item.item_id)
     assert reloaded is not None
     assert reloaded.version == 3

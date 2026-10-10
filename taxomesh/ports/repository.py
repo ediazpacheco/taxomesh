@@ -1,251 +1,357 @@
-"""Storage interface for the taxomesh repository layer.
+"""The storage port: the members that a taxomesh repository implements.
 
-``TaxomeshRepositoryBase`` is a ``typing.Protocol`` — any class that
-implements all required methods with compatible signatures is a valid
-repository. Explicit inheritance is NOT required; mypy verifies compliance
-structurally at type-check time.
+``TaxomeshRepositoryBase`` is a ``typing.Protocol``. A class that has every member below, with
+compatible signatures, is a repository, and it does not need to inherit from the port. mypy checks
+that a class has the members of the port.
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping, Sequence
 from contextlib import AbstractContextManager
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
-from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, ItemRelationLink, Tag
+from taxomesh.domain.info import RepositoryInfo
+from taxomesh.domain.models import (
+    Category,
+    CategoryParentLink,
+    Item,
+    ItemParentLink,
+    ItemRelationLink,
+    ItemTagLink,
+    Tag,
+)
 
 
 class TaxomeshRepositoryBase(Protocol):
-    """Structural interface that every taxomesh storage backend must satisfy.
+    """The members that every storage backend implements: the contract of a repository.
 
-    All method names and signatures below form the contract. Implement them
-    in any class (no inheritance required) and pass the instance to
-    ``TaxomeshService`` at construction time.
+    The names and the signatures below are the contract. Implement them in any class, with no
+    inheritance, and give an instance to ``TaxomeshService`` when you build it.
     """
 
     # --- Atomicity boundary ---
 
     def atomic(self) -> AbstractContextManager[None]:
-        """Return a context manager defining a per-backend consistency boundary.
+        """Return a context manager that groups writes, as far as the backend can.
 
-        ``TaxomeshService`` wraps the write sequence of each multi-write
-        operation (``create_category``, ``reorder_subcategories``,
-        ``reorder_items_in_category``, ``reparent_category``, ``reparent_item``)
-        in ``with self._repo.atomic():`` so the writes either all commit or all
-        roll back.
+        The collections run the writes of each member that writes more than once, such as
+        ``categories.create``, ``add_parent``, ``move`` and ``reorder``, inside
+        ``with repository.atomic():``.
 
-        The guarantee is **two-tier** and backend-dependent:
+        What the block guarantees depends on the backend:
 
-        - **Transactional backends** (e.g. ``DjangoRepository``) MUST make this a
-          full-rollback boundary: if the wrapped body raises, every write
-          performed inside — including nested inner boundaries opened by the
-          backend's own per-method writes (Django savepoints) — is rolled back,
-          leaving the datastore in its pre-boundary state.
-        - **Non-transactional backends** (file/in-memory, e.g.
-          ``JsonRepository``, ``YAMLRepository``) treat the boundary as a
-          **best-effort no-op**: the success path is never altered, but after a
-          mid-boundary failure partial state MAY remain. Such backends return
-          ``contextlib.nullcontext()``.
+        - **A backend with transactions**, such as ``DjangoRepository``, must roll back the whole
+          block. If the body raises, every write in the block is rolled back, the inner blocks
+          that the backend's own writes open (Django savepoints) included. The data is then as it
+          was before the block.
+        - **A backend without transactions**, such as ``JsonRepository``, ``YamlRepository`` or
+          one in memory, does **not roll back**. When the block succeeds, the writes are the same
+          as without the block. After a failure in the block, the writes made before the failure
+          stay. Such a block does nothing, as ``contextlib.nullcontext()``, or only keeps other
+          threads out while it is open, as the block of the file repositories does.
 
-        Entering the context MUST NOT raise. On normal exit the wrapped writes
-        are made durable per the backend's usual semantics. On exceptional exit
-        the context manager MUST propagate the exception (transactional backends
-        additionally roll back).
+        Entering the block must not raise. On a normal exit, the writes are durable as the
+        backend's writes always are. On an exit by an exception, the context manager must
+        propagate the exception, and a backend with transactions also rolls back.
 
         Returns:
-            A context manager usable as ``with repo.atomic():`` that yields
-            ``None``.
+            A context manager for ``with repo.atomic():``, which yields ``None``.
         """
         ...
 
     # --- Category ---
 
-    def save_category(self, category: Category) -> None:
-        """Insert or update a category record.
+    def save_category(self, category: Category, *, expected_version: int | None = None) -> Category:
+        """Store a category row: insert it, or replace the stored row with its identifier.
+
+        The given row does not change. The repository assigns the ``version`` of the stored row:
+        an update stores the version of the row that it replaces plus one, whatever the given row
+        has. With ``expected_version``, the save is a conditional update: the comparison and the
+        write are one atomic step, so two writers that hold the same version cannot both succeed.
 
         Args:
-            category: The Category instance to persist.
+            category: The category row to store.
+            expected_version: The version that the stored row must be at, or ``None`` (the
+                default) for no comparison. A row that is not stored is at no version.
+
+        Returns:
+            The row as stored, with the version that the repository assigned.
 
         Raises:
-            TaxomeshExternalIdConflictError: If category.external_id is not None and another
-                record with a different category_id already holds the same external_id.
+            TaxomeshVersionConflictError: If ``expected_version`` is given and the stored row is
+                not at it, or no row is stored; nothing is written.
+            TaxomeshExternalIdConflictError: If ``category.external_id`` is not ``None`` and
+                another category already has it.
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
-    def get_category(self, category_id: UUID) -> Category | None:
-        """Retrieve a category by its identifier.
+    def find_category(self, category_id: UUID) -> Category | None:
+        """Return the category with this identifier, or ``None``.
 
         Args:
-            category_id: The library-assigned UUID of the category.
+            category_id: The identifier of the category.
 
         Returns:
-            The matching Category, or None if it does not exist.
+            The category row, or ``None`` when no category with this identifier is stored.
         """
         ...
 
-    def list_categories(self, *, enabled: bool | None = True) -> list[Category]:
-        """Return all stored categories ordered by name then category_id.
+    def list_categories(self, *, enabled: bool | None = True) -> Sequence[Category]:
+        """Return the stored categories, ordered by name and then by identifier.
 
-        Results are ordered ascending by ``name``; when two categories share the
-        same name they are further ordered ascending by ``category_id`` for
-        deterministic output.  ``Category`` has no direct ``sort_index`` field;
-        ``name`` is the stable fallback for a global category listing.
+        The order is ascending by ``name``, and two categories with the same name are in ascending
+        order of ``category_id``, so the order is always the same. ``Category`` has no
+        ``sort_index`` field of its own, so a listing of every category is ordered by ``name``.
+
+        Args:
+            enabled: ``True`` (the default) returns only the enabled categories, ``False`` only the
+                disabled ones, and ``None`` all of them.
 
         Returns:
-            List of all categories ordered by ``(name ASC, category_id ASC)``;
-            empty list if the store is empty.
+            The matching categories, ordered by ``(name ASC, category_id ASC)``; empty when none
+            match.
         """
         ...
 
     def delete_category(self, category_id: UUID) -> bool:
-        """Delete a category by its identifier.
+        """Delete a category and every link that names it, in one write.
+
+        The links deleted with it are its parent links, as child and as parent, and its item
+        placements. No stored link names the category afterwards.
 
         Args:
-            category_id: The library-assigned UUID of the category to delete.
+            category_id: The identifier of the category to delete.
 
         Returns:
             True if the category was found and deleted; False if it did not exist.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
     # --- Item ---
 
-    def save_item(self, item: Item) -> None:
-        """Insert or update an item record.
+    def save_item(self, item: Item, *, expected_version: int | None = None) -> Item:
+        """Store an item row: insert it, or replace the stored row with its identifier.
+
+        The given row does not change. The repository assigns the ``version`` of the stored row:
+        an update stores the version of the row that it replaces plus one, whatever the given row
+        has. With ``expected_version``, the save is a conditional update: the comparison and the
+        write are one atomic step, so two writers that hold the same version cannot both succeed.
 
         Args:
-            item: The Item instance to persist.
+            item: The item row to store.
+            expected_version: The version that the stored row must be at, or ``None`` (the
+                default) for no comparison. A row that is not stored is at no version.
+
+        Returns:
+            The row as stored, with the version that the repository assigned.
 
         Raises:
-            TaxomeshExternalIdConflictError: If item.external_id is not None and another
-                record with a different item_id already holds the same external_id.
+            TaxomeshVersionConflictError: If ``expected_version`` is given and the stored row is
+                not at it, or no row is stored; nothing is written.
+            TaxomeshExternalIdConflictError: If ``item.external_id`` is not ``None`` and another
+                item already has it.
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
-    def get_item(self, item_id: UUID) -> Item | None:
-        """Retrieve an item by its internal identifier.
+    def find_item(self, item_id: UUID) -> Item | None:
+        """Return the item with this identifier, or ``None``.
 
         Args:
-            item_id: The library-assigned UUID of the item.
+            item_id: The identifier of the item.
 
         Returns:
-            The matching Item, or None if it does not exist.
+            The item row, or ``None`` when no item with this identifier is stored.
         """
         ...
 
-    def list_items(self, *, enabled: bool | None = True) -> list[Item]:
-        """Return all stored items ordered by name then item_id.
+    def list_items(self, *, enabled: bool | None = True) -> Sequence[Item]:
+        """Return the stored items, ordered by name and then by identifier.
 
-        Results are ordered ascending by ``name``; when two items share the same
-        name they are further ordered ascending by ``item_id`` for deterministic
-        output.  ``Item`` has no direct ``sort_index`` field; ``name`` is the
-        stable fallback for a global item listing.
+        The order is ascending by ``name``, and two items with the same name are in ascending order
+        of ``item_id``, so the order is always the same. ``Item`` has no ``sort_index`` field of its
+        own, so a listing of every item is ordered by ``name``.
+
+        Args:
+            enabled: ``True`` (the default) returns only the enabled items, ``False`` only the
+                disabled ones, and ``None`` all of them.
 
         Returns:
-            List of all items ordered by ``(name ASC, item_id ASC)``; empty
-            list if the store is empty.
+            The matching items, ordered by ``(name ASC, item_id ASC)``; empty when none match.
         """
         ...
 
     def delete_item(self, item_id: UUID) -> bool:
-        """Delete an item by its internal identifier.
+        """Delete an item and every link that names it, in one write.
+
+        The links deleted with it are its placements, its tag links and its relation links at
+        either end. No stored link names the item afterwards.
 
         Args:
-            item_id: The library-assigned UUID of the item to delete.
+            item_id: The identifier of the item to delete.
 
         Returns:
             True if the item was found and deleted; False if it did not exist.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
     # --- Tag ---
 
     def save_tag(self, tag: Tag) -> None:
-        """Insert or update a tag record.
+        """Store a tag row: insert it, or replace the stored row with its identifier.
 
         Args:
-            tag: The Tag instance to persist.
+            tag: The tag row to store.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
-    def get_tag(self, tag_id: UUID) -> Tag | None:
-        """Retrieve a tag by its identifier.
+    def find_tag(self, tag_id: UUID) -> Tag | None:
+        """Return the tag with this identifier, or ``None``.
 
         Args:
-            tag_id: The library-assigned UUID of the tag.
+            tag_id: The identifier of the tag.
 
         Returns:
-            The matching Tag, or None if it does not exist.
+            The tag row, or ``None`` when no tag with this identifier is stored.
         """
         ...
 
-    def list_tags(self) -> list[Tag]:
-        """Return all stored tags.
+    def list_tags(self) -> Sequence[Tag]:
+        """Return every stored tag.
 
         Returns:
-            List of all tags; empty list if the store is empty.
+            Every tag row; empty when no tag is stored.
+        """
+        ...
+
+    def map_tags_by_id(self, tag_ids: Collection[UUID]) -> "Mapping[UUID, Tag]":
+        """Return the tags whose ``tag_id`` is in ``tag_ids``, in one read.
+
+        A tag has no ``enabled`` field, so this member takes no ``enabled`` filter.
+
+        Args:
+            tag_ids: The identifiers of the tags to look up. An empty collection returns an empty
+                mapping.
+
+        Returns:
+            A mapping from the identifier of each stored tag to its row. An identifier that names
+            no stored tag is left out of the mapping, and no error is raised.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
         """
         ...
 
     # --- Tag ↔ Item association ---
 
-    def assign_tag(self, tag_id: UUID, item_id: UUID) -> None:
-        """Associate a tag with an item. Idempotent — no-op if already linked.
+    def add_item_tag_link(self, item_id: UUID, tag_id: UUID) -> None:
+        """Store a tag link: the tag on the item. Nothing changes when the link is already stored.
 
         Args:
-            tag_id: The library-assigned UUID of the tag.
-            item_id: The library-assigned UUID of the item.
+            item_id: The identifier of the item.
+            tag_id: The identifier of the tag.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
-    def remove_tag(self, tag_id: UUID, item_id: UUID) -> bool:
-        """Remove the association between a tag and an item.
+    def delete_item_tag_link(self, item_id: UUID, tag_id: UUID) -> bool:
+        """Delete the tag link of this tag on this item.
 
         Args:
-            tag_id: The library-assigned UUID of the tag.
-            item_id: The library-assigned UUID of the item.
+            item_id: The identifier of the item.
+            tag_id: The identifier of the tag.
 
         Returns:
-            True if the association was found and removed; False if it did not exist.
+            True if the link was found and deleted; False if it did not exist.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
+        """
+        ...
+
+    def list_item_tag_links(
+        self,
+        *,
+        item_ids: Collection[UUID] | None = None,
+        tag_ids: Collection[UUID] | None = None,
+    ) -> Sequence[ItemTagLink]:
+        """Return the stored tag links, filtered by either end when a filter is given.
+
+        The order is ``(item_id ASC, tag_id ASC)``. A tag link has no sort index, so its two
+        identifiers are the whole order. Every combination of filters keeps this order.
+
+        Args:
+            item_ids: When given, only the links whose ``item_id`` is in it are returned. An
+                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
+                default) applies no item filter.
+            tag_ids: When given, only the links whose ``tag_id`` is in it are returned. An
+                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
+                default) applies no tag filter. When both filters are given, a link must match
+                both.
+
+        Returns:
+            The matching links, ordered by ``(item_id ASC, tag_id ASC)``; empty when none match.
+            With both filters ``None``, every stored link.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure.
         """
         ...
 
     # --- Category parent links ---
 
     def save_category_parent_link(self, link: CategoryParentLink) -> None:
-        """Upsert a category→parent relationship.
+        """Store a parent link: insert it, or update the stored one.
 
-        If a link with the same (category_id, parent_category_id) pair already
-        exists its sort_index is updated in-place. No duplicate is created.
+        When a link with the same ``(category_id, parent_category_id)`` is stored, its
+        ``sort_index`` is updated. No second link is created.
 
         Args:
-            link: The CategoryParentLink to persist.
+            link: The parent link to store.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
     def list_category_parent_links(
         self,
         *,
+        category_ids: Collection[UUID] | None = None,
         parent_category_ids: Collection[UUID] | None = None,
-    ) -> list[CategoryParentLink]:
-        """Return stored category-parent relationships, optionally filtered by parent.
+    ) -> Sequence[CategoryParentLink]:
+        """Return the stored parent links, filtered by either end when a filter is given.
 
-        Results are ordered by ``(parent_category_id ASC, sort_index ASC,
-        category_id ASC)``.  Links are grouped so that all children of the same
-        parent appear together, ordered by their ``sort_index`` within that
-        group.  When two links share the same parent and ``sort_index``, they
-        are further ordered by ``category_id`` for deterministic output.  The
-        ordering contract holds under every filter combination.
+        The order is ``(parent_category_id ASC, sort_index ASC, category_id ASC)``. So the children
+        of one parent are together, in the order of their ``sort_index``, and two links with the
+        same parent and ``sort_index`` are in the order of ``category_id``. Every combination of
+        filters keeps this order.
 
         Args:
-            parent_category_ids: When given, only links whose
-                ``parent_category_id`` is a member are returned. An EMPTY
-                collection returns ``[]`` — it is NOT treated as "no filter".
-                ``None`` (default) applies no filter and returns every link.
+            category_ids: When given, only the links whose ``category_id`` is in it are returned. An
+                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
+                default) applies no child filter.
+            parent_category_ids: When given, only the links whose ``parent_category_id`` is in it are returned. An
+                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
+                default) applies no parent filter. When both
+                filters are given, a link must match both.
 
         Returns:
-            List of matching CategoryParentLink records ordered by
-            ``(parent_category_id ASC, sort_index ASC, category_id ASC)``;
-            empty list if none match.
+            The matching links, ordered by ``(parent_category_id ASC, sort_index ASC,
+            category_id ASC)``; empty when none match. With both filters ``None``, every stored
+            link.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -255,58 +361,62 @@ class TaxomeshRepositoryBase(Protocol):
     # --- Tag delete ---
 
     def delete_tag(self, tag_id: UUID) -> bool:
-        """Delete a tag entity by its identifier.
+        """Delete a tag and every link that names it, in one write.
+
+        The links deleted with it are its tag links. No stored link names the tag afterwards.
 
         Args:
-            tag_id: The library-assigned UUID of the tag.
+            tag_id: The identifier of the tag to delete.
 
         Returns:
             True if the tag was found and deleted; False if it did not exist.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
     # --- Item → Category placement ---
 
     def save_item_parent_link(self, link: ItemParentLink) -> None:
-        """Upsert an item→category placement.
+        """Store a placement: insert it, or update the stored one.
 
-        If a link with the same (item_id, category_id) pair already exists its
-        sort_index is updated in-place. No duplicate is created.
+        When a placement with the same ``(item_id, category_id)`` is stored, its ``sort_index`` is
+        updated. No second placement is created.
 
         Args:
-            link: The ItemParentLink to persist.
+            link: The placement to store.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
     def list_item_parent_links(
         self,
         *,
-        item_id: UUID | None = None,
+        item_ids: Collection[UUID] | None = None,
         category_ids: Collection[UUID] | None = None,
-    ) -> list[ItemParentLink]:
-        """Return item→category placements grouped by category then sort_index, optionally filtered.
+    ) -> Sequence[ItemParentLink]:
+        """Return the stored placements, filtered by either end when a filter is given.
 
-        Results are ordered by ``(category_id ASC, sort_index ASC, item_id
-        ASC)``.  Links are grouped so that all items in the same category appear
-        together, ordered by their ``sort_index`` within that group.  When two
-        links share the same category and ``sort_index``, they are further
-        ordered by ``item_id`` for deterministic output.  The ordering contract
-        holds under every filter combination.
+        The order is ``(category_id ASC, sort_index ASC, item_id ASC)``. So the items of one
+        category are together, in the order of their ``sort_index``, and two placements with the
+        same category and ``sort_index`` are in the order of ``item_id``. Every combination of
+        filters keeps this order.
 
         Args:
-            item_id: When given, only links whose ``item_id`` equals it are
-                returned. ``None`` (default) applies no item filter.
-            category_ids: When given, only links whose ``category_id`` is a
-                member are returned. An EMPTY collection returns ``[]`` — it
-                is NOT treated as "no filter". ``None`` (default) applies no
-                category filter. When both filters are given, AND semantics
-                apply.
+            item_ids: When given, only the links whose ``item_id`` is in it are returned. An
+                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
+                default) applies no item filter.
+            category_ids: When given, only the links whose ``category_id`` is in it are returned. An
+                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
+                default) applies no category filter. When both
+                filters are given, a link must match both.
 
         Returns:
-            List of matching ItemParentLink records ordered by
-            ``(category_id ASC, sort_index ASC, item_id ASC)``; empty list if
-            none match. With both filters ``None`` the result is identical to
-            the previous unfiltered behavior.
+            The matching placements, ordered by ``(category_id ASC, sort_index ASC, item_id ASC)``;
+            empty when none match. With both filters ``None``, every stored placement.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -315,158 +425,148 @@ class TaxomeshRepositoryBase(Protocol):
 
     # --- External-ID lookup ---
 
-    def get_item_by_external_id(self, external_id: str) -> "Item | None":
+    def find_item_by_external_id(self, external_id: str) -> "Item | None":
         """Return the item with the given external_id, or None.
 
         Args:
-            external_id: The external identifier to look up (already a str; never None).
+            external_id: The external id to look up, in its stored form: a ``str``, never ``None``.
 
         Returns:
-            The matching Item, or None if no item has this external_id.
+            The item row, or ``None`` when no item has this external id.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
         """
         ...
 
-    def get_category_by_external_id(self, external_id: str) -> "Category | None":
+    def find_category_by_external_id(self, external_id: str) -> "Category | None":
         """Return the category with the given external_id, or None.
 
         Args:
-            external_id: The external identifier to look up (already a str; never None).
+            external_id: The external id to look up, in its stored form: a ``str``, never ``None``.
 
         Returns:
-            The matching Category, or None if no category has this external_id.
-            Root category filtering is the caller's responsibility.
+            The category row, or ``None`` when no category has this external id. The repository
+            does not leave out the implicit root: the caller does.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
         """
 
-    def get_items_by_ids(
+    def map_items_by_id(
         self,
         item_ids: Collection[UUID],
         *,
         enabled: bool | None = None,
-    ) -> "dict[UUID, Item]":
-        """Return items whose item_id matches any value in item_ids.
+    ) -> "Mapping[UUID, Item]":
+        """Return the items whose ``item_id`` is in ``item_ids``.
 
-        The input is pre-normalised: duplicates have already been removed by
-        the caller (e.g. ``TaxomeshService``). The adapter MUST NOT perform
-        any further normalisation.
+        The caller, such as ``TaxomeshService``, removes the duplicates before the call. The
+        repository must not change the input further.
 
         Args:
-            item_ids: A collection of internal item UUIDs to look up.
-                Guaranteed to contain no duplicates. An empty collection
-                returns an empty dict.
-            enabled: ``True`` returns only enabled items; ``False`` only
-                disabled; ``None`` (default) returns all matching items
-                regardless of enabled state.
+            item_ids: The identifiers of the items to look up, with no duplicates. An empty
+                collection returns an empty mapping.
+            enabled: ``True`` returns only the enabled items, ``False`` only the disabled ones, and
+                ``None`` (the default) every matching item.
 
         Returns:
-            A dict mapping each found item_id to its Item. Missing IDs are
-            silently absent from the result — no error is raised.
+            A mapping from the identifier of each stored item to its row. An identifier that names
+            no stored item is left out of the mapping, and no error is raised.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
         """
         ...
 
-    def get_categories_by_ids(
+    def map_categories_by_id(
         self,
         category_ids: Collection[UUID],
         *,
         enabled: bool | None = None,
-    ) -> "dict[UUID, Category]":
-        """Return categories whose category_id matches any value in category_ids.
+    ) -> "Mapping[UUID, Category]":
+        """Return the categories whose ``category_id`` is in ``category_ids``.
 
-        The input is pre-normalised: duplicates have already been removed by
-        the caller (e.g. ``TaxomeshService``). The adapter MUST NOT perform
-        any further normalisation.
+        The caller, such as ``TaxomeshService``, removes the duplicates before the call. The
+        repository must not change the input further.
 
-        The collection is passed to the store as a single request; adapters
-        MUST NOT split it internally. Where a store imposes a per-query limit,
-        that limit is the library's limit and exceeding it surfaces as
-        ``TaxomeshRepositoryError`` like any other storage failure.
+        The repository passes the collection to its storage as one request, and must not split it.
+        When the storage has a limit for each query, that limit is the library's limit, and a
+        request over it raises ``TaxomeshRepositoryError``, as any other storage failure does.
 
         Args:
-            category_ids: A collection of internal category UUIDs to look up.
-                Guaranteed to contain no duplicates. An empty collection
-                returns an empty dict without reaching storage.
-            enabled: ``True`` returns only enabled categories; ``False`` only
-                disabled; ``None`` (default) returns all matching categories
-                regardless of enabled state.
+            category_ids: The identifiers of the categories to look up, with no duplicates. An
+                empty collection returns an empty mapping, and storage is not read.
+            enabled: ``True`` returns only the enabled categories, ``False`` only the disabled
+                ones, and ``None`` (the default) every matching category.
 
         Returns:
-            A dict mapping each found category_id to its Category. Missing IDs
-            are silently absent from the result — no error is raised.
+            A mapping from the identifier of each stored category to its row. An identifier that
+            names no stored category is left out of the mapping, and no error is raised.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
         """
         ...
 
-    def get_items_by_external_ids(
+    def map_items_by_external_id(
         self,
         external_ids: Collection[str],
         *,
         enabled: bool | None = None,
-    ) -> "dict[str, Item]":
-        """Return items whose external_id matches any value in external_ids.
+    ) -> "Mapping[str, Item]":
+        """Return the items whose ``external_id`` is in ``external_ids``.
 
-        The input is pre-normalised: blank strings and duplicates have already
-        been removed by the caller (e.g. ``TaxomeshService``). The adapter
-        MUST NOT perform any further normalisation.
+        The caller, such as ``TaxomeshService``, converts each value to its stored form with the
+        one rule that writes use, and removes the duplicates. The repository must not change the
+        input further: a value matches a row only as written. Surrounding whitespace counts, and the
+        empty string is a value like any other.
 
         Args:
-            external_ids: A collection of external ID strings to look up.
-                Guaranteed to contain no blank strings and no duplicates.
-            enabled: ``True`` returns only enabled items; ``False`` only
-                disabled; ``None`` (default) returns all matching items
-                regardless of enabled state.
+            external_ids: The external ids to look up, in stored form, with no duplicates.
+            enabled: ``True`` returns only the enabled items, ``False`` only the disabled ones, and
+                ``None`` (the default) every matching item.
 
         Returns:
-            A dict mapping each found external_id to its Item. Missing IDs
-            are silently absent from the result — no error is raised.
+            A mapping from the external id of each stored item to its row. An external id that no
+            stored item has is left out of the mapping, and no error is raised.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
         """
         ...
 
-    def get_categories_by_external_ids(
+    def map_categories_by_external_id(
         self,
         external_ids: Collection[str],
         *,
         enabled: bool | None = None,
-    ) -> "dict[str, Category]":
-        """Return categories whose external_id matches any value in external_ids.
+    ) -> "Mapping[str, Category]":
+        """Return the categories whose ``external_id`` is in ``external_ids``.
 
-        The input is pre-normalised: blank strings and duplicates have already
-        been removed by the caller (e.g. ``TaxomeshService``). The adapter
-        MUST NOT perform any further normalisation.
+        The caller, such as ``TaxomeshService``, converts each value to its stored form with the
+        one rule that writes use, and removes the duplicates. The repository must not change the
+        input further: a value matches a row only as written. Surrounding whitespace counts, and the
+        empty string is a value like any other.
 
-        Root category exclusion is the service's responsibility, not the
-        adapter's. The adapter returns the raw result including the root
-        category if its external_id matches.
+        The service leaves out the implicit root, and the repository does not: the repository
+        returns the implicit root too when its external id matches.
 
         Args:
-            external_ids: A collection of external ID strings to look up.
-                Guaranteed to contain no blank strings and no duplicates.
-            enabled: ``True`` returns only enabled categories; ``False`` only
-                disabled; ``None`` (default) returns all matching categories
-                regardless of enabled state.
+            external_ids: The external ids to look up, in stored form, with no duplicates.
+            enabled: ``True`` returns only the enabled categories, ``False`` only the disabled
+                ones, and ``None`` (the default) every matching category.
 
         Returns:
-            A dict mapping each found external_id to its Category. Missing IDs
-            are silently absent from the result — no error is raised.
+            A mapping from the external id of each stored category to its row. An external id that
+            no stored category has is left out of the mapping, and no error is raised.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
         """
         ...
 
-    def get_item_by_slug(self, slug: str) -> Item | None:
+    def find_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given non-empty slug, or None.
 
         Args:
@@ -477,7 +577,7 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
-    def get_category_by_slug(self, slug: str) -> Category | None:
+    def find_category_by_slug(self, slug: str) -> Category | None:
         """Return the category with the given non-empty slug, or None.
 
         Args:
@@ -490,66 +590,76 @@ class TaxomeshRepositoryBase(Protocol):
 
     # --- Configuration introspection ---
 
-    def get_config_summary(self) -> str:
-        """Return a human-readable string describing this repository's configuration.
+    @property
+    def config_summary(self) -> str:
+        """Text, for a person to read, that describes the configuration of this repository.
 
-        Implementations MUST satisfy the following contract:
+        An implementation must keep this contract:
 
-        - The returned string MUST be non-empty.
-        - This method MUST NOT raise under any circumstances.
-        - The returned string MUST NOT contain passwords, credentials, or other
-          secrets; implementations are required to sanitize or omit sensitive values.
+        - The text is not empty.
+        - Reading it never raises.
+        - The text contains no password, credential or other secret: the implementation removes
+          or masks each sensitive value.
 
         Returns:
-            A non-empty, human-readable description of the repository's
-            configuration (e.g. the storage file path, a sanitized connection
-            string, or a named data source identifier).
+            A description of the configuration of the repository, not empty, for a person to read:
+            for example, the path of the storage file, a connection string without its secrets, or
+            the name of a data source.
         """
         ...
 
-    def get_debug_info(self) -> dict[str, Any]:
-        """Return adapter-specific diagnostic information.
+    def describe(self) -> RepositoryInfo:
+        """Return what this repository reports about itself.
 
         Returns:
-            A flat dict with adapter-specific diagnostic keys. Must never raise.
+            A :class:`RepositoryInfo` that names the class of the repository, its storage path if
+            it has one, and the facts that only its backend has. This member must never raise.
         """
         ...
 
     def delete_category_parent_link(self, category_id: UUID, parent_category_id: UUID) -> bool:
-        """Delete a category→parent relationship.
+        """Delete the parent link of this category under this parent.
 
         Args:
-            category_id: The child category's UUID.
-            parent_category_id: The parent category's UUID.
+            category_id: The identifier of the child category.
+            parent_category_id: The identifier of the parent category.
 
         Returns:
             True if the link was found and deleted; False if it did not exist.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
     def delete_item_parent_link(self, item_id: UUID, category_id: UUID) -> bool:
-        """Delete an item→category placement.
+        """Delete the placement of this item in this category.
 
         Args:
-            item_id: The item's UUID.
-            category_id: The category's UUID.
+            item_id: The identifier of the item.
+            category_id: The identifier of the category.
 
         Returns:
             True if the placement was found and deleted; False if it did not exist.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
     # --- Item relation links ---
 
     def save_item_relation_link(self, link: ItemRelationLink) -> None:
-        """Upsert a directed item-to-item relation.
+        """Store a relation: insert it, or update the stored one.
 
-        If a link with the same ``(source_item_id, target_item_id, relation_type)``
-        triple already exists, its ``sort_index`` and ``metadata`` are updated in-place.
-        No duplicate is created.
+        When a relation with the same ``(source_item_id, target_item_id, relation_type)`` is
+        stored, its ``sort_index`` and ``metadata`` are updated. No second relation is created.
 
         Args:
-            link: The ItemRelationLink to persist.
+            link: The relation to store.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...
 
@@ -557,47 +667,43 @@ class TaxomeshRepositoryBase(Protocol):
         self,
         item_id: UUID,
         *,
-        relation_type: str | None = None,
+        relation_types: Collection[str] | None = None,
         direction: Literal["outgoing", "incoming", "both"] = "outgoing",
-    ) -> list[ItemRelationLink]:
-        """Return item relation links for the given item, ordered by sort_index.
+    ) -> Sequence[ItemRelationLink]:
+        """Return the relations of one item, ordered by sort index.
 
-        Results are ordered by ``(sort_index ASC, source_item_id ASC,
-        target_item_id ASC)``.  Filters are applied before sorting.
+        The order is ``(sort_index ASC, source_item_id ASC, target_item_id ASC)``. The filters
+        apply before the sort.
 
         Args:
-            item_id: The UUID of the item to query.
-            relation_type: Optional filter; if provided only links with this
-                exact (already-normalised) type are returned.
-            direction: ``"outgoing"`` returns links where ``source_item_id``
-                equals ``item_id``; ``"incoming"`` returns links where
-                ``target_item_id`` equals ``item_id``; ``"both"`` returns links
-                where ``item_id`` is *either* the source or the target (each
-                link at most once).
+            item_id: The identifier of the item.
+            relation_types: The relation types to keep, already stripped and in lowercase, as
+                :meth:`list_item_relation_links_batch` takes them. ``None`` or an empty collection
+                is no filter.
+            direction: ``"outgoing"`` returns the links whose ``source_item_id`` is ``item_id``;
+                ``"incoming"`` the links whose ``target_item_id`` is ``item_id``; ``"both"`` the
+                links whose source *or* target is ``item_id``, each link at most once.
 
         Returns:
-            List of matching ItemRelationLink objects ordered by
-            ``(sort_index ASC, source_item_id ASC, target_item_id ASC)``;
-            empty list if none match.
+            The matching relations, ordered by ``(sort_index ASC, source_item_id ASC,
+            target_item_id ASC)``; empty when none match.
         """
         ...
 
-    def list_item_relation_links_for_items(
+    def list_item_relation_links_batch(
         self,
         item_ids: Collection[UUID],
         *,
-        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
         relation_types: Collection[str] | None = None,
-    ) -> list[ItemRelationLink]:
-        """Return relation links for many items in a single query, by direction.
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
+    ) -> Sequence[ItemRelationLink]:
+        """Return the relations of many items in one query, by direction.
 
-        Eliminates the N+1 pattern that arises when calling
-        :meth:`list_item_relation_links` in a loop over many items. A single
-        query resolves every queried item regardless of *direction* — including
-        ``"both"``, which uses one combined ``source OR target`` query rather
-        than two.
+        One call replaces a loop of :meth:`list_item_relation_links` calls, one for each item: the
+        N+1 query pattern. One query reads every given item, whatever the *direction*: ``"both"``
+        also uses one ``source OR target`` query, and not two.
 
-        Direction semantics and deterministic ordering:
+        What each direction selects, and its fixed order:
 
         - ``"outgoing"``: links where ``source_item_id`` is in *item_ids*,
           ordered by ``(source_item_id, relation_type, sort_index, target_item_id)``.
@@ -607,30 +713,29 @@ class TaxomeshRepositoryBase(Protocol):
           target, ordered by ``(sort_index, source_item_id, target_item_id)``.
 
         Args:
-            item_ids: Collection of item UUIDs to query. An empty collection
-                returns ``[]`` immediately without hitting storage.
-            direction: Which side of the link the queried items are matched on.
-            relation_types: Optional allow-list of relation type strings.
-                ``None`` or ``[]`` means no filter — all types are returned.
+            item_ids: The identifiers of the items. An empty collection returns ``[]`` at once,
+                and storage is not read.
+            relation_types: The relation types to keep. ``None`` or ``[]`` is no filter: every type
+                is returned.
+            direction: The end of the link that the given items are matched on.
 
         Returns:
-            List of matching :class:`~taxomesh.domain.models.ItemRelationLink` objects
-            in deterministic order; empty list if *item_ids* is empty or no links
-            match.
+            The matching :class:`~taxomesh.domain.models.ItemRelationLink` relations, in the fixed
+            order above; empty when *item_ids* is empty or no link matches.
 
-        Example:
+        Example::
 
-            # links: song_a --(performed_by)--> artist_x
-            #        song_b --(performed_by)--> artist_x
+            # links: item_a --(related_to)--> item_b
+            #        item_c --(related_to)--> item_b
 
-            links = repo.list_item_relation_links_for_items(
-                [artist_x_id],
+            links = repo.list_item_relation_links_batch(
+                [item_b_id],
                 direction="incoming",
-                relation_types=["performed_by"],
+                relation_types=["related_to"],
             )
             # → [
-            #     ItemRelationLink(source=song_a_id, target=artist_x_id, relation_type="performed_by"),
-            #     ItemRelationLink(source=song_b_id, target=artist_x_id, relation_type="performed_by"),
+            #     ItemRelationLink(source=item_a_id, target=item_b_id, relation_type="related_to"),
+            #     ItemRelationLink(source=item_c_id, target=item_b_id, relation_type="related_to"),
             #   ]
         """
         ...
@@ -641,14 +746,17 @@ class TaxomeshRepositoryBase(Protocol):
         target_item_id: UUID,
         relation_type: str,
     ) -> bool:
-        """Delete the specific directed relation identified by the triple.
+        """Delete the one relation that these three values name.
 
         Args:
-            source_item_id: UUID of the source item.
-            target_item_id: UUID of the target item.
-            relation_type: Exact (already-normalised, lowercase) relation type string.
+            source_item_id: The identifier of the source item.
+            target_item_id: The identifier of the target item.
+            relation_type: The relation type exactly as stored: stripped and in lowercase.
 
         Returns:
             True if the relation was found and deleted; False if it did not exist.
+
+        Raises:
+            TaxomeshRepositoryError: On storage failure; nothing is written.
         """
         ...

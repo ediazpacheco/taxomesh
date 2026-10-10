@@ -1,4 +1,4 @@
-"""Tests for migration 0008_unique_external_id (spec 041).
+"""Tests for migration 0008_unique_external_id.
 
 Verifies that:
 1. ItemModel.external_id and CategoryModel.external_id are null=True, unique=True.

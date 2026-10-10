@@ -1,1210 +1,159 @@
 # Changelog
 
-All notable changes to taxomesh will be documented here.
+All notable changes to taxomesh are documented here, in the format of
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[Semantic Versioning](https://semver.org/).
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/).
+The alpha series before 0.2.0, `0.1.0a1` to `0.1.0a50`, is described on the
+[GitHub releases page](https://github.com/ediazpacheco/taxomesh/releases), one release per git tag.
+The full entries of that series are in
+[`CHANGELOG.md` at the tag `v0.1.0a50`](https://github.com/ediazpacheco/taxomesh/blob/v0.1.0a50/CHANGELOG.md).
 
----
+## [0.2.0] — Unreleased
 
-## [Unreleased]
+0.2.0 gives taxomesh a Python stdlib-style interface: every operation is a member of
+`svc.categories`, `svc.items` or `svc.tags`, or is `svc.graph()`; rows are frozen values; and the
+command line and the HTTP handlers are named after the member they call. It breaks nearly every
+`0.1.0a50` call, with no alias: an old name fails at once with `AttributeError`, which
+`mypy --strict` reports first.
+[`docs/python-api.md`](docs/python-api.md) states the new surface.
+
+### Silent changes
+
+After each call is renamed, these three changes still give no error. The ⚠ entries below name the
+other breaking changes.
+
+- `categories.get_by_slug` and `items.get_by_slug` return `None` on a miss, where
+  `get_category_by_slug` and `get_item_by_slug` raised not-found. A loop waiting for the raise never
+  ends.
+- `categories.list()` with no filter returns every category. `list_categories()` returned the top
+  level, which is `categories.roots()` now.
+- `svc.categories`, `svc.items` and `svc.tags` are attributes, not methods. A lookup such as
+  `getattr(svc, "get_category_by_slug", None)`, or a proxy that wraps only callables, finds nothing
+  and raises no error.
+
+### Changed
+
+- ⚠ **The flat service methods are gone.** Each operation is a member of the collection it acts on:
+  `svc.get_category(c)` is `svc.categories[c]`, `list_categories_by_item(i)` is
+  `categories.list(item=i)`, `reparent_category` is `categories.move`, and
+  `list_related_items_for_sources` is `items.get_many_related`, which returns a `RelatedItems` per
+  item. `get_graph()` is `svc.graph()`, and `get_debug()` is the `svc.info` property, where
+  `repository_type` and `working_path` are `repository.backend` and `.path`.
+- ⚠ **One law over the collections.** On an absent key, subscript raises
+  `Taxomesh<X>NotFoundError`, and `get(key, default=None, /)` and anything else named `get*` does
+  not. `in`, `len` and `del` complete the forms, and a collection does not iterate: `list(...)`
+  enumerates. A listing returns a tuple, a `get_many*` a new dict keyed by identifier or by stored
+  external id.
+- ⚠ **A parameter that names an entity takes a row or its `UUID`** (`CategoryRef`, `ItemRef`,
+  `TagRef`) and is a noun: `parent`, `item`, `before`, `source`. Anything else, a `str` identifier
+  included, raises `TypeError` before storage is read. Filters, `sort_index` and `metadata` are
+  keyword-only.
+- ⚠ **`items.tag(item, tag)` and `untag` take the item first**, where `assign_tag` took the tag
+  first. Passed as two `UUID`s, a call left in the old order type-checks: edit each by hand.
+- ⚠ **Rows are frozen.** Assigning to a field raises pydantic's `ValidationError`, a `ValueError`,
+  and changing `metadata` in place `TypeError`. `update` returns a new row; each field defaults to
+  `UNSET`, which leaves it, and `None` clears `external_id` and is a `TypeError` for any other.
+  `str(row)` is a plain label, `Music (slug: music, id: …)`, and `Category.is_root` is gone.
+- ⚠ **Errors are stdlib errors too:** not-found is a `KeyError`, a refused value a `ValueError`, and
+  an argument of the wrong type a `TypeError` (`enabled="yes"` used to match nothing). No
+  `pydantic.ValidationError` leaves a member. `TaxomeshRootCategoryError`, a validation error, also
+  refuses a rename to the reserved name.
+- ⚠ **A category is at the top level exactly when it has no parent:** `add_parent` removes it from
+  the top level, removing its last parent puts it back, and `roots()` and `graph().roots` agree.
+  `None`, not the identifier of the implicit root, which is not-found everywhere, stands for the top
+  level in `move` and `reorder`, and `move` returns `None`. File stores are normalised as they load,
+  and on Django `migrate` runs `0011_root_invariant`; both drop an item's placement in the implicit
+  root, so `categories.list(item=…)` never returns it.
+- ⚠ **Relations:** `unrelate` of an absent relation does nothing, and both relation listings raise
+  for an item that is not stored. `list_related` and `get_many_related` keep `enabled` items by
+  default and skip a relation to an absent item with one `WARNING` from
+  `taxomesh.application.collections.items`. `relation_type="x"` is `relation_types="x"`;
+  `skip_on_error` is gone.
+- ⚠ **Each service caches its own reads** for `cache_ttl` seconds (5 by default; `0` caches
+  nothing), `get_many` included, and a write clears only that service's entries; an expired entry
+  is dropped when its member stores the next one. A YAML or JSON file has one writer, and a
+  repository whose file another writer changed refuses to write. `@memoize(ttl)` on a function of
+  yours, and `clear_all_caches()`, are gone.
+- ⚠ **`YAMLRepository` is `YamlRepository`**, and `taxomesh.repositories` holds the three repository
+  classes.
+  `Direction` replaces `DIRECTION_OUTGOING` and `DIRECTION_INCOMING`.
+- ⚠ **The repository port**, for a custom backend: lookups are `find_*`, keyed batch reads `map_*`,
+  `assign_tag` and `remove_tag` `add_item_tag_link` and `delete_item_tag_link`,
+  `get_config_summary()` the `config_summary` property, `get_debug_info()` `describe()`, and
+  `list_item_relation_links_for_items` `list_item_relation_links_batch`. The saves return the stored
+  row and take `expected_version`, a delete removes its links, listings return `Sequence`, and
+  `list_item_parent_links` takes `item_ids`, `list_category_parent_links` `category_ids` too.
+- ⚠ **Each HTTP handler is `<namespace>_<member>`** (`get_category` is `categories_get`,
+  `list_categories` `categories_roots`, `get_graph` `graph`) and returns what its member returns, so
+  a lookup answers `None` and your application makes the 404. Arguments after the subject are
+  keyword-only, `include_disabled` is `enabled`, `AddParentRequest` and `PlaceInCategoryRequest` are
+  `AddCategoryParentRequest` and `PlaceItemRequest`, and the search schemas take `query`, not `q`.
+- ⚠ **The command line is the `cli` extra** (`pip install "taxomesh[cli]"`), and each command is its
+  member, hyphenated: `item add-to-category` is `item place-in`, `item relation add` is `item
+  relate`. `category list` lists every category, `category roots` the top level. `create` and
+  `update` take no link option; `--include-disabled` is `--state all`, `--type` a repeatable
+  `--relation-type`, both updates take `--enable/--disable`, `tag update --name` is optional, and
+  `item create` requires `--name`. `item create --external-id ""` stores `""`, where `item add`
+  stored none.
+- ⚠ **The Django admin is type-checked** against django-stubs, its mixins take Django's signatures,
+  and `GraphEntry` and `RelationEntry` import from `taxomesh.contrib.django.graph_types`. Its graph
+  skips relations to a disabled item; a category's page shows *At the top level* read-only and saves
+  parents through the service. Its debug page names each row as `svc.info` names it.
+- ⚠ **`Item.name` is required.** It may be `""`, but a stored item without the key fails to load.
+- ⚠ **The graph holds one node per category**, shared by every parent and compared by identity;
+  `walk()` enumerates it, and its roots are ordered by sort index, then identifier. The HTTP
+  serializer raises `TaxomeshGraphTooLargeError`, from `taxomesh.contrib.api.errors`, past 100,000
+  emitted nodes.
+- ⚠ **External ids are `ExternalId` everywhere** (`str | int | UUID | None`); a batch lookup drops a
+  `None` and keeps surrounding spaces and `""`, as a write does. Another type, such as `bytes` or a
+  `bool`, raises `TypeError` where it was stored as its `str()`. `get_by_external_id` replaces
+  `list_categories(external_id=…)`.
+- ⚠ **`metadata` is plain JSON:** dicts with text keys, lists or tuples, text, finite numbers,
+  booleans and `None`; a tuple is taken as a list, and an enum member as its value. A `datetime`,
+  `UUID`, `Decimal` or `NaN` in it, which the file stores wrote as text, and a value that contains
+  itself raise `TaxomeshValidationError`.
+
+### Added
+
+- **Tags read back:** `tags.list(item=…)`, `items.list(tag=…)`, and the port's `list_item_tag_links`
+  and `map_tags_by_id`.
+- **Optimistic concurrency:** `update(…, expected_version=…)` raises `TaxomeshVersionConflictError`,
+  which the HTTP edge answers with 409, and a version below 0 `TaxomeshValidationError`.
+- **A graph limited to one category and its descendants,** `svc.graph(root=…)`, and
+  `include_items=False`, which reads no item rows; a graph has `len`, subscript, `get`, `in` and
+  `node.parents`, and a node's `ancestors()` and `descendants()` reach every level up or down.
+- **`items.list(category=…, recursive=True)`**, `tags.update(metadata=…)`, `search(enabled=None)`.
+- **One value where a lookup takes several:** `get_many(row)`, `get_many_by_external_id("ab")`,
+  `get_many_related(item)` and `relation_types="covers"`.
+- **Commands:** `category roots`, `add-parent` and `remove-parent`; `item remove-from` and `untag`;
+  and `--state` on `item list-related`.
+- **`taxomesh` exports the whole surface**, the service, collections, graph and nodes have
+  readable reprs, and [`llms.txt`](llms.txt) states the surface on one page.
 
 ### Fixed
 
-#### Repeated category reads stopped paying for rows already in memory (061)
-
-Release 060 replaced per-row resolution with batch reads in three methods. The per-row
-calls it replaced went through the memoized accessors `get_category` / `get_item`; the
-batch reads go straight to the repository and bypass that layer. That cost two things:
-
-1. Resolving a row as a **result** stopped priming the entry a later call needs when that
-   same row is passed as an **argument**. A tree walk feels this directly, because each
-   child becomes the next call's `parent_id` and `list_categories` validates its parent
-   through `get_category` — every one of those validations was free before 060.
-2. **The batch ignored the cache even when every row it needed was already in it.**
-
-`list_categories(parent_id=…)` and `list_categories_by_item(item_id)` now do both:
-they resolve rows through `get_category`'s cache and fetch only the misses, in one batch,
-then prime exactly the rows they fetched.
-
-Both were needed. Priming alone was measured and rejected — it still cost *more* than
-`0.1.0a49` on two access patterns. Reads per pattern, counted on fixed fixtures with each
-release behind its own repository:
-
-| pattern | `0.1.0a49` | `0.1.0a50` | priming only | **this release** |
-|---|---:|---:|---:|---:|
-| walk, 12 nodes, depth 2 | 26 | 30 | 18 | **18** |
-| walk, 84 nodes, depth 3 | 170 | 191 | 107 | **107** |
-| walk, 75 nodes, consumer-shaped | 150 | 177 | 103 | **103** |
-| walk over a multi-parent tree | 12 | 16 | 11 | **9** |
-| fetch children by id, then list them | 7 | 8 | 8 | **7** |
-| `list_categories_by_item` × 40 over 5 categories | 85 | 120 | 120 | **84** |
-| a single cold call to each batched method | 22 / 7 / 8 | 3 / 3 / 3 | 3 / 3 / 3 | **3 / 3 / 3** |
-
-No category access pattern measured costs more than it did on `0.1.0a49`, and the batch
-saving 060 delivered is kept in full. The walk costs 103 rather than 0 because the walk's
-own root is nobody's child, so nothing primes it: its single validation is a genuine read.
-
-Every figure above is reproduced by `tests/service/test_memoize_priming.py` as an exact
-constant on all four backends — in-memory, JSON, YAML and Django. The corresponding
-measurement on the one production consumer's own database (`0.1.0a49` 150, `0.1.0a50` 177,
-this release 103) is external provenance and is not reproducible here, since that database
-is not committed.
-
-A primed entry is indistinguishable from one the accessor wrote itself: same key, same
-5-second TTL, cleared by the same `clear_all_caches()` on every write. Rows are primed
-before the `enabled` filter is applied, so a filtered-out row is still cached with its true
-value. Only rows actually fetched are primed — a row served from the cache keeps its
-original timestamp, so repeated access cannot extend an entry's lifetime. **A single cold
-call still costs exactly 3 reads**, so release 060's exact-constant gates pass unmodified.
-
-**`list_items(category_id=…)` deliberately does neither.** It has the identical bypass, but
-the cache has no eviction and items are large: priming `get_item` measured **+2.37 MB** per
-listing on a 2,000-item fixture (~3.3 KB of metadata per row) — measured by
-`specs/061-memoize-priming/measurements/memory.py`, not reproduced by the suite. Against
-that, **0.17 MB** for all 93 categories, and **108 MB per worker** on the item corpus: both
-the one production consumer's own figures on its own corpus, on a host already swapping,
-behind a public unauthenticated endpoint — relayed here rather than reproduced. Nothing on
-the item path regressed in 060's measurements, so there is no win to weigh against that.
-
-The price is stated rather than hidden. Three patterns cost slightly more than `0.1.0a49`
-— **at most one extra read per `list_items(category_id=…)` call in the pattern**:
-
-| pattern | `0.1.0a49` | this release |
-|---|---:|---:|
-| `list_items`, then `list_categories_by_item` per item (20) | 45 | 46 |
-| `list_items`, then `get_item` per item (20) | 22 | 23 |
-| 10 small `list_items` calls sharing 3 items | 23 | 30 |
-
-Every other item pattern is cheaper than `0.1.0a49` by 060's batch saving itself. A test
-asserts the item path stays unprimed — observed through `get_item.cached()` — so adding it
-later as an "obvious symmetry" fails the build. Revisit only behind an eviction policy.
-Note that not priming items avoids only the *increment*: `list_items` is itself memoized,
-so its result list is retained until the next write regardless.
-
-See `specs/061-memoize-priming`.
-
-### Changed
-
-#### ⚠ `memoize` returns a typed object instead of a plain function
-
-`taxomesh.utils.memoize.memoize(ttl)` now returns a `MemoizedFunction`; accessing one on an
-instance yields a `MemoizedMethod`. **The decorator's name and call syntax are unchanged**,
-so `@memoize(ttl)` needs no edit at any call site, and calling a decorated function behaves
-exactly as before — including for zero-argument and keyword-only functions.
-
-What changes is that the decorated callable now carries typed operations:
-
-- `prime(value, /, *args, **kwargs)` — insert a value as the cached result of a call.
-- `cached(*args, **kwargs) -> R | Miss` — return the fresh cached value, or the `Miss`
-  sentinel. Strictly read-only: it never writes, refreshes or evicts an entry. `Miss` rather
-  than `None` so a genuinely cached `None` stays distinguishable from a miss.
-- `clear_cache()` — unchanged.
-
-Both are checked against the decorated callable's own parameters and return type, so
-priming the wrong type or keying on the wrong arguments is a type error rather than a
-silent extra read. A decorated callable keeps its own `__name__`, `__qualname__`,
-`__module__`, `__doc__`, `__wrapped__` and signature, so `help()` and `inspect.signature`
-behave as they did under `functools.wraps`.
-
-**Migration:** none for `@memoize(ttl)` itself. The only breaking change is the removal
-below, of a symbol that never appeared in a release.
-
-### Removed
-
-- `taxomesh.utils.memoize.prime(func, value, /, *args, **kwargs)`, the module-level helper.
-  Priming is a method now. The helper reached the cache through `getattr` plus a `cast`,
-  which defeated the argument checking it existed to provide. **It was never released** —
-  it existed only between unreleased commits on the `061` branch — so no published version
-  exposed it and no consumer can depend on it. Priming a callable that is not memoized is
-  now a static type error rather than a silent no-op.
-
-### Added
-
-- A repeated-access regression gate (`tests/service/test_memoize_priming.py`). Release
-  060's gates measure a single cold call per method, which structurally cannot see a cost
-  that only appears when a small result set is read many times — the shape of this
-  regression. The new gate asserts exact constants, each next to its `0.1.0a49` value, on
-  all four backends.
-- A type-level gate (`tests/utils/test_memoize_typing.py`). Runs `mypy --strict` over a
-  fixture of deliberate misuses and asserts each one is reported, plus a counterpart
-  asserting correct use type-checks clean — static guarantees are exactly what a runtime
-  test cannot check.
-- `CountingRepository` and the `counting_service` fixture in `tests/service/conftest.py` —
-  a generic delegating read counter that wraps any backend, so one exact constant is
-  asserted on all four rather than on the in-memory one alone.
-
----
-
-## [0.1.0a50] — 2026-09-10
-
-### Fixed
-
-#### N+1 removed from the three placement read paths (finding F1)
-
-`list_items(category_id=…)`, `list_categories(parent_id=…)` and
-`list_categories_by_item(item_id)` resolved one stored row per result row. On the
-Django adapter, listing a category holding 5,218 placements cost **5,220 queries
-and 705 ms** — while the *unfiltered* `list_items()` over a larger result set cost
-one query and was 2.7× faster. All three now cost a constant **3 queries** (2 when
-the result is empty), whatever the row count.
-
-`list_categories(parent_id=…)` carried a second, independent defect: it read
-**every** category-parent link in the store and filtered by parent in memory. It
-now pushes the filter into storage, so an unrelated branch growing elsewhere in
-the tree no longer costs anything. The `external_id` branch of the same method
-ran its own copy of that scan and is fixed with it.
-
-Behaviour is unchanged: ordering (including tie-breaks), the `enabled` filter,
-empty results, and every raised exception type and message are identical. A
-placement link whose endpoint row is missing still raises, exactly as before —
-this release does not introduce cascade or skip semantics.
-
-Regression gates were the point of the work: query counts are asserted as exact
-constants across two corpus sizes, and a spy asserts the call shape at the
-repository boundary. Reverting any of the three methods to per-row resolution
-fails CI, as does deleting the stable `sort_index` re-sort the ordering depends
-on.
-
-**One access pattern costs more, measured downstream after this text was first
-written.** The batch resolve is a repository call and sits outside the service
-memoize layer, while `get_category` and `list_categories` are both memoized. A
-caller that walks a tree node by node with a warm `get_category` cache therefore
-paid one query per non-empty `list_categories(parent_id=…)` call before this
-release and pays two now: the old per-row resolutions were cache hits, the new
-single batch query never is. On a 93-category tree the observed cost was 195 →
-222 queries across 27 non-empty calls. Wall time still *improved* on that same
-path (1460 → 1191 ms), because the unfiltered link scan this release removes was
-the heavier query — so this is a query-count regression, not a latency one. A
-batched read that resolves a whole tree level — or a subtree — in a constant
-number of queries is under consideration as a follow-up; the exact shape is not
-settled.
-
-#### `py.typed` was never shipped, so consumers got no types
-
-The package declared the `Typing :: Typed` classifier and the README advertised
-`py.typed`, but no marker file existed. Under PEP 561 a type checker running in a
-consuming project ignores every annotation in a package without that marker, so
-taxomesh's inline types — and `mypy --strict` compliance — had no effect downstream. The
-marker is now present and covered by three tests (`tests/test_packaging.py`): it exists
-in the package, the classifier and the file agree, and it survives into the built wheel.
-The CI wheel job additionally asserts it is present after installation into a clean
-consumer environment.
-
-No API change. Consumers running a type checker may see new errors that were previously
-suppressed, because taxomesh's types are now visible for the first time.
-
-### Added
-
-#### `get_categories_by_ids` and a parent filter on `list_category_parent_links`
-
-Two additions to `TaxomeshRepositoryBase`, implemented in `JsonRepository`,
-`YAMLRepository` and `DjangoRepository`:
-
-- `get_categories_by_ids(category_ids, *, enabled=None) -> dict[UUID, Category]`
-  — mirrors the existing `get_items_by_ids`: pre-normalised input, missing ids
-  silently absent, `TaxomeshRepositoryError` on storage failure.
-- `list_category_parent_links(*, parent_category_ids=None)` — an EMPTY collection
-  means "match nothing", not "no filter", matching the rule already documented
-  for `category_ids` on `list_item_parent_links`.
-
-**Breaking for custom repository implementations.** `TaxomeshRepositoryBase` is a
-`typing.Protocol`, so conformance is structural: if you pass your own repository
-to `TaxomeshService`, it must now implement `get_categories_by_ids` and accept the
-new keyword on `list_category_parent_links` or `mypy --strict` will reject it in
-your project. Runtime is unaffected — Protocols are not enforced at runtime — so
-this surfaces at type-check time, not as a crash. Nothing in taxomesh's own public
-facade changed.
-
-Neither batch primitive splits an oversized id collection: the store's own
-per-query limit is the library's limit, and exceeding it surfaces as
-`TaxomeshRepositoryError`. Modern SQLite allows roughly 32k parameters and the
-project floor is Python 3.13, so this is well clear of realistic corpus sizes.
-
-#### `list_category_parent_links` now wraps database errors on the Django adapter
-
-A side effect of adding the filter, recorded because it is observable: the
-Django implementation previously issued its query in a bare list comprehension
-with no error handling, so a `django.db.DatabaseError` escaped the port raw.
-It now surfaces as `TaxomeshRepositoryError` like every other repository
-method, on both the filtered and unfiltered paths. Callers catching
-`DatabaseError` around this method directly should catch `TaxomeshRepositoryError`
-instead; anyone already catching `TaxomeshError` is unaffected. `TaxomeshService`
-never depended on the old behaviour.
-
-- `CONTRIBUTING.md` — development setup, the four quality gates, the spec-first
-  workflow, and how the documented examples are tested.
-- `tests/docs/test_doc_examples.py` — extracts the runnable Python blocks from
-  `README.md` and the `docs/` pages, runs each as a script in an isolated working
-  directory, and smoke-tests the documented CLI commands. Illustrative fragments are
-  tagged `python notest`. Stale examples now fail the test suite instead of rotting
-  silently.
-- Single-query guard tests asserting that `get_items_by_external_ids` and
-  `get_categories_by_external_ids` each resolve a full batch in exactly one SQL query
-  on the Django backend.
-
-### Changed
-
-#### **Breaking — HTTP 500 bodies no longer contain the backend's error message**
-
-`errors.to_tuple` returned `{"detail": str(exc)}` for every status, including its two
-500 branches. `DjangoRepository` raises `TaxomeshRepositoryError(str(exc))` in 14 places,
-passing the backend message through verbatim, so ORM constraint, table and column names —
-and, on the JSON and YAML backends, the absolute path of the data file — were returned to
-the HTTP client of any application built on `taxomesh.contrib.api`.
-
-Both 500 branches now return a fixed `GENERIC_SERVER_ERROR_DETAIL`
-(`"An internal error occurred."`), exported from `taxomesh.contrib.api.errors` so callers
-can compare against it rather than duplicate the literal. `TaxomeshConfigError` and
-`TaxomeshRootCategoryError` reach the same fallback branch and are redacted with it.
-
-The detail is relocated, not discarded: every 500 emits exactly one `ERROR` record on the
-`taxomesh` logger carrying the original exception and its traceback. An application that
-configures no logging stays silent, as before.
-
-Client errors are deliberately untouched. 404, 409, and 422 bodies still carry the
-exception's own message byte-for-byte — those messages are authored inside taxomesh from
-the caller's own input and are the reason a client can correct its request. A test asserts
-this per branch, so a future change cannot over-redact them.
-
-**Migration:** a client that displayed, logged, or parsed the 500 `detail` now sees a
-fixed string. Branch on the status code instead. See `specs/059-safe-error-bodies`.
-
-### Documentation
-
-- **README "Stability and versioning" rewritten.** The section previously opened with
-  "As of **1.0.0**" while the package was published as `0.1.0a49`, which read as though
-  1.0.0 already existed. It now states that the package is pre-1.0, that the API
-  guarantees take effect at 1.0.0 and do not apply to the current alpha releases, and
-  which properties do hold today.
-- **`Development Status` classifier: `2 - Pre-Alpha` → `3 - Alpha`.** Pre-Alpha
-  indicates that no usable release exists; 43 releases have been published. `3 - Alpha`
-  matches the `a` in the `0.1.0aN` version scheme and continues to signal that
-  breaking changes occur between releases.
-- README "Contributing" now points at `CONTRIBUTING.md` rather than at the `specs/`
-  directory.
-- `docs/http-api-integration.md` documents the generic 500 body and how to attach a
-  handler to retrieve the detail. Its error-mapping table also gained the
-  `TaxomeshExternalIdConflictError` → 409 row, which was missing since `0.1.0a47`
-  introduced that mapping.
-- Repaired every primary documented example so it runs in a clean environment: stale
-  `enabled_only` → `enabled` in the Python and HTTP API references, corrected CLI option
-  syntax in the README, unified the Django bridge delete-helper name to
-  `delete_item_for_external_id`, and fixed the quick-start output comment.
-
----
-
-## [0.1.0a49] — 2026-07-17
-
-### Added
-
-#### `atomic()` repository boundary for multi-write service operations
-
-`TaxomeshRepositoryBase` gains `atomic() -> AbstractContextManager[None]`. The five
-`TaxomeshService` operations that perform more than one write — `create_category`,
-`reorder_subcategories`, `reorder_items_in_category`, `reparent_category`, and
-`reparent_item` — now run their write sequence inside it, so those writes commit or roll
-back as a unit.
-
-- The guarantee is **two-tier and backend-dependent**. `DjangoRepository` implements
-  `atomic()` with `transaction.atomic(using=...)`, giving real rollback; inner
-  per-method blocks nest as savepoints. `JsonRepository`, `YAMLRepository`, and the
-  in-memory test repository return `nullcontext()` — a documented best-effort no-op with
-  no rollback.
-- Only the write sequence is wrapped. Pre-write validation and object construction stay
-  outside the boundary, so `pydantic.ValidationError`, builtin `ValueError`, and
-  `TaxomeshError` subclasses propagate unchanged. A raw error escaping the boundary is
-  re-raised as `TaxomeshRepositoryError`, chained to its cause.
-- `taxomesh.__version__` is now resolved via `importlib.metadata` rather than being
-  hard-coded.
-
-See `specs/058-atomic-operations`. The cross-model bridge case — atomicity spanning a
-taxomesh write and a write to the consuming application's own models — remains the
-consumer's responsibility by design.
-
----
-
-## [0.1.0a48] — 2026-07-16
-
-Narrows the declared runtime support matrix to the combinations CI actually exercises.
-The classifiers previously claimed 3.11–3.13 while CI tested only 3.11/3.12, and the sole
-production consumer runs Python 3.14 with Django 6.0 — a combination that was never
-tested.
-
-### Changed
-
-**Breaking — the supported Python floor is now 3.13.** `requires-python` moves from
-`>=3.11` to `>=3.13`; Python 3.11 and 3.12 are dropped. `ruff` `target-version` and
-`mypy` `python_version` move to 3.13 alongside it. Installing on 3.11 or 3.12 now fails
-at resolution time rather than at runtime.
-
-**Breaking — the `django` extra now requires Django ≥ 6.0** (was ≥ 4.2), matching the
-only version under test.
-
-- Internals moved to PEP 695 syntax (`type` aliases, class and function type parameters),
-  as required by the `py313` ruff target. No public API change.
-- CI: static checks on 3.13; a test matrix of Python 3.13 and 3.14 against Django 6.0;
-  and a wheel job that installs the built artifact — including the `[django]` extra —
-  into a clean virtual environment and smoke-tests the import, a service operation, and
-  the CLI.
-
----
-
-## [0.1.0a47] — 2026-07-16
-
-Aligns the public request contract in `taxomesh.contrib.api` with the external-identifier
-semantics established at the domain and service layers (specs 041, 043), enforcing one rule at
-the HTTP boundary: **an omitted field carries no instruction; a present field means "assign this
-value" and is rejected if the value is invalid for that field.** See `specs/057-api-request-omission`.
-
-This release also ships two fixes previously merged to `main` but never released
-(commits `e93ef5d`, `e049b68`): item creation without an external identifier, and preservation of
-omitted fields on partial update.
-
-### Changed
-
-**Breaking — an explicit `null` on a non-nullable partial-update field is now rejected.**
-The partial-update request schemas (`UpdateItemRequest`, `UpdateCategoryRequest`, `UpdateTagRequest`)
-no longer express "this field may be omitted" by widening the field type to `X | None`. Each field
-now carries its true type and an inert default. As a result, a non-nullable field (`name`, `slug`,
-`description`, `enabled`, `metadata`) rejects an explicit `null` at request validation instead of
-accepting it and silently discarding it. A caller that relied on `null`-as-no-op must omit the field
-instead — which is what it meant all along. `external_id` remains genuinely nullable: an explicit
-`null` clears the stored external identifier. Omitting any field is unchanged: it leaves the stored
-value untouched.
-
-**Breaking — an external-identifier uniqueness conflict now returns 409 instead of 422.**
-`errors.to_tuple` now maps `TaxomeshExternalIdConflictError` to HTTP 409 (Conflict), identically to
-the structurally equivalent `TaxomeshDuplicateSlugError`. It previously fell through to the generic
-422 (Unprocessable Entity) because the error type postdated the error mapping. A caller branching on
-422 for this case must branch on 409, alongside the slug conflict it already handles there.
-
-### Added
-
-- **`UpdateCategoryRequest` now exposes `external_id` and `enabled`.** The service layer already
-  supported both with full omitted/set/clear semantics; the public request schema now reaches them,
-  so categories can have their external identifier set, changed, or cleared, and their enabled state
-  toggled, through the public partial-update handler.
-- **Four-backend PATCH parity coverage** (`tests/service/test_api_patch_parity.py`) and a
-  schema/service **drift guard** (`tests/contrib/test_api_schema_service_parity.py`) and an
-  error-mapping **completeness guard** (`tests/contrib/test_api_errors.py`) so a future error type
-  cannot silently inherit a generic status.
-
-### Lineage
-
-Supersedes the `028-contrib-api` public contract in three scoped respects only — item-creation
-external-identifier defaulting, partial-update null handling, and the mapped status for
-external-identifier conflicts. The historical spec directories for 028, 041, and 043 are unchanged;
-the supersession is recorded in this feature's own artifacts, following 041's precedent.
-
----
-
-## [0.1.0a46] — 2026-06-27
-
-### Added
-
-#### `direction` parameter for the batched related-items traversal
-
-`TaxomeshService.list_related_items_for_sources` accepts a new
-`direction="outgoing" | "incoming" | "both"` parameter (default `"outgoing"`),
-generalizing the previously outgoing-only batched traversal. This closes the
-N+1 gap on the incoming side: code needing the incoming relations of many items
-no longer has to loop the single-item `list_related_items` /
-`list_item_relations` with `direction="incoming"`.
-
-- **Every** direction resolves in exactly **two repository calls** — one batched
-  link query plus one bulk item lookup. `"both"` uses a single combined
-  `source OR target` query rather than two, so it is two calls, not three. The
-  call count is constant — it does not grow with the number of input ids.
-- The result keeps the same grouped shape `{queried_item_id: {relation_type:
-  [Item, ...]}}`. For `"incoming"` the related items are the source-side items;
-  for `"both"` each group lists outgoing-derived items first, then
-  incoming-derived items.
-- `direction` is part of the read-cache key, so each direction is an independent
-  cache entry; writes and `clear_all_caches()` invalidate as before.
-- Backward compatible at the service layer: the default `"outgoing"` is
-  byte-for-byte identical to the previous behavior.
-
-#### Unified `list_item_relation_links_for_items` repository query
-
-The two prior batched link queries were replaced by a single direction-aware
-repository method
-`list_item_relation_links_for_items(item_ids, *, direction="outgoing" | "incoming" | "both", relation_types=None)`
-on the `TaxomeshRepositoryBase` protocol and all adapters (`JsonRepository`,
-`YAMLRepository`, `DjangoRepository`, and the in-memory test repository). This
-matches the direction-parameter shape of the single-item `list_item_relation_links`.
-
-**Breaking (repository protocol):** `list_item_relation_links_for_sources`
-(added in `0.1.0a44`) is removed; call
-`list_item_relation_links_for_items(ids)` (default `direction="outgoing"`)
-instead. `"both"` issues one `Q(source__in) | Q(target__in)` query on the Django
-backend.
-
-#### Django index for the incoming batched query
-
-Added composite index `taxomesh_rl_tgt_type_sort_idx` on
-`(target_item_id, relation_type, sort_index, source_item_id)` (migration `0010`),
-the mirror of the existing `taxomesh_rl_src_type_sort_idx`. It lets the incoming
-batched query replace a filesort with an index scan, matching the outgoing
-path's performance.
-
----
-
-## [0.1.0a45] — 2026-06-15
-
-### Added
-
-#### `direction="both"` for item relation queries
-
-`TaxomeshService.list_item_relations` and `list_related_items` accept a new
-`direction="both"` value (alongside the existing `"outgoing"` default and
-`"incoming"`). `"both"` returns every link that touches the item on **either**
-end — the union of outgoing and incoming — so an item that is the *source* of
-some relations and the *target* of others can be queried in a single call.
-
-This fixes a class of bug where an item only ever appears as a relation
-*target* (e.g. a credit stored as `work → author`): an `"outgoing"`-only query
-returns nothing for that item and it looks unrelated/orphaned. `"both"` (or
-`"incoming"`) surfaces those incoming links.
-
-- Backward compatible: the default remains `"outgoing"`; existing callers are
-  unaffected.
-- Each link is returned at most once. A bidirectional relation stored as two
-  rows (`A→B` and `B→A`) yields two distinct links under `"both"` (one per
-  direction) because they are genuinely separate directed edges — no dedup.
-- For repository backends the filter is applied in storage (Django uses a
-  DB-side `Q(source) | Q(target)` OR); the in-memory/JSON/YAML backends filter
-  in one pass.
-- Available on every backend (`JsonRepository`, `YAMLRepository`,
-  `DjangoRepository`, in-memory) and via the CLI `--direction both`.
-
-**Relation type values are opaque to taxomesh.** taxomesh never interprets,
-validates, or hardcodes relation-type strings (`covers`, `version_of`,
-`worked_with`, …); the only normalisation is case-folding. The vocabulary is
-defined entirely by the consuming application — `direction` operates purely on
-the source/target structure, independently of the type.
-
----
-
-## [0.1.0a44] — 2026-06-11
-
-### Performance
-
-#### `list_related_items_for_sources` joins the read cache (055)
-
-The batched related-items lookup was the only `TaxomeshService` read method
-without `@memoize(DEFAULT_CACHE_TTL)` caching, creating a perverse trade-off:
-the per-relation-type `list_related_items` loop was N+1 cold but free warm,
-while the batched call was 2 repository queries cold **and** on every
-subsequent call. The batched call is now at most 2 repository queries cold
-and **0 warm** — consumers can migrate per-type loops (2–5 queries per detail
-page) to one batched call with no warm-cache penalty.
-
-- Cache keys are normalised: `source_item_ids` ordering/duplicates and
-  `relation_types` ordering/duplicates/casing/whitespace do not fragment the
-  cache; `relation_types=None` and `[]` ("no filter") share one entry
-- `skip_on_error` is part of the cache key — it changes dangling-link
-  behaviour, so `True`/`False` results are never shared
-- Raised `TaxomeshItemNotFoundError` (with `skip_on_error=False`) is never
-  cached; the next call re-queries
-- Invalidated by `clear_all_caches()` and every write operation, like all
-  sibling read methods
-
-#### Bulk cold-path target resolution in `list_related_items` (055)
-
-On a cold cache, `list_related_items` resolved each related item with one
-`get_item` query per relation link. It now issues a single
-`get_items_by_ids` bulk query.
-
-**No observable behavior change** in either method: identical signatures,
-results, ordering, enabled-state semantics (`get_items_by_ids(..., enabled=None)`
-mirrors `get_item`'s any-state contract), exceptions, and error messages.
-
-## [0.1.0a43] — 2026-06-05
-
-### Documentation
-
-#### README / PyPI page rework — capability synthesis
-
-The project front page (README, rendered on PyPI) was restructured to follow
-established library conventions, with no behavior changes:
-
-- New **Highlights** list and **Capabilities** tour covering the full public API
-  surface — including bulk external-ID lookups, reorder/reparent operations,
-  incoming relation traversal, and the HTTP API building blocks, which were
-  previously undocumented on the front page
-- Verified, signature-accurate micro-examples for every capability
-- New **Architecture** diagram and **Stability and versioning** section
-- Deep implementation detail (search cache internals, admin sort-mode
-  registration, logging warning catalog) moved off the front page to the
-  linked docs
-
-### Fixed
-
-- `taxomesh.__version__` was stale (`0.1.0a40`) and out of sync with the
-  package version since 0.1.0a41; now synced (`0.1.0a43`)
-
-## [0.1.0a42] — 2026-06-05
-
-### Performance
-
-#### Repository-level filtered lookups — full-table scans eliminated (054)
-
-Four `TaxomeshService` read paths previously loaded an **entire** repository
-collection (all items, or all item→category placement links) and filtered it
-in Python. On consumer-scale datasets (~7,300 items / ~14,000 links) this
-dominated cold detail-page render time. All four now issue filtered
-repository queries — repository work scales with the number of matched
-records, not table size:
-
-| Read path | Before | After |
-|---|---|---|
-| `list_related_items_for_sources` | full `list_items()` map | bulk fetch of only the items referenced by matched relation links |
-| `list_categories_by_item` | full link scan | `list_item_parent_links(item_id=…)` |
-| `search_items(…, recursive=True)` candidates | full item map + full link scan | `list_item_parent_links(category_ids=…)` + bulk item fetch |
-| `list_items(category_id=…)` | full link scan | `list_item_parent_links(category_ids=[…])` |
-
-In `DjangoRepository` the filters are pushed into the database query
-(`item_id=` / `category_id__in=` / `item_id__in=`); the file-backed adapters
-filter in memory before sorting.
-
-**No observable behavior change**: identical results, ordering, exceptions,
-`skip_on_error` / dangling-link semantics, and enabled-state filtering at
-every call site, verified by parity tests across all four backends.
-
-### Added
-
-#### New repository port methods (custom-backend authors)
-
-`TaxomeshRepositoryBase` (structural Protocol) gained:
-
-```python
-def get_items_by_ids(
-    self, item_ids: Collection[UUID], *, enabled: bool | None = None
-) -> dict[UUID, Item]:
-    """Bulk fetch by internal ID — the internal-ID twin of 052's
-    get_items_by_external_ids. Missing IDs silently absent."""
-
-def list_item_parent_links(
-    self, *, item_id: UUID | None = None, category_ids: Collection[UUID] | None = None
-) -> list[ItemParentLink]:
-    """Existing method, now with optional keyword filters. None = unfiltered
-    (backward compatible); empty category_ids collection returns [] (NOT a
-    full listing); both filters apply AND semantics. Ordering contract
-    (category_id ASC, sort_index ASC, item_id ASC) unchanged."""
-```
-
-Custom repositories must implement `get_items_by_ids` and accept the new
-keyword-only filter parameters on `list_item_parent_links`; `mypy --strict`
-flags non-compliant repositories at the `TaxomeshService(...)` construction
-site.
-
----
-
-## [0.1.0a41] — 2026-03-29
-
-### Added
-
-#### Pluggable graph sort modes (`taxomesh.contrib.django`)
-
-The Django admin graph view now supports a configurable sort order via a
-`<select>` toolbar. taxomesh ships two built-in sort modes and consumers can
-register any number of additional modes by subclassing their admin class.
-
-**Built-in modes**
-
-| Key | Label | Behaviour |
-|---|---|---|
-| `sort_index_asc` | Sort index ↑ | Ascending by `sort_index` (default — no behaviour change) |
-| `sort_index_desc` | Sort index ↓ | Descending by `sort_index` |
-
-**Consumer extension**
-
-```python
-# myproject/admin.py
-from taxomesh.contrib.django.admin import TaxomeshCategoryAdmin
-from taxomesh.contrib.django.graph_sort import DEFAULT_SORT_MODES, SortMode
-from taxomesh.contrib.django.graph_types import GraphEntry
-
-def sort_by_relevance(entries: list[GraphEntry]) -> list[GraphEntry]:
-    scores = fetch_my_relevance_scores([e["uuid"] for e in entries])
-    return sorted(entries, key=lambda e: scores.get(e["uuid"], 0), reverse=True)
-
-class MyCategoryAdmin(TaxomeshCategoryAdmin):
-    sort_modes: list[SortMode] = [
-        *DEFAULT_SORT_MODES,
-        ("content_relevance", "Content relevance", sort_by_relevance),
-    ]
-```
-
-The custom mode appears in the sort selector on the graph page. taxomesh
-calls the callable with `list[GraphEntry]` — the entries already built for
-that view level — and expects the sorted list in return.
-
-**Type exports** (`taxomesh.contrib.django.graph_sort`)
-
-```python
-SortModeFn: TypeAlias = Callable[[list[GraphEntry]], list[GraphEntry]]
-SortMode:   TypeAlias = tuple[str, str, SortModeFn]   # (key, label, callable)
-DEFAULT_SORT_MODE:  Final[str]        = "sort_index_asc"
-DEFAULT_SORT_MODES: Final[list[SortMode]]
-```
-
-**`GraphEntry` and `RelationEntry`** are now also importable directly from
-`taxomesh.contrib.django.graph_types` (in addition to the existing
-`taxomesh.contrib.django.admin` re-export).
-
-**No migration required. No behaviour change for existing consumers.**
-
----
-
-## [0.1.0a40] — 2026-03-24
-
-### Added
-
-#### `get_items_by_external_ids()` and `get_categories_by_external_ids()` — bulk external ID lookup
-
-`TaxomeshService` now exposes two bulk resolution methods:
-
-```python
-service.get_items_by_external_ids(
-    external_ids: Iterable[str],
-    *,
-    enabled: bool | None = None,
-) -> dict[str, Item]
-
-service.get_categories_by_external_ids(
-    external_ids: Iterable[str],
-    *,
-    enabled: bool | None = None,
-) -> dict[str, Category]
-```
-
-Both methods resolve multiple domain objects by `external_id` in a **single bulk
-operation**, replacing the N+1 pattern that resulted from looping over
-`get_item_by_external_id` / `get_category_by_external_id`.
-
-**Input handling**:
-- Each value is normalised with `str(value).strip()`.
-- Blank / whitespace-only values are silently ignored.
-- Duplicate IDs are deduplicated before the query.
-- Missing IDs are silently omitted from the result — no exception is raised.
-
-**`enabled` filter** (`bool | None`, default `None`):
-- `True` — return only enabled items/categories.
-- `False` — return only disabled items/categories.
-- `None` (default) — return all matching regardless of enabled state.
-
-A disabled item/category whose ID is supplied is included when `enabled=None`,
-and excluded (silently omitted, not an error) when `enabled=True`.
-
-**`get_categories_by_external_ids` note**: the root category is always excluded from
-results, consistent with `get_category_by_external_id`.
-
-**Adapter support**: all three repository backends implement the bulk query natively —
-`JsonRepository` and `YAMLRepository` scan their in-memory store once per call;
-`DjangoRepository` issues a single `WHERE external_id IN (...)` SQL query.
-
-**Caching**: both methods are TTL-cached via the same `@memoize` mechanism used by
-all other service read methods.
-
----
-
-## [0.1.0a39] — 2026-03-23
-
-### Added
-
-#### Public-library logging best practices
-
-- `taxomesh` root logger now registers a `NullHandler` at import time, following
-  Python public-library conventions and preventing "No handlers could be found"
-  warnings in applications that do not configure logging.
-- Dangling-link warning in `list_related_items_for_sources()` now includes the
-  method name, `str(source_item_id)`, and an "orphaned" label for easier
-  debugging.
-- Warning log in `list_related_items_for_sources()` is guarded with
-  `isEnabledFor(WARNING)` to avoid unnecessary string interpolation when the
-  `WARNING` level is suppressed.
-- `_resolve_linked_url` calls in the Django admin module upgraded from `DEBUG`
-  to `WARNING` level so misconfigured URL lookups surface in standard production
-  log configurations.
-
----
-
-## [0.1.0a38] — 2026-03-23
-
-### Added
-
-#### `list_related_items_for_sources()` — `skip_on_error` parameter
-
-`TaxomeshService.list_related_items_for_sources()` now accepts a keyword-only
-`skip_on_error: bool = True` parameter.
-
-When `True` (default), dangling links — where a `target_item_id` no longer exists
-in the repository — are **skipped** instead of raising an exception. Each skipped
-link emits a `WARNING`-level log message via the `taxomesh.application.service`
-logger, including `source_item_id`, `target_item_id`, and `relation_type` to aid
-database-level debugging.
-
-When `False`, the original `TaxomeshItemNotFoundError` is raised immediately
-(existing strict behaviour, preserved for callers that rely on it).
-
-The change is fully backwards-compatible: existing call sites require no modification.
-
----
-
-## [0.1.0a34] — 2026-03-21
-
-### ⚠ BREAKING CHANGES
-
-#### Repository-level `enabled` filtering — default behaviour changed
-
-All listing and search methods now return only **enabled** records by default.
-Previously, disabled records were included silently and callers were responsible
-for filtering. The `enabled_only` parameter name on search methods has been
-removed and replaced by `enabled`.
-
-##### Migration
-
-| Before | After |
-|--------|-------|
-| `svc.list_categories()` — returned all categories | `svc.list_categories()` — returns only enabled; pass `enabled=None` for all |
-| `svc.list_items()` — returned all items | `svc.list_items()` — returns only enabled; pass `enabled=None` for all |
-| `svc.list_categories_by_item(id)` — included disabled categories | `svc.list_categories_by_item(id)` — returns only enabled; pass `enabled=None` for all |
-| `svc.get_graph()` — included disabled nodes | `svc.get_graph()` — excludes disabled; pass `enabled=None` for all |
-| `svc.search_items("q", enabled_only=True)` | `svc.search_items("q", enabled=True)` |
-| `svc.search_categories("q", enabled_only=False)` | `svc.search_categories("q", enabled=False)` |
-| CLI `taxomesh category list` — returned all | `taxomesh category list` — returns only enabled; add `--include-disabled` for all |
-| CLI `taxomesh item list` — returned all | `taxomesh item list` — returns only enabled; add `--include-disabled` for all |
-| CLI `taxomesh graph` — showed all nodes | `taxomesh graph` — shows only enabled; add `--include-disabled` for all |
-| API `list_categories` — returned all | API `list_categories` — returns only enabled; pass `include_disabled=true` for all |
-| API `list_items` — returned all | API `list_items` — returns only enabled; pass `include_disabled=true` for all |
-| API `get_graph` — returned all nodes | API `get_graph` — returns only enabled; pass `include_disabled=true` for all |
-| `SearchItemsRequest(enabled_only=True)` | `SearchItemsRequest(enabled=True)` |
-| `SearchCategoriesRequest(enabled_only=True)` | `SearchCategoriesRequest(enabled=True)` |
-
-##### Repository port
-
-`TaxomeshRepositoryBase.list_categories` and `list_categories` gain a keyword-only
-`enabled: bool | None = True` parameter with three-way semantics:
-- `True` (default) — only enabled records
-- `False` — only disabled records
-- `None` — all records regardless of state
-
-All adapter implementations (JSON, YAML, Django ORM, InMemory) implement this parameter.
-The Django adapter applies the filter at ORM level (`WHERE enabled = <value>`); no
-full-table fetch occurs for enabled-filtered calls.
-
-### Added
-
-#### `TaxomeshService.update_category` — `enabled` parameter
-
-`update_category()` now accepts `enabled: bool | None = None`, consistent with `update_item()`.
-
----
-
-## [0.1.0a33] — 2026-03-21
-
-### Added
-
-#### `TaxomeshService.list_categories_by_item`
-
-New public method `list_categories_by_item(item_id: UUID) -> list[Category]` exposes the
-item→categories traversal direction.
-
-- Returns only enabled categories by default; pass `enabled=None` to include disabled ones.
-- Raises `TaxomeshItemNotFoundError` if the item does not exist.
-- Returns `[]` if the item has no placements.
-- Result memoized at `DEFAULT_CACHE_TTL`; automatically invalidated by `place_item_in_category`, `remove_item_from_category`, and `reorder_items_in_category`.
-
----
-
-## [0.1.0a30] — 2026-03-21
-
-### ⚠ BREAKING CHANGES
-
-#### `external_id` is now a 1:1 unique identifier — migration required
-
-`external_id` on `Item` and `Category` has changed from a duplicate-tolerant
-lookup key to a **true unique identifier**.  Every layer of the library has been
-updated accordingly.  Consumer apps that link their own records to taxomesh
-Items or Categories via `external_id` **must** migrate before upgrading.
-
----
-
-##### What changed
-
-| Layer | Before | After |
-|---|---|---|
-| Domain model type | `str` (default `""`) | `str \| None` (default `None`) |
-| Duplicate external\_ids | allowed | **forbidden** — raises `TaxomeshExternalIdConflictError` |
-| Service lookup | `get_items_by_external_id(…) → list[Item]` | `get_item_by_external_id(…) → Item \| None` |
-| Service lookup | `get_categories_by_external_id(…) → list[Category]` | `get_category_by_external_id(…) → Category \| None` |
-| Repository protocol | `list_items_by_external_id(str) → list[Item]` | `get_item_by_external_id(str) → Item \| None` |
-| Repository protocol | `list_categories_by_external_id(str) → list[Category]` | `get_category_by_external_id(str) → Category \| None` |
-| "No match" signal | empty list (`[]`) | `None` |
-| "Absent" value | empty string (`""`) | `None` |
-| Django ORM | `CharField(db_index=True)` | `CharField(null=True, unique=True)` |
-| Django migration | — | `0008_unique_external_id` converts `""` → `NULL`, adds `UNIQUE` constraint |
-
----
-
-##### New exception
-
-```python
-TaxomeshExternalIdConflictError(TaxomeshValidationError)
-```
-
-Raised by `save_item` / `save_category` (all three repository backends) when a
-non-`None` `external_id` is already held by a **different** record of the same
-type.  Re-saving a record with its own existing `external_id` (same primary key)
-never raises.
-
-```python
-from taxomesh import TaxomeshExternalIdConflictError
-
-try:
-    service.update_item(item_id, external_id="ext-123")
-except TaxomeshExternalIdConflictError as exc:
-    # "external_id 'ext-123' is already assigned to another item."
-    print(exc)
-```
-
----
-
-##### Updated service API
-
-```python
-# Look up an Item by its external identifier
-item: Item | None = service.get_item_by_external_id("ext-123")
-item: Item | None = service.get_item_by_external_id(some_uuid)   # coerced to str
-item: Item | None = service.get_item_by_external_id(None)        # returns None immediately
-
-# Look up a Category by its external identifier (root category never returned)
-cat: Category | None = service.get_category_by_external_id("ext-456")
-```
-
-Both methods accept `str | int | UUID | None`.  `None` input short-circuits
-immediately without touching the repository.  Results are memoized for
-`DEFAULT_CACHE_TTL` seconds.
-
----
-
-##### Consumer app migration checklist
-
-1. **Remove** all calls to `get_items_by_external_id` — replace with
-   `get_item_by_external_id` and handle `Item | None` instead of `list[Item]`.
-
-2. **Remove** all calls to `get_categories_by_external_id` — replace with
-   `get_category_by_external_id` and handle `Category | None`.
-
-3. **Replace** the "empty list = orphan" pattern with a `None` check:
-
-   ```python
-   # Before
-   results = service.get_items_by_external_id(ext_id)
-   if not results:
-       # orphan — external record has no taxomesh Item
-       ...
-   item = results[0]
-
-   # After
-   item = service.get_item_by_external_id(ext_id)
-   if item is None:
-       # no taxomesh Item for this external_id
-       ...
-   ```
-
-4. **Audit** your data for duplicate `external_id` values before running the
-   Django migration.  The migration converts `""` → `NULL` automatically, but
-   two records sharing the same non-empty `external_id` string will **block**
-   the `UNIQUE` constraint from being applied.  Resolve duplicates manually
-   (set one of them to `None`) before migrating:
-
-   ```python
-   # Find conflicts before migrating
-   from collections import Counter
-   counts = Counter(
-       item.external_id
-       for item in service.list_items()
-       if item.external_id  # skip empty/None
-   )
-   duplicates = [eid for eid, n in counts.items() if n > 1]
-   ```
-
-5. **Run the Django migration** (if using `DjangoRepository`):
-
-   ```bash
-   python manage.py migrate taxomesh
-   ```
-
-   Migration `0008_unique_external_id` converts all `external_id = ""` rows to
-   `NULL` and then adds the `UNIQUE` constraint on both `taxomesh_item` and
-   `taxomesh_category`.
-
-6. **Update `external_id` defaults** — any code that creates Items or Categories
-   with `external_id=""` as an explicit "no reference" sentinel should be
-   updated to pass `external_id=None` (or omit the argument, since `None` is
-   now the default).
-
-7. **Catch `TaxomeshExternalIdConflictError`** wherever your app assigns
-   `external_id` values at write time, so accidental duplicates surface
-   immediately instead of silently creating data inconsistencies.
-
----
-
-##### Unchanged behaviours
-
-- Multiple `NULL` / `None` external IDs **do not conflict** — a taxonomy where
-  most Items have no external reference is fully supported.
-- `external_id` remains optional on both `Item` and `Category`.
-- UUID and `int` inputs are still coerced to `str` before storage.
-- The `search_items()` and `search_categories()` methods continue to score
-  against `external_id` as a search field.
-- `list_categories(external_id=…)` still works; it now returns a list of at
-  most one element (and is not sorted, since there can be only one match).
-
----
-
-## [0.1.0a29] — 2026-03-17
-
-### Performance
-
-- `search_items()` and `search_categories()` now pre-normalize each candidate's
-  name, slug, and external\_id exactly once per call (via an internal
-  `SearchCandidate` object), eliminating the previous double-normalization of
-  names and reducing per-call work for large catalogs.
-- When `limit` is smaller than the number of scoring matches, a heap-based
-  top-k selection (O(N log k)) replaces a full sort (O(N log N)), reducing
-  per-keystroke cost for autocomplete workloads. Public API and result ordering
-  are unchanged.
-- Unfiltered `search_items()` and `search_categories()` now maintain an
-  internal pre-normalized candidate corpus (`_item_corpus`, `_category_corpus`)
-  that is built once on the first call and reused across repeated searches on
-  the same service instance. Candidate normalization (name, slug, external\_id)
-  is performed exactly once per corpus lifetime instead of on every search call.
-  The corpus is automatically invalidated by any item or category write
-  operation (`create_*`, `update_*`, `delete_*`). Category-filtered and
-  recursive searches are unaffected and continue to load candidates directly.
-- Unfiltered `search_items()` now routes candidate loading through the
-  memoized `list_items()` service path instead of calling the repository
-  directly, eliminating redundant I/O when the service-level cache is warm.
-
-### Changed (internal)
-
-- `TaxomeshService.get_debug()` now returns two additional keys:
-  `item_corpus_size` (integer count of pre-normalized item candidates when the
-  corpus is warm, `None` when cold or invalidated) and `category_corpus_size`
-  (same for categories).
-
----
-
-## [0.1.0a27] — 2026-03-16
-
-### Added
-
-#### `TaxomeshService.list_related_items_for_sources` *(new)*
-
-```python
-service.list_related_items_for_sources(
-    source_item_ids: Collection[UUID],
-    *,
-    relation_types: Collection[str] | None = None,
-) -> dict[UUID, dict[str, list[Item]]]
-```
-
-Batch counterpart to `list_related_items`.  Resolves all outgoing relations for
-every item in `source_item_ids` in **two repository calls** — one batch link
-query and one `list_items` — eliminating the N+1 pattern that arises when
-calling `list_related_items` in a loop.
-
-- Relation types are normalised to lower-case before filtering; `"COVERS"` and
-  `"covers"` are equivalent.
-- Duplicate source IDs are deduplicated automatically.
-- Source items with no matching outgoing links are **absent** from the result
-  (not represented as empty dicts).
-- Raises `TaxomeshItemNotFoundError` if a target referenced by a matched link
-  does not exist.
-
-**Example:**
-
-```python
-result = service.list_related_items_for_sources(
-    [song_a.item_id, song_b.item_id],
-    relation_types=["performed_by"],
-)
-# {
-#     song_a.item_id: {"performed_by": [artist]},
-#     song_b.item_id: {"performed_by": [artist]},
-# }
-```
-
-#### `TaxomeshRepository.list_item_relation_links_for_sources` *(new protocol method)*
-
-```python
-repo.list_item_relation_links_for_sources(
-    source_item_ids: Collection[UUID],
-    *,
-    relation_types: Collection[str] | None = None,
-) -> list[ItemRelationLink]
-```
-
-Low-level batch method on the repository protocol.  Returns raw
-`ItemRelationLink` objects for many source items in a single storage
-operation, ordered by
-`(source_item_id ASC, relation_type ASC, sort_index ASC, target_item_id ASC)`.
-
-- An empty `source_item_ids` collection returns `[]` immediately without
-  hitting storage.
-- `relation_types=None` or `relation_types=[]` means no filter.
-- Implemented by all three built-in backends: `JsonRepository`,
-  `YAMLRepository`, and `DjangoRepository`.  The Django backend issues a
-  **single ORM query** with `source_item_id__in`.
-
-**Example:**
-
-```python
-links = repo.list_item_relation_links_for_sources(
-    [song_a_id, song_b_id],
-    relation_types=["performed_by"],
-)
-# [
-#     ItemRelationLink(source=song_a_id, target=artist_x_id, relation_type="performed_by"),
-#     ItemRelationLink(source=song_b_id, target=artist_x_id, relation_type="performed_by"),
-# ]
-```
-
-### Changed
-
-- **Django migration `0006`**: added composite index
-  `(source_item_id, relation_type, sort_index, target_item_id)` on
-  `taxomesh_item_relation_link`.  This index covers:
-  - Outgoing queries filtered by both `source_item_id` and `relation_type`
-    (the existing unique-together index could not serve this because
-    `target_item_id` sits between the two columns).
-  - The full `ORDER BY` emitted by `list_item_relation_links_for_sources`,
-    allowing the DB to use an index scan instead of a filesort.
-
----
-
-## [0.1.0a26] — 2026-03-15
-
-### Added
-
-#### `TaxomeshService.search_items` / `TaxomeshService.search_categories` *(contrib.api — spec 037)*
-
-HTTP-level search handlers added to `taxomesh.contrib.api`:
-
-- `GET /items/search?q=<query>&limit=<n>` — fuzzy item search via
-  `TaxomeshService.fuzzy_search_items`.
-- `GET /categories/search?q=<query>&limit=<n>` — fuzzy category search via
-  `TaxomeshService.fuzzy_search_categories`.
-
-Response schema: `SearchResultsSchema` with a `results` list of
-`ItemSchema` / `CategorySchema`.
-
-#### Service read cache *(spec 028)*
-
-`TaxomeshService` read methods decorated with `@memoize(DEFAULT_CACHE_TTL)`
-(TTL: 5 s).  Cached methods: `get_item`, `get_category`, `list_items`,
-`list_categories`, `list_related_items`, `fuzzy_search_items`,
-`fuzzy_search_categories`.  Cache is invalidated automatically on any write
-that touches the affected data.
-
----
-
-## [0.1.0a25] — 2026-03-10
-
-### Added
-
-- **spec 036 — service/repo parity**: parametrized test suite covering all
-  three backends (`JsonRepository`, `YAMLRepository`, `DjangoRepository`)
-  for every public service method.
-- **spec 035 — Django ordering indexes**: `name` indexes on `CategoryModel`
-  and `ItemModel`; composite `(parent_category_id, sort_index)` on
-  `CategoryParentLinkModel`; composite `(category_id, sort_index)` on
-  `ItemParentLinkModel`.
-- **spec 034 — default sort_index**: `CategoryParentLink` and
-  `ItemParentLink` now auto-assign `sort_index` as `max(existing) + 1` when
-  not explicitly provided.
-
----
-
-## [0.1.0a24] — 2026-03-05
-
-### Added
-
-- **spec 033 — fuzzy search**: `TaxomeshService.fuzzy_search_items` and
-  `fuzzy_search_categories` using `rapidfuzz` for token-set-ratio scoring
-  with Unicode normalisation.
-- **spec 032 — external_id indexes**: B-tree indexes on
-  `taxomesh_item.external_id` and `taxomesh_category.external_id`.
-- **spec 031 — metadata JSON editor**: Ace Editor widget in Django admin for
-  `metadata` JSONField on `ItemModel` and `CategoryModel`.
-
----
-
-## [0.1.0a23] — 2026-02-28
-
-### Added
-
-- **spec 030 — graph drag-and-drop**: HTML5 drag-and-drop reordering of
-  category and item parent links in the Django admin graph view; persists
-  `sort_index` changes via AJAX endpoint.
-- **spec 029 — graph serializer**: `GraphSerializer` that turns the full
-  category/item DAG into a JSON-serialisable dict; used by the admin graph
-  view and the contrib.api graph endpoint.
-- **spec 028 — contrib.api**: `taxomesh.contrib.api` package — thin
-  Pydantic-based request/response schemas and handler functions for HTTP
-  adapters (FastAPI, Django views, etc.).
-
----
-
-## [0.1.0a22] — 2026-02-20
-
-### Added
-
-- **spec 027 — autocomplete FK widget**: Django admin foreign-key fields on
-  `ItemRelationLinkModel` now use `AutocompleteSelect` widget.
-- **spec 026 — admin service debug**: debug panel in Django admin surfacing
-  service version, repository type, and live config values.
-- **spec 025 — graph admin UX**: visual graph panel in Django admin with
-  collapsible category tree and item assignments.
-- **spec 024 — graph enhancements**: `TaxomeshService.get_category_subtree`
-  and `get_item_ancestors` CLI commands + Django admin actions.
-
----
-
-## [0.1.0a21] — 2026-02-10
-
-### Added
-
-- **spec 023 — item relations**: `ItemRelationLink` domain model; repository
-  methods `save_item_relation_link`, `list_item_relation_links`,
-  `delete_item_relation_link`; service methods `relate_items`,
-  `list_item_relations`, `list_related_items`, `remove_item_relation`.
-  Django backend: `ItemRelationLinkModel` with migration `0003`.
-- **spec 022 — unified `__str__` / admin links**: consistent `__str__`
-  representations for all domain models; clickable object links in all
-  Django admin list views.
-- **spec 021 — optional external_id**: `Item.external_id` is now
-  `str | None` (was required); Django migration `0002` relaxes the column
-  constraint.
-
----
-
-## [0.1.0a1] — 2026-01-01
-
-### Added
-
-- Initial library skeleton: `Item`, `Category`, `Tag`, `CategoryParentLink`,
-  `ItemParentLink`, `ItemTagLink` domain models (Pydantic v2).
-- `TaxomeshRepositoryBase` protocol with `JsonRepository` and
-  `YAMLRepository` built-in backends.
-- `TaxomeshService` facade exposing item CRUD, category CRUD, tag CRUD,
-  parent-link management, slug lookup, external-id lookup, and fuzzy search.
-- Typer CLI with `graph`, `config dump`, and item/category subcommands.
-- Optional Django contrib package (`taxomesh.contrib.django`) with ORM
-  models, admin views, and `DjangoRepository`.
-- Optional contrib.api package (`taxomesh.contrib.api`) with Pydantic
-  schemas and handler functions for HTTP adapters.
+- On JSON and YAML too, a delete removes every link that names the entity, and a load drops a link
+  that names an entity that is not stored.
+- An update or a `move` refused by any check stores nothing, on every backend. Metadata a file store
+  cannot write is refused before the write, where it stayed in memory and failed every later write.
+- Listing a parent's children or an item's categories reads only the rows not already cached.
+- `items.search(category=…, enabled=False)` returns the disabled items it asks for, and
+  `get_by_slug("")` answers `None` instead of an unrelated row without a slug.
+- Building the graph, serializing it and `taxomesh graph` end on a stored cycle and on any depth;
+  `taxomesh graph` stops past 100,000 drawn categories and names `--max-depth`. `--show-config`
+  refuses a repository type that every command refuses.
+- The admin's graph views cost a constant number of queries, and its forms save every field they
+  show, a tag without metadata and a top-level category included. An inline saves each row on its
+  own, the new link before the old one goes, so a refused row keeps the link it had.
+- `--direction` refuses a value other than its three, which used to answer as `both`.
+- A failed file write raises `TaxomeshRepositoryError` from every write, not an `OSError`, and no
+  later write carries the failed change to disk; an operation whose later write fails clears its
+  service's cache, so the service reads what was stored. A file repository's lock stops two threads
+  passing one `expected_version`.
+- An update builds on the stored row, so it never undoes a change another service made within
+  `cache_ttl`, and a write that names an entity that another service deleted raises its not-found
+  error.
+- Migrations `0008` and `0011` change the database `migrate --database` names, not `default`.
+  `0008`, released in 0.1.0a30, no longer fails on a store holding a row without an external id.
+- A category name the model reads as `__root__`, such as `b"__root__"`, is refused as reserved.

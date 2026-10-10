@@ -11,24 +11,24 @@ from pathlib import Path
 import pytest
 
 from taxomesh.adapters.repositories.json_repository import JsonRepository
-from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+from taxomesh.adapters.repositories.yaml_repository import YamlRepository
 from taxomesh.application.service import TaxomeshService
 
 
 def test_json_backend_parity_smoke(tmp_path: Path) -> None:
     """JsonRepository must support create/retrieve by id and by slug — core parity operations."""
     svc = TaxomeshService(repository=JsonRepository(tmp_path / "t.json"))
-    cat = svc.create_category("Smoke", slug="smoke")
-    assert svc.get_category(cat.category_id).name == "Smoke"
-    assert svc.get_category_by_slug("smoke").name == "Smoke"
+    cat = svc.categories.create("Smoke", slug="smoke")
+    assert svc.categories[cat.category_id].name == "Smoke"
+    assert svc.categories.get_by_slug("smoke") == cat
 
 
 def test_yaml_backend_parity_smoke(tmp_path: Path) -> None:
-    """YAMLRepository must support create/retrieve by id and by slug — core parity operations."""
-    svc = TaxomeshService(repository=YAMLRepository(tmp_path / "t.yaml"))
-    cat = svc.create_category("Smoke", slug="smoke")
-    assert svc.get_category(cat.category_id).name == "Smoke"
-    assert svc.get_category_by_slug("smoke").name == "Smoke"
+    """YamlRepository must support create/retrieve by id and by slug — core parity operations."""
+    svc = TaxomeshService(repository=YamlRepository(tmp_path / "t.yaml"))
+    cat = svc.categories.create("Smoke", slug="smoke")
+    assert svc.categories[cat.category_id].name == "Smoke"
+    assert svc.categories.get_by_slug("smoke") == cat
 
 
 @pytest.mark.django_db
@@ -41,6 +41,6 @@ def test_django_backend_parity_smoke() -> None:
     from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
 
     svc = TaxomeshService(repository=DjangoRepository())
-    cat = svc.create_category("Smoke", slug="smoke")
-    assert svc.get_category(cat.category_id).name == "Smoke"
-    assert svc.get_category_by_slug("smoke").name == "Smoke"
+    cat = svc.categories.create("Smoke", slug="smoke")
+    assert svc.categories[cat.category_id].name == "Smoke"
+    assert svc.categories.get_by_slug("smoke") == cat

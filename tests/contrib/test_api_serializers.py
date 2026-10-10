@@ -26,18 +26,18 @@ class TestGraphToDictEmptyGraph:
 
     def test_returns_empty_roots(self, service: TaxomeshService) -> None:
         """Empty graph produces {"roots": []}."""
-        graph = service.get_graph()
+        graph = service.graph()
         result = graph_to_dict(graph)
         assert result == {"roots": []}
 
 
 class TestGraphToDictSingleRoot:
-    """Single root node with no items or children."""
+    """One node in ``roots``, with no items or children."""
 
     def test_node_shape(self, service: TaxomeshService) -> None:
-        """A root node has exactly category, items, and children keys."""
-        service.create_category(name="Music")
-        graph = service.get_graph()
+        """A node in ``roots`` has exactly category, items, and children keys."""
+        service.categories.create(name="Music")
+        graph = service.graph()
         result = graph_to_dict(graph)
         assert len(result["roots"]) == 1
         node = result["roots"][0]
@@ -47,21 +47,21 @@ class TestGraphToDictSingleRoot:
 
     def test_category_matches_model_dump(self, service: TaxomeshService) -> None:
         """category dict equals category.model_dump(mode='json')."""
-        cat = service.create_category(name="Books")
-        graph = service.get_graph()
+        cat = service.categories.create(name="Books")
+        graph = service.graph()
         result = graph_to_dict(graph)
         assert result["roots"][0]["category"] == cat.model_dump(mode="json")
 
 
 class TestGraphToDictRootWithItems:
-    """Root node that has items but no children."""
+    """A node in ``roots`` that has items but no children."""
 
     def test_items_match_model_dump(self, service: TaxomeshService) -> None:
         """items list contains dicts equal to item.model_dump()."""
-        cat = service.create_category(name="Jazz")
-        item = service.create_item(name="Kind of Blue")
-        service.place_item_in_category(item.item_id, cat.category_id)
-        graph = service.get_graph()
+        cat = service.categories.create(name="Jazz")
+        item = service.items.create(name="Kind of Blue")
+        service.items.place_in(item.item_id, cat.category_id)
+        graph = service.graph()
         result = graph_to_dict(graph)
         node = result["roots"][0]
         assert len(node["items"]) == 1
@@ -70,14 +70,14 @@ class TestGraphToDictRootWithItems:
 
 
 class TestGraphToDictRootWithChildren:
-    """Root node that has children but no items."""
+    """A node in ``roots`` that has children but no items."""
 
     def test_children_list_has_node_shape(self, service: TaxomeshService) -> None:
         """children list contains correctly shaped node dicts."""
-        parent = service.create_category(name="Fiction")
-        child = service.create_category(name="Fantasy")
-        service.add_category_parent(child.category_id, parent.category_id)
-        graph = service.get_graph()
+        parent = service.categories.create(name="Fiction")
+        child = service.categories.create(name="Fantasy")
+        service.categories.add_parent(child.category_id, parent.category_id)
+        graph = service.graph()
         result = graph_to_dict(graph)
         root_node = result["roots"][0]
         assert root_node["items"] == []
@@ -93,12 +93,12 @@ class TestGraphToDictMultiLevel:
 
     def test_three_levels_preserved(self, service: TaxomeshService) -> None:
         """Nesting is preserved recursively at three levels."""
-        root_cat = service.create_category(name="Root")
-        child_cat = service.create_category(name="Child")
-        grand_cat = service.create_category(name="Grandchild")
-        service.add_category_parent(child_cat.category_id, root_cat.category_id)
-        service.add_category_parent(grand_cat.category_id, child_cat.category_id)
-        graph = service.get_graph()
+        root_cat = service.categories.create(name="Root")
+        child_cat = service.categories.create(name="Child")
+        grand_cat = service.categories.create(name="Grandchild")
+        service.categories.add_parent(child_cat.category_id, root_cat.category_id)
+        service.categories.add_parent(grand_cat.category_id, child_cat.category_id)
+        graph = service.graph()
         result = graph_to_dict(graph)
         root_node = result["roots"][0]
         assert len(root_node["children"]) == 1
@@ -111,14 +111,14 @@ class TestGraphToDictMultiLevel:
 
 
 class TestGraphToDictMultipleRoots:
-    """Multiple top-level root categories."""
+    """Several top-level categories."""
 
     def test_all_roots_present(self, service: TaxomeshService) -> None:
-        """All root-level categories appear in roots list."""
-        service.create_category(name="Alpha")
-        service.create_category(name="Beta")
-        service.create_category(name="Gamma")
-        graph = service.get_graph()
+        """All top-level categories appear in the ``roots`` list."""
+        service.categories.create(name="Alpha")
+        service.categories.create(name="Beta")
+        service.categories.create(name="Gamma")
+        graph = service.graph()
         result = graph_to_dict(graph)
         assert len(result["roots"]) == 3
         names = {node["category"]["name"] for node in result["roots"]}
@@ -130,12 +130,12 @@ class TestGraphToDictItemsAndChildren:
 
     def test_items_and_children_both_present(self, service: TaxomeshService) -> None:
         """A node with both items and children serializes both correctly."""
-        parent = service.create_category(name="Science")
-        child = service.create_category(name="Physics")
-        service.add_category_parent(child.category_id, parent.category_id)
-        item = service.create_item(name="Principia")
-        service.place_item_in_category(item.item_id, parent.category_id)
-        graph = service.get_graph()
+        parent = service.categories.create(name="Science")
+        child = service.categories.create(name="Physics")
+        service.categories.add_parent(child.category_id, parent.category_id)
+        item = service.items.create(name="Principia")
+        service.items.place_in(item.item_id, parent.category_id)
+        graph = service.graph()
         result = graph_to_dict(graph)
         root_node = result["roots"][0]
         assert len(root_node["items"]) == 1
@@ -149,17 +149,17 @@ class TestGraphToDictJsonSerializable:
 
     def test_empty_graph_json_safe(self, service: TaxomeshService) -> None:
         """Empty graph output passes json.dumps without raising TypeError."""
-        result = graph_to_dict(service.get_graph())
+        result = graph_to_dict(service.graph())
         json.dumps(result)  # must not raise
 
     def test_populated_graph_json_safe(self, service: TaxomeshService) -> None:
         """Populated graph with categories, items, and children passes json.dumps."""
-        cat = service.create_category(name="History")
-        child = service.create_category(name="Ancient")
-        service.add_category_parent(child.category_id, cat.category_id)
-        item = service.create_item(name="Sapiens")
-        service.place_item_in_category(item.item_id, cat.category_id)
-        result = graph_to_dict(service.get_graph())
+        cat = service.categories.create(name="History")
+        child = service.categories.create(name="Ancient")
+        service.categories.add_parent(child.category_id, cat.category_id)
+        item = service.items.create(name="Sapiens")
+        service.items.place_in(item.item_id, cat.category_id)
+        result = graph_to_dict(service.graph())
         json.dumps(result)  # must not raise
 
 
@@ -173,7 +173,7 @@ class TestItemsToList:
 
     def test_single_item_returns_dict_with_string_uuid(self, service: TaxomeshService) -> None:
         """A single Item is serialized to a dict with item_id as a string."""
-        item = service.create_item(name="Kind of Blue")
+        item = service.items.create(name="Kind of Blue")
         result = items_to_list([item])
         assert len(result) == 1
         entry = result[0]
@@ -187,20 +187,20 @@ class TestItemsToList:
 
     def test_multiple_items_all_serialized(self, service: TaxomeshService) -> None:
         """All items in the input are serialized."""
-        items = [service.create_item(name=f"Item {i}") for i in range(3)]
+        items = [service.items.create(name=f"Item {i}") for i in range(3)]
         result = items_to_list(items)
         assert len(result) == 3
         assert all(isinstance(r, dict) for r in result)
 
     def test_output_matches_model_dump(self, service: TaxomeshService) -> None:
         """Each dict matches Item.model_dump(mode='json')."""
-        item = service.create_item(name="Troilo")
+        item = service.items.create(name="Troilo")
         result = items_to_list([item])
         assert result[0] == item.model_dump(mode="json")
 
     def test_json_serializable(self, service: TaxomeshService) -> None:
         """Output passes json.dumps without raising."""
-        item = service.create_item(name="Piazzolla")
+        item = service.items.create(name="Piazzolla")
         json.dumps(items_to_list([item]))  # must not raise
 
 
@@ -214,7 +214,7 @@ class TestCategoriesToList:
 
     def test_single_category_returns_dict_with_string_uuid(self, service: TaxomeshService) -> None:
         """A single Category is serialized to a dict with category_id as a string."""
-        cat = service.create_category(name="Tango")
+        cat = service.categories.create(name="Tango")
         result = categories_to_list([cat])
         assert len(result) == 1
         entry = result[0]
@@ -228,18 +228,18 @@ class TestCategoriesToList:
 
     def test_multiple_categories_all_serialized(self, service: TaxomeshService) -> None:
         """All categories in the input are serialized."""
-        cats = [service.create_category(name=f"Cat {i}") for i in range(3)]
+        cats = [service.categories.create(name=f"Cat {i}") for i in range(3)]
         result = categories_to_list(cats)
         assert len(result) == 3
         assert all(isinstance(r, dict) for r in result)
 
     def test_output_matches_model_dump(self, service: TaxomeshService) -> None:
         """Each dict matches Category.model_dump(mode='json')."""
-        cat = service.create_category(name="Jazz")
+        cat = service.categories.create(name="Jazz")
         result = categories_to_list([cat])
         assert result[0] == cat.model_dump(mode="json")
 
     def test_json_serializable(self, service: TaxomeshService) -> None:
         """Output passes json.dumps without raising."""
-        cat = service.create_category(name="Folk")
+        cat = service.categories.create(name="Folk")
         json.dumps(categories_to_list([cat]))  # must not raise

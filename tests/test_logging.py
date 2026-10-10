@@ -10,7 +10,7 @@ from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.models import Item, ItemRelationLink
 from tests.service.conftest import InMemoryRepository
 
-SERVICE_LOGGER = "taxomesh.application.service"
+SERVICE_LOGGER = "taxomesh.application.collections.items"
 ROOT_LOGGER = "taxomesh"
 
 
@@ -48,7 +48,7 @@ def test_no_timestamp_in_message_text(caplog: pytest.LogCaptureFixture) -> None:
     svc = TaxomeshService(repository=repo)
 
     with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
-        svc.list_related_items_for_sources([source.item_id])
+        svc.items.get_many_related([source.item_id])
 
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warning_records) == 1

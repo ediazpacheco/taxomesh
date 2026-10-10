@@ -1,32 +1,36 @@
-"""Base model class for all taxomesh domain entities."""
+"""The base class of every taxomesh model, and the ``str()`` of a row."""
 
 from pydantic import BaseModel, ConfigDict
 
 
-def _build_str_repr(emoji: str, name: str, id_value: object, slug: str, external_id: str | None) -> str:
-    """Build the standard human-readable string representation for a domain model.
+def _build_str_repr(name: str, id_value: object, slug: str = "", external_id: str | None = None) -> str:
+    """Build a row's ``str()``: a plain-text label naming it and the keys it is found by.
 
     Args:
-        emoji: Leading emoji prefix (e.g. '📂' for Category, '🏷️' for Item).
-        name: Human-readable display name.
-        id_value: Internal UUID identifier.
-        slug: URL-friendly slug; omitted from output when empty.
-        external_id: External system identifier; omitted from output when None.
+        name: The row's name.
+        id_value: The row's identifier.
+        slug: The row's slug; left out when empty, which is no slug.
+        external_id: The row's external id; left out when ``None``.
 
     Returns:
-        Formatted string: ``<emoji> <name> (slug: … - id: … - ext_id: …)``
-        with slug and ext_id segments included only when non-None/non-empty.
+        ``<name> (slug: …, id: …, external_id: …)``, with the slug and the external id only when
+        the row has one, such as ``Music (slug: music, id: …)``.
     """
     parts = []
     if slug:
         parts.append(f"slug: {slug}")
     parts.append(f"id: {id_value}")
     if external_id is not None:
-        parts.append(f"ext_id: {external_id}")
-    return f"{emoji} {name} ({' - '.join(parts)})"
+        parts.append(f"external_id: {external_id}")
+    return f"{name} ({', '.join(parts)})"
 
 
 class ModelBase(BaseModel):
-    """Shared base for all taxomesh Pydantic models."""
+    """The base class of every taxomesh Pydantic model: the rows and the links.
 
-    model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
+    The models are frozen. A row never changes in place, and an assignment to a field raises
+    pydantic's ``ValidationError``, which is a ``ValueError``. A changed row is a new object, built
+    by ``model_copy(update=…)`` or validated again.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)

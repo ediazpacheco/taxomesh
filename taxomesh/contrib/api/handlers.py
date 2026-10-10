@@ -1,20 +1,34 @@
-"""Framework-agnostic handler functions for taxomesh HTTP operations.
+"""The HTTP handlers: functions that each call one member of the service.
 
-Each function accepts a TaxomeshService instance and a validated request schema,
-delegates all business logic to the service, and returns the domain model result.
-Consuming applications provide the HTTP glue (route registration, request parsing,
-response serialization).
+A handler takes the service, the values of the request and, where it has one, a validated request
+schema. It calls one member, and returns what the member returns: rows, links or a graph snapshot.
+The application does the rest of the HTTP work: it registers the routes, reads the requests and
+serializes the responses.
+
+Each handler is named ``<namespace>_<member>`` after the collection member it calls, so
+``categories_get_by_slug`` calls ``service.categories.get_by_slug``, and ``graph`` calls
+``service.graph``. A handler keeps its member's contract: it returns what the member returns,
+a tuple from a listing, and a lookup (``*_get``, ``*_get_by_slug``, ``*_get_by_external_id``)
+returns ``None`` on a miss. The consuming application turns that ``None`` into its 404.
+
+Every handler takes its arguments in the same way: ``service`` and the **subject** of the
+operation are the only positional parameters, and every other parameter is keyword-only. So two
+identifiers of the same type cannot change places without an error: ``items_tag(service, item_id,
+tag_id=...)`` fails the type check with its arguments in the other order, and two bare ``UUID``
+positionals would pass it. HTTP names a row by its identifier, so the parameters keep their ``_id``
+names, and each one is passed to the member's parameter that the noun names.
 """
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from taxomesh.application.service import TaxomeshService
 from taxomesh.contrib.api.schemas import (
-    AddParentRequest,
+    AddCategoryParentRequest,
     CreateCategoryRequest,
     CreateItemRequest,
     CreateTagRequest,
-    PlaceInCategoryRequest,
+    PlaceItemRequest,
     SearchCategoriesRequest,
     SearchItemsRequest,
     UpdateCategoryRequest,
@@ -23,124 +37,241 @@ from taxomesh.contrib.api.schemas import (
 )
 from taxomesh.domain.graph import TaxomeshGraph
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink, Tag
+from taxomesh.domain.types import UNSET
 
 # ---------------------------------------------------------------------------
 # Categories
 # ---------------------------------------------------------------------------
 
 
-def list_categories(
+def categories_list(
     service: TaxomeshService,
+    *,
     parent_id: UUID | None = None,
-    include_disabled: bool = False,
-) -> list[Category]:
-    """List categories, optionally filtered by parent.
+    item_id: UUID | None = None,
+    enabled: bool | None = True,
+) -> Sequence[Category]:
+    """List categories: every one, or the children of a parent, or those that an item is placed in.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        parent_id: When provided, returns children of this parent ordered by
-            sort_index. When None, returns top-level categories.
-        include_disabled: When True, returns all categories regardless of
-            enabled state. When False (default), returns only enabled categories.
+        service: The service to call.
+        parent_id: When given, only the children of this parent, ordered by their ``sort_index``.
+        item_id: When given, only the categories that this item is placed in, ordered by the
+            ``sort_index`` of each placement.
+        enabled: ``True`` (the default) returns only the enabled categories, ``False`` only the
+            disabled ones, and ``None`` all of them.
 
     Returns:
-        List of matching categories.
+        The matching categories. With neither filter, every category, wherever it is;
+        :func:`categories_roots` lists the top level.
 
     Raises:
-        TaxomeshCategoryNotFoundError: If parent_id is provided but not found.
+        TaxomeshValidationError: If both ``parent_id`` and ``item_id`` are given.
+        TaxomeshCategoryNotFoundError: If ``parent_id`` names a category that is not stored.
+        TaxomeshItemNotFoundError: If ``item_id`` names an item that is not stored.
     """
-    return service.list_categories(parent_id=parent_id, enabled=None if include_disabled else True)
+    return service.categories.list(parent=parent_id, item=item_id, enabled=enabled)
 
 
-def get_category(service: TaxomeshService, category_id: UUID) -> Category:
-    """Retrieve a category by its UUID.
+def categories_roots(service: TaxomeshService, *, enabled: bool | None = True) -> Sequence[Category]:
+    """List the top level: the categories that have no parent.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        category_id: The library-assigned UUID of the category.
+        service: The service to call.
+        enabled: ``True`` (the default) returns only the enabled categories, ``False`` only the
+            disabled ones, and ``None`` all of them.
 
     Returns:
-        The matching Category.
-
-    Raises:
-        TaxomeshCategoryNotFoundError: If no category with the given id exists.
+        The top-level categories, in their stored order.
     """
-    return service.get_category(category_id)
+    return service.categories.roots(enabled=enabled)
 
 
-def get_category_by_slug(service: TaxomeshService, slug: str) -> Category:
-    """Retrieve a category by its slug.
+def categories_get(service: TaxomeshService, category_id: UUID) -> Category | None:
+    """Return the category with this identifier, or ``None``.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        slug: The URL-friendly identifier of the category.
+        service: The service to call.
+        category_id: The identifier of the category.
 
     Returns:
-        The matching Category.
-
-    Raises:
-        TaxomeshCategoryNotFoundError: If no category with the given slug exists.
+        The category row, or ``None`` when no category with this identifier is stored.
     """
-    return service.get_category_by_slug(slug)
+    return service.categories.get(category_id)
 
 
-def create_category(service: TaxomeshService, body: CreateCategoryRequest) -> Category:
-    """Create a new category.
+def categories_get_by_slug(service: TaxomeshService, slug: str) -> Category | None:
+    """Return the category with this slug, or ``None``.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        body: Validated create request containing name, description, slug, metadata.
+        service: The service to call.
+        slug: The slug of the category: a text key for URLs.
 
     Returns:
-        The newly created Category.
+        The category row, or ``None`` when no category has this slug. An empty slug names no
+        category.
+    """
+    return service.categories.get_by_slug(slug)
+
+
+def categories_get_by_external_id(service: TaxomeshService, external_id: str) -> Category | None:
+    """Return the category with this external id, or ``None``.
+
+    Args:
+        service: The service to call.
+        external_id: The external id to look up.
+
+    Returns:
+        The category row, or ``None`` when no category has this external id.
+    """
+    return service.categories.get_by_external_id(external_id)
+
+
+def categories_create(service: TaxomeshService, *, body: CreateCategoryRequest) -> Category:
+    """Create a category at the top level.
+
+    Args:
+        service: The service to call.
+        body: The validated request, with ``name``, ``description``, ``slug``, ``external_id`` and
+            ``metadata``.
+
+    Returns:
+        The row of the new category.
 
     Raises:
-        TaxomeshDuplicateSlugError: If slug is non-empty and already in use.
+        TaxomeshRootCategoryError: If the name is the reserved name of the implicit root.
+        TaxomeshDuplicateSlugError: If the slug is not empty and another category has it.
+        TaxomeshExternalIdConflictError: If another category already has the external id.
     """
-    return service.create_category(
+    return service.categories.create(
         name=body.name,
         description=body.description,
         slug=body.slug,
+        external_id=body.external_id,
         metadata=body.metadata,
     )
 
 
-def update_category(service: TaxomeshService, category_id: UUID, body: UpdateCategoryRequest) -> Category:
-    """Update an existing category.
+def categories_update(service: TaxomeshService, category_id: UUID, *, body: UpdateCategoryRequest) -> Category:
+    """Update a category.
 
-    Only fields the caller explicitly set are delegated: an omitted field carries no
-    instruction and leaves the stored value untouched. A present field is assigned its value.
-    ``external_id`` is the sole field whose value domain includes null, so an explicit null
-    external_id clears the stored identifier; a null on any other field (including enabled) is
-    rejected by request validation before this handler runs.
+    Only the fields that the caller set are passed on: an omitted field carries no instruction and
+    keeps the stored value. A present field is assigned its value. ``external_id`` is the one
+    stored field that accepts null, so a null ``external_id`` clears the stored external id. The
+    request validation refuses a null in any other stored field, ``enabled`` included, before this
+    handler runs. ``expected_version`` is passed on as it is: omitted or null, the update compares
+    no version.
+
+    Each field is passed under its own keyword, and not unpacked from a model dump, so a service
+    parameter with another name is a type error here, and not a ``TypeError`` at run time.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        category_id: The library-assigned UUID of the category to update.
-        body: Validated update request; only explicitly provided fields are delegated.
+        service: The service to call.
+        category_id: The identifier of the category to update.
+        body: The validated request; only the fields that the caller set are passed on.
 
     Returns:
-        The updated Category.
+        The new row of the category.
 
     Raises:
-        TaxomeshCategoryNotFoundError: If no category with the given id exists.
-        TaxomeshDuplicateSlugError: If slug is non-empty and already in use.
-        TaxomeshExternalIdConflictError: If external_id is already held by another category.
+        TaxomeshCategoryNotFoundError: If the category is not stored.
+        TaxomeshRootCategoryError: If the new name is the reserved name of the implicit root.
+        TaxomeshDuplicateSlugError: If the slug is not empty and another category has it.
+        TaxomeshExternalIdConflictError: If another category already has the external id.
+        TaxomeshVersionConflictError: If ``expected_version`` is given and the stored category is
+            not at it.
     """
-    return service.update_category(category_id=category_id, **body.model_dump(exclude_unset=True))
+    provided = body.model_fields_set
+    return service.categories.update(
+        category_id,
+        name=body.name if "name" in provided else UNSET,
+        description=body.description if "description" in provided else UNSET,
+        slug=body.slug if "slug" in provided else UNSET,
+        metadata=body.metadata if "metadata" in provided else UNSET,
+        external_id=body.external_id if "external_id" in provided else UNSET,
+        enabled=body.enabled if "enabled" in provided else UNSET,
+        expected_version=body.expected_version,
+    )
 
 
-def delete_category(service: TaxomeshService, category_id: UUID) -> None:
-    """Delete a category.
+def categories_delete(service: TaxomeshService, category_id: UUID) -> None:
+    """Delete a category, and every link that names it.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        category_id: The library-assigned UUID of the category to delete.
+        service: The service to call.
+        category_id: The identifier of the category to delete.
 
     Raises:
-        TaxomeshCategoryNotFoundError: If no category with the given id exists.
+        TaxomeshCategoryNotFoundError: If the category is not stored.
     """
-    service.delete_category(category_id)
+    service.categories.delete(category_id)
+
+
+def categories_add_parent(
+    service: TaxomeshService,
+    category_id: UUID,
+    *,
+    body: AddCategoryParentRequest,
+) -> CategoryParentLink:
+    """Add a parent to a category.
+
+    Args:
+        service: The service to call.
+        category_id: The identifier of the child category.
+        body: The validated request, with ``parent_id`` and ``sort_index``.
+
+    Returns:
+        The parent link.
+
+    Raises:
+        TaxomeshCategoryNotFoundError: If either category is not stored.
+        TaxomeshCyclicDependencyError: If the parent link would make a cycle.
+    """
+    return service.categories.add_parent(
+        category=category_id,
+        parent=body.parent_id,
+        sort_index=body.sort_index,
+    )
+
+
+def categories_remove_parent(service: TaxomeshService, category_id: UUID, *, parent_id: UUID) -> None:
+    """Remove one parent from a category. Removing a parent it does not have does nothing.
+
+    Args:
+        service: The service to call.
+        category_id: The identifier of the child category.
+        parent_id: The identifier of the parent category.
+
+    Raises:
+        TaxomeshCategoryNotFoundError: If either category is not stored.
+    """
+    service.categories.remove_parent(category=category_id, parent=parent_id)
+
+
+def categories_search(service: TaxomeshService, *, params: SearchCategoriesRequest) -> Sequence[Category]:
+    """Search the categories with every parameter of ``SearchCategoriesRequest``.
+
+    The request object is named ``params`` and not ``body``: it serves a GET endpoint, which has
+    no body.
+
+    Args:
+        service: The service to call.
+        params: The validated search parameters.
+
+    Returns:
+        The categories in order of relevance, at most ``params.limit`` of them.
+
+    Raises:
+        TaxomeshValidationError: If ``params.limit`` is 0 or less.
+        TaxomeshCategoryNotFoundError: If ``params.parent_id`` names a category that is not stored.
+    """
+    return service.categories.search(
+        params.query,
+        limit=params.limit,
+        parent=params.parent_id,
+        enabled=params.enabled,
+        fuzzy=params.fuzzy,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -148,88 +279,92 @@ def delete_category(service: TaxomeshService, category_id: UUID) -> None:
 # ---------------------------------------------------------------------------
 
 
-def list_items(
+def items_list(
     service: TaxomeshService,
+    *,
     category_id: UUID | None = None,
-    include_disabled: bool = False,
-) -> list[Item]:
-    """List items, optionally filtered by category.
+    recursive: bool = False,
+    tag_id: UUID | None = None,
+    enabled: bool | None = True,
+) -> Sequence[Item]:
+    """List items: every one, or those in a category, or those that have a tag, or both.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        category_id: When provided, returns items in this category ordered by
-            sort_index. When None, returns all items.
-        include_disabled: When True, returns all items regardless of enabled
-            state. When False (default), returns only enabled items.
+        service: The service to call.
+        category_id: When given, only the items placed in this category, ordered by the
+            ``sort_index`` of each placement.
+        recursive: With ``category_id``, also the items placed in the descendants of the category.
+            Without ``category_id``, it has no effect.
+        tag_id: When given, only the items that have this tag, ordered by name. With
+            ``category_id``, the items of the category that have the tag, in the order of the
+            category.
+        enabled: ``True`` (the default) returns only the enabled items, ``False`` only the
+            disabled ones, and ``None`` all of them.
 
     Returns:
-        List of matching items.
+        The matching items.
 
     Raises:
-        TaxomeshCategoryNotFoundError: If category_id is provided but not found.
+        TaxomeshCategoryNotFoundError: If ``category_id`` names a category that is not stored.
+        TaxomeshTagNotFoundError: If ``tag_id`` names a tag that is not stored.
     """
-    return service.list_items(category_id=category_id, enabled=None if include_disabled else True)
+    return service.items.list(category=category_id, recursive=recursive, tag=tag_id, enabled=enabled)
 
 
-def get_item(service: TaxomeshService, item_id: UUID) -> Item:
-    """Retrieve an item by its UUID.
+def items_get(service: TaxomeshService, item_id: UUID) -> Item | None:
+    """Return the item with this identifier, or ``None``.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        item_id: The library-assigned UUID of the item.
+        service: The service to call.
+        item_id: The identifier of the item.
 
     Returns:
-        The matching Item.
+        The item row, or ``None`` when no item with this identifier is stored.
+    """
+    return service.items.get(item_id)
+
+
+def items_get_by_slug(service: TaxomeshService, slug: str) -> Item | None:
+    """Return the item with this slug, or ``None``.
+
+    Args:
+        service: The service to call.
+        slug: The slug of the item: a text key for URLs.
+
+    Returns:
+        The item row, or ``None`` when no item has this slug. An empty slug names no item.
+    """
+    return service.items.get_by_slug(slug)
+
+
+def items_get_by_external_id(service: TaxomeshService, external_id: str) -> Item | None:
+    """Return the item with this external id, or ``None``.
+
+    Args:
+        service: The service to call.
+        external_id: The external id to look up.
+
+    Returns:
+        The item row, or ``None`` when no item has this external id.
+    """
+    return service.items.get_by_external_id(external_id)
+
+
+def items_create(service: TaxomeshService, *, body: CreateItemRequest) -> Item:
+    """Create an item.
+
+    Args:
+        service: The service to call.
+        body: The validated request, with ``name``, ``external_id``, ``slug`` and ``metadata``.
+
+    Returns:
+        The row of the new item.
 
     Raises:
-        TaxomeshItemNotFoundError: If no item with the given id exists.
+        TaxomeshDuplicateSlugError: If the slug is not empty and another item has it.
+        TaxomeshExternalIdConflictError: If another item already has the external id.
     """
-    return service.get_item(item_id)
-
-
-def get_item_by_slug(service: TaxomeshService, slug: str) -> Item:
-    """Retrieve an item by its slug.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        slug: The URL-friendly identifier of the item.
-
-    Returns:
-        The matching Item.
-
-    Raises:
-        TaxomeshItemNotFoundError: If no item with the given slug exists.
-    """
-    return service.get_item_by_slug(slug)
-
-
-def get_item_by_external_id(service: TaxomeshService, external_id: str) -> Item | None:
-    """Return the item matching the given external_id, or None.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        external_id: The external identifier to look up.
-
-    Returns:
-        The matching Item, or None if not found.
-    """
-    return service.get_item_by_external_id(external_id)
-
-
-def create_item(service: TaxomeshService, body: CreateItemRequest) -> Item:
-    """Create a new item.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        body: Validated create request containing name, external_id, slug, metadata.
-
-    Returns:
-        The newly created Item.
-
-    Raises:
-        TaxomeshDuplicateSlugError: If slug is non-empty and already in use.
-    """
-    return service.create_item(
+    return service.items.create(
         name=body.name,
         external_id=body.external_id,
         slug=body.slug,
@@ -237,42 +372,164 @@ def create_item(service: TaxomeshService, body: CreateItemRequest) -> Item:
     )
 
 
-def update_item(service: TaxomeshService, item_id: UUID, body: UpdateItemRequest) -> Item:
-    """Update an existing item.
+def items_update(service: TaxomeshService, item_id: UUID, *, body: UpdateItemRequest) -> Item:
+    """Update an item.
 
-    Only fields the caller explicitly set are delegated: an omitted field carries no
-    instruction and leaves the stored value untouched. A present field is assigned its value.
-    ``external_id`` is the sole field whose value domain includes null, so an explicit null
-    external_id clears the stored identifier; a null on any other field is rejected by request
-    validation before this handler runs.
+    Only the fields that the caller set are passed on: an omitted field carries no instruction and
+    keeps the stored value. A present field is assigned its value. ``external_id`` is the one
+    stored field that accepts null, so a null ``external_id`` clears the stored external id. The
+    request validation refuses a null in any other stored field before this handler runs.
+    ``expected_version`` is passed on as it is: omitted or null, the update compares no version.
+
+    Each field is passed under its own keyword, and not unpacked from a model dump, so a service
+    parameter with another name is a type error here, and not a ``TypeError`` at run time.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        item_id: The library-assigned UUID of the item to update.
-        body: Validated update request; only explicitly provided fields are delegated.
+        service: The service to call.
+        item_id: The identifier of the item to update.
+        body: The validated request; only the fields that the caller set are passed on.
 
     Returns:
-        The updated Item.
+        The new row of the item.
 
     Raises:
-        TaxomeshItemNotFoundError: If no item with the given id exists.
-        TaxomeshDuplicateSlugError: If slug is non-empty and already in use.
-        TaxomeshExternalIdConflictError: If external_id is already held by another item.
+        TaxomeshItemNotFoundError: If the item is not stored.
+        TaxomeshDuplicateSlugError: If the slug is not empty and another item has it.
+        TaxomeshExternalIdConflictError: If another item already has the external id.
+        TaxomeshVersionConflictError: If ``expected_version`` is given and the stored item is not
+            at it.
     """
-    return service.update_item(item_id=item_id, **body.model_dump(exclude_unset=True))
+    provided = body.model_fields_set
+    return service.items.update(
+        item_id,
+        name=body.name if "name" in provided else UNSET,
+        slug=body.slug if "slug" in provided else UNSET,
+        metadata=body.metadata if "metadata" in provided else UNSET,
+        external_id=body.external_id if "external_id" in provided else UNSET,
+        enabled=body.enabled if "enabled" in provided else UNSET,
+        expected_version=body.expected_version,
+    )
 
 
-def delete_item(service: TaxomeshService, item_id: UUID) -> None:
-    """Delete an item.
+def items_delete(service: TaxomeshService, item_id: UUID) -> None:
+    """Delete an item, and every link that names it.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        item_id: The library-assigned UUID of the item to delete.
+        service: The service to call.
+        item_id: The identifier of the item to delete.
 
     Raises:
-        TaxomeshItemNotFoundError: If no item with the given id exists.
+        TaxomeshItemNotFoundError: If the item is not stored.
     """
-    service.delete_item(item_id)
+    service.items.delete(item_id)
+
+
+def items_place_in(
+    service: TaxomeshService,
+    item_id: UUID,
+    *,
+    body: PlaceItemRequest,
+) -> ItemParentLink:
+    """Place an item in a category.
+
+    Args:
+        service: The service to call.
+        item_id: The identifier of the item.
+        body: The validated request, with ``category_id`` and ``sort_index``.
+
+    Returns:
+        The placement.
+
+    Raises:
+        TaxomeshItemNotFoundError: If the item is not stored.
+        TaxomeshCategoryNotFoundError: If the category is not stored.
+    """
+    return service.items.place_in(
+        item=item_id,
+        category=body.category_id,
+        sort_index=body.sort_index,
+    )
+
+
+def items_remove_from(service: TaxomeshService, item_id: UUID, *, category_id: UUID) -> None:
+    """Remove an item from one category. Removing a placement it does not have does nothing.
+
+    Args:
+        service: The service to call.
+        item_id: The identifier of the item.
+        category_id: The identifier of the category.
+
+    Raises:
+        TaxomeshItemNotFoundError: If the item is not stored.
+        TaxomeshCategoryNotFoundError: If the category is not stored.
+    """
+    service.items.remove_from(item=item_id, category=category_id)
+
+
+def items_tag(service: TaxomeshService, item_id: UUID, *, tag_id: UUID) -> None:
+    """Tag an item. Tagging it again with the same tag changes nothing.
+
+    The item comes first, as in ``service.items.tag``: the member is on the collection of the
+    entity that it changes. Both parameters are ``UUID``s, so ``tag_id`` is keyword-only, and the two
+    cannot change places.
+
+    Args:
+        service: The service to call.
+        item_id: The identifier of the item.
+        tag_id: The identifier of the tag.
+
+    Raises:
+        TaxomeshTagNotFoundError: If the tag is not stored.
+        TaxomeshItemNotFoundError: If the item is not stored.
+    """
+    service.items.tag(item=item_id, tag=tag_id)
+
+
+def items_untag(service: TaxomeshService, item_id: UUID, *, tag_id: UUID) -> None:
+    """Remove a tag from an item. Removing a tag that it does not have does nothing.
+
+    The item comes first, as in ``service.items.untag``: the member is on the collection of the
+    entity that it changes. Both parameters are ``UUID``s, so ``tag_id`` is keyword-only, and the two
+    cannot change places.
+
+    Args:
+        service: The service to call.
+        item_id: The identifier of the item.
+        tag_id: The identifier of the tag.
+
+    Raises:
+        TaxomeshTagNotFoundError: If the tag is not stored.
+        TaxomeshItemNotFoundError: If the item is not stored.
+    """
+    service.items.untag(item=item_id, tag=tag_id)
+
+
+def items_search(service: TaxomeshService, *, params: SearchItemsRequest) -> Sequence[Item]:
+    """Search the items with every parameter of ``SearchItemsRequest``.
+
+    The request object is named ``params`` and not ``body``: it serves a GET endpoint, which has
+    no body.
+
+    Args:
+        service: The service to call.
+        params: The validated search parameters.
+
+    Returns:
+        The items in order of relevance, at most ``params.limit`` of them.
+
+    Raises:
+        TaxomeshValidationError: If ``params.limit`` is 0 or less.
+        TaxomeshCategoryNotFoundError: If ``params.category_id`` names a category that is not
+            stored.
+    """
+    return service.items.search(
+        params.query,
+        limit=params.limit,
+        category=params.category_id,
+        enabled=params.enabled,
+        fuzzy=params.fuzzy,
+        recursive=params.recursive,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -280,235 +537,89 @@ def delete_item(service: TaxomeshService, item_id: UUID) -> None:
 # ---------------------------------------------------------------------------
 
 
-def list_tags(service: TaxomeshService) -> list[Tag]:
-    """List all tags.
+def tags_list(service: TaxomeshService, *, item_id: UUID | None = None) -> Sequence[Tag]:
+    """List tags: every one, or those that an item has.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
+        service: The service to call.
+        item_id: When given, only the tags of this item, ordered by name.
 
     Returns:
-        List of all tags; empty list if none exist.
-    """
-    return service.list_tags()
-
-
-def create_tag(service: TaxomeshService, body: CreateTagRequest) -> Tag:
-    """Create a new tag.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        body: Validated create request containing name and metadata.
-
-    Returns:
-        The newly created Tag.
-    """
-    return service.create_tag(name=body.name, metadata=body.metadata)
-
-
-def update_tag(service: TaxomeshService, tag_id: UUID, body: UpdateTagRequest) -> Tag:
-    """Update an existing tag.
-
-    Only fields the caller explicitly set are delegated: an omitted field carries no
-    instruction and leaves the stored value untouched. ``name`` is non-nullable, so an
-    explicit null is rejected by request validation before this handler runs.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        tag_id: The library-assigned UUID of the tag to update.
-        body: Validated update request; only explicitly provided fields are delegated.
-
-    Returns:
-        The updated Tag.
+        The matching tags.
 
     Raises:
-        TaxomeshTagNotFoundError: If no tag with the given id exists.
+        TaxomeshItemNotFoundError: If ``item_id`` names an item that is not stored.
     """
-    return service.update_tag(tag_id=tag_id, **body.model_dump(exclude_unset=True))
+    return service.tags.list(item=item_id)
 
 
-def delete_tag(service: TaxomeshService, tag_id: UUID) -> None:
-    """Delete a tag.
+def tags_get(service: TaxomeshService, tag_id: UUID) -> Tag | None:
+    """Return the tag with this identifier, or ``None``.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        tag_id: The library-assigned UUID of the tag to delete.
-
-    Raises:
-        TaxomeshTagNotFoundError: If no tag with the given id exists.
-    """
-    service.delete_tag(tag_id)
-
-
-# ---------------------------------------------------------------------------
-# Relationships
-# ---------------------------------------------------------------------------
-
-
-def add_category_parent(
-    service: TaxomeshService,
-    category_id: UUID,
-    body: AddParentRequest,
-) -> CategoryParentLink:
-    """Add a parent relationship to a category.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        category_id: The child category's UUID.
-        body: Validated request with parent_id and sort_index.
+        service: The service to call.
+        tag_id: The identifier of the tag.
 
     Returns:
-        The created CategoryParentLink.
+        The tag row, or ``None`` when no tag with this identifier is stored.
+    """
+    return service.tags.get(tag_id)
+
+
+def tags_create(service: TaxomeshService, *, body: CreateTagRequest) -> Tag:
+    """Create a tag.
+
+    Args:
+        service: The service to call.
+        body: The validated request, with ``name`` and ``metadata``.
+
+    Returns:
+        The row of the new tag.
+    """
+    return service.tags.create(name=body.name, metadata=body.metadata)
+
+
+def tags_update(service: TaxomeshService, tag_id: UUID, *, body: UpdateTagRequest) -> Tag:
+    """Update a tag.
+
+    Only the fields that the caller set are passed on: an omitted field carries no instruction and
+    keeps the stored value. Neither field accepts null, so the request validation refuses a null
+    before this handler runs. A present ``metadata`` replaces the stored one, as in the item and
+    category updates.
+
+    Each field is passed under its own keyword, and not unpacked from a model dump, so a service
+    parameter with another name is a type error here, and not a ``TypeError`` at run time.
+
+    Args:
+        service: The service to call.
+        tag_id: The identifier of the tag to update.
+        body: The validated request; only the fields that the caller set are passed on.
+
+    Returns:
+        The new row of the tag.
 
     Raises:
-        TaxomeshCategoryNotFoundError: If either category does not exist.
-        TaxomeshCyclicDependencyError: If the relationship would create a cycle.
+        TaxomeshTagNotFoundError: If the tag is not stored.
     """
-    return service.add_category_parent(
-        category_id=category_id,
-        parent_id=body.parent_id,
-        sort_index=body.sort_index,
+    provided = body.model_fields_set
+    return service.tags.update(
+        tag_id,
+        name=body.name if "name" in provided else UNSET,
+        metadata=body.metadata if "metadata" in provided else UNSET,
     )
 
 
-def remove_category_parent(service: TaxomeshService, category_id: UUID, parent_id: UUID) -> None:
-    """Remove a parent relationship from a category.
+def tags_delete(service: TaxomeshService, tag_id: UUID) -> None:
+    """Delete a tag, and every link that names it.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        category_id: The child category's UUID.
-        parent_id: The parent category's UUID.
+        service: The service to call.
+        tag_id: The identifier of the tag to delete.
 
     Raises:
-        TaxomeshCategoryNotFoundError: If either category does not exist.
+        TaxomeshTagNotFoundError: If the tag is not stored.
     """
-    service.remove_category_parent(category_id=category_id, parent_id=parent_id)
-
-
-def place_item_in_category(
-    service: TaxomeshService,
-    item_id: UUID,
-    body: PlaceInCategoryRequest,
-) -> ItemParentLink:
-    """Place an item in a category.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        item_id: The library-assigned UUID of the item.
-        body: Validated request with category_id and sort_index.
-
-    Returns:
-        The resulting ItemParentLink.
-
-    Raises:
-        TaxomeshItemNotFoundError: If no item with the given id exists.
-        TaxomeshCategoryNotFoundError: If no category with the given id exists.
-    """
-    return service.place_item_in_category(
-        item_id=item_id,
-        category_id=body.category_id,
-        sort_index=body.sort_index,
-    )
-
-
-def remove_item_from_category(service: TaxomeshService, item_id: UUID, category_id: UUID) -> None:
-    """Remove an item's placement from a category.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        item_id: The item's UUID.
-        category_id: The category's UUID.
-
-    Raises:
-        TaxomeshItemNotFoundError: If no item with the given id exists.
-        TaxomeshCategoryNotFoundError: If no category with the given id exists.
-    """
-    service.remove_item_from_category(item_id=item_id, category_id=category_id)
-
-
-def assign_tag(service: TaxomeshService, tag_id: UUID, item_id: UUID) -> None:
-    """Associate a tag with an item. Idempotent.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        tag_id: The library-assigned UUID of the tag.
-        item_id: The library-assigned UUID of the item.
-
-    Raises:
-        TaxomeshTagNotFoundError: If no tag with the given id exists.
-        TaxomeshItemNotFoundError: If no item with the given id exists.
-    """
-    service.assign_tag(tag_id=tag_id, item_id=item_id)
-
-
-def remove_tag_from_item(service: TaxomeshService, tag_id: UUID, item_id: UUID) -> None:
-    """Remove a tag association from an item.
-
-    Args:
-        service: The TaxomeshService instance to delegate to.
-        tag_id: The library-assigned UUID of the tag.
-        item_id: The library-assigned UUID of the item.
-
-    Raises:
-        TaxomeshTagNotFoundError: If no tag with the given id exists.
-        TaxomeshItemNotFoundError: If no item with the given id exists.
-    """
-    service.remove_tag(tag_id=tag_id, item_id=item_id)
-
-
-# ---------------------------------------------------------------------------
-# Search
-# ---------------------------------------------------------------------------
-
-
-def search_items(service: TaxomeshService, params: SearchItemsRequest) -> list[Item]:
-    """Search items using all parameters from SearchItemsRequest.
-
-    Delegates 1:1 to service.search_items(). Adds no business logic.
-
-    Args:
-        service: The TaxomeshService instance.
-        params: Validated search parameters.
-
-    Returns:
-        Items ranked by relevance, trimmed to params.limit.
-
-    Raises:
-        ValueError: If params.limit <= 0 (raised by service).
-        TaxomeshCategoryNotFoundError: If params.category_id does not exist.
-    """
-    return service.search_items(
-        params.q,
-        limit=params.limit,
-        category_id=params.category_id,
-        enabled=params.enabled,
-        fuzzy=params.fuzzy,
-        recursive=params.recursive,
-    )
-
-
-def search_categories(service: TaxomeshService, params: SearchCategoriesRequest) -> list[Category]:
-    """Search categories using all parameters from SearchCategoriesRequest.
-
-    Delegates 1:1 to service.search_categories(). Adds no business logic.
-
-    Args:
-        service: The TaxomeshService instance.
-        params: Validated search parameters.
-
-    Returns:
-        Categories ranked by relevance, trimmed to params.limit.
-
-    Raises:
-        ValueError: If params.limit <= 0 (raised by service).
-        TaxomeshCategoryNotFoundError: If params.parent_id does not exist.
-    """
-    return service.search_categories(
-        params.q,
-        limit=params.limit,
-        parent_id=params.parent_id,
-        enabled=params.enabled,
-        fuzzy=params.fuzzy,
-    )
+    service.tags.delete(tag_id)
 
 
 # ---------------------------------------------------------------------------
@@ -516,15 +627,23 @@ def search_categories(service: TaxomeshService, params: SearchCategoriesRequest)
 # ---------------------------------------------------------------------------
 
 
-def get_graph(service: TaxomeshService, *, include_disabled: bool = False) -> TaxomeshGraph:
-    """Build and return the full taxonomy graph snapshot.
+def graph(service: TaxomeshService, *, enabled: bool | None = True) -> TaxomeshGraph:
+    """Return the graph snapshot.
 
     Args:
-        service: The TaxomeshService instance to delegate to.
-        include_disabled: When True, returns all categories and items regardless of
-            enabled state. When False (default), returns only enabled records.
+        service: The service to call.
+        enabled: ``True`` (the default) keeps only the enabled categories and items, ``False``
+            only the disabled ones, and ``None`` all of them.
 
     Returns:
-        A TaxomeshGraph snapshot with all categories, items, and relationships.
+        The ``TaxomeshGraph``: the categories, their parent links and their items, as they were
+        stored at the call.
+
+    Note:
+        A filtered graph is not the whole graph with some rows hidden. A link is kept only when
+        both of its ends pass the filter, so ``enabled=False`` drops the parent link between a
+        disabled category and an enabled parent. The child stays under each parent that the
+        filter keeps. With none, it is in no node's children: ``walk()`` reaches it, and
+        ``roots`` does not list it.
     """
-    return service.get_graph(enabled=None if include_disabled else True)
+    return service.graph(enabled=enabled)

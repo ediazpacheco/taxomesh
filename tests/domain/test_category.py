@@ -1,4 +1,4 @@
-"""Tests for Category.external_id type, default, and coercion (spec 041)."""
+"""Tests for Category.external_id type, default, and coercion."""
 
 from uuid import uuid4
 
@@ -22,14 +22,14 @@ def test_external_id_str_input_stays_str() -> None:
 
 
 def test_external_id_int_coerced_to_str() -> None:
-    cat = Category(name="Test", external_id=42)  # type: ignore[arg-type]
+    cat = Category.model_validate({"name": "Test", "external_id": 42})
     assert cat.external_id == "42"
     assert isinstance(cat.external_id, str)
 
 
 def test_external_id_uuid_coerced_to_str() -> None:
     uid = uuid4()
-    cat = Category(name="Test", external_id=uid)  # type: ignore[arg-type]
+    cat = Category.model_validate({"name": "Test", "external_id": uid})
     assert cat.external_id == str(uid)
     assert isinstance(cat.external_id, str)
 

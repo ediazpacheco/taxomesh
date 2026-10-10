@@ -1,37 +1,39 @@
-"""taxomesh Django integration app.
+"""The Django app of taxomesh.
 
-Provides:
-- Django ORM models for taxomesh domain objects (via ``taxomesh.contrib.django.models``)
-- ``get_taxomesh_service_with_django`` convenience factory (deferred imports — Django not required
-  at import time)
+It has the ORM models behind ``DjangoRepository`` (``taxomesh.contrib.django.models``), the
+admin, and ``get_taxomesh_service_with_django``, which builds a service over the Django ORM.
+Importing this package imports no Django: the function imports it when it runs.
 
-To use in a Django project, add ``"taxomesh.contrib.django"`` to ``INSTALLED_APPS`` and run
+To use it in a Django project, add ``"taxomesh.contrib.django"`` to ``INSTALLED_APPS`` and run
 ``python manage.py migrate``.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from taxomesh.application.service import TaxomeshService
 
 default_app_config = "taxomesh.contrib.django.apps.TaxomeshContribDjangoConfig"
 
 
 def get_taxomesh_service_with_django(
     using: str | None = None,
-) -> Any:
-    """Return a TaxomeshService backed by DjangoRepository.
+) -> "TaxomeshService":
+    """Return a new ``TaxomeshService`` whose repository is a ``DjangoRepository``.
 
-    Both ``DjangoRepository`` and ``TaxomeshService`` are imported inside this
-    function body so that ``from taxomesh.contrib.django import
-    get_taxomesh_service_with_django`` succeeds even when Django is not installed.
+    ``DjangoRepository`` and ``TaxomeshService`` are imported inside this function, so that
+    ``from taxomesh.contrib.django import get_taxomesh_service_with_django`` succeeds when Django is
+    not installed.
 
     Args:
-        using: Django database alias. Defaults to ``DJANGO_REPO_USING_DEFAULT``
-            (``"default"``) when ``None``.
+        using: The Django database alias. When ``None``, the alias ``"default"``.
 
     Returns:
-        A fully configured ``TaxomeshService`` instance using the Django ORM backend.
+        A service over the Django ORM, on that database.
 
     Raises:
-        TaxomeshRepositoryError: If Django is not installed.
+        TaxomeshRepositoryError: If Django is not installed, or if its settings are not
+            configured.
     """
     from taxomesh import TaxomeshService  # noqa: PLC0415
     from taxomesh.adapters.repositories.django_repository import (  # noqa: PLC0415

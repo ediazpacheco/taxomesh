@@ -1,17 +1,17 @@
-"""Tests for audit fields (created_at, updated_at, version) on Category and Item.
+"""Tests for audit fields (created_at, updated_at, version) on Category and Item."""
 
-TDD: timestamp tests (T009) are written before service stamping is implemented.
-Version tests (T015) are added later in the same file.
-"""
-
-import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Final
 
 import pytest
 
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.json_repository import JsonRepository
+from taxomesh.domain.models import Category, Item
+
+# A stored row's timestamps, earlier than any update this suite makes.
+_PAST: Final = datetime(2020, 1, 1, tzinfo=UTC)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -32,13 +32,13 @@ def svc_path(tmp_path: Path) -> tuple[TaxomeshService, Path]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 / User Story 1 — Timestamps (T009)
+# Timestamps
 # ---------------------------------------------------------------------------
 
 
-def test_create_category_timestamps_set(svc: TaxomeshService) -> None:
+def test_categories_create_timestamps_set(svc: TaxomeshService) -> None:
     before = datetime.now(tz=UTC)
-    cat = svc.create_category("Fruits")
+    cat = svc.categories.create("Fruits")
     after = datetime.now(tz=UTC)
 
     assert cat.created_at.tzinfo is not None
@@ -47,21 +47,18 @@ def test_create_category_timestamps_set(svc: TaxomeshService) -> None:
     assert before <= cat.created_at <= after
 
 
-def test_update_category_advances_updated_at(svc: TaxomeshService) -> None:
-    cat = svc.create_category("Fruits")
-    pre_update_updated_at = cat.updated_at
-    pre_update_created_at = cat.created_at
+def test_categories_update_advances_updated_at(svc: TaxomeshService) -> None:
+    stored = svc.repository.save_category(Category(name="Fruits", created_at=_PAST, updated_at=_PAST))
 
-    time.sleep(0.01)
-    updated = svc.update_category(cat.category_id, name="Veggies")
+    updated = svc.categories.update(stored.category_id, name="Veggies")
 
-    assert updated.updated_at >= pre_update_updated_at
-    assert updated.created_at == pre_update_created_at
+    assert updated.updated_at > _PAST
+    assert updated.created_at == _PAST
 
 
-def test_create_item_timestamps_set(svc: TaxomeshService) -> None:
+def test_items_create_timestamps_set(svc: TaxomeshService) -> None:
     before = datetime.now(tz=UTC)
-    item = svc.create_item("Apple")
+    item = svc.items.create("Apple")
     after = datetime.now(tz=UTC)
 
     assert item.created_at.tzinfo is not None
@@ -70,29 +67,26 @@ def test_create_item_timestamps_set(svc: TaxomeshService) -> None:
     assert before <= item.created_at <= after
 
 
-def test_update_item_advances_updated_at(svc: TaxomeshService) -> None:
-    item = svc.create_item("Apple")
-    pre_update_updated_at = item.updated_at
-    pre_update_created_at = item.created_at
+def test_items_update_advances_updated_at(svc: TaxomeshService) -> None:
+    stored = svc.repository.save_item(Item(name="Apple", created_at=_PAST, updated_at=_PAST))
 
-    time.sleep(0.01)
-    updated = svc.update_item(item.item_id, name="Orange")
+    updated = svc.items.update(stored.item_id, name="Orange")
 
-    assert updated.updated_at >= pre_update_updated_at
-    assert updated.created_at == pre_update_created_at
+    assert updated.updated_at > _PAST
+    assert updated.created_at == _PAST
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 / User Story 1 — JSON round-trip (T014)
+# JSON round-trip
 # ---------------------------------------------------------------------------
 
 
 def test_json_category_timestamps_roundtrip(svc_path: tuple[TaxomeshService, Path]) -> None:
     svc, path = svc_path
-    cat = svc.create_category("Fruits")
+    cat = svc.categories.create("Fruits")
 
     svc2 = TaxomeshService(repository=JsonRepository(path))
-    reloaded = svc2.get_category(cat.category_id)
+    reloaded = svc2.categories[cat.category_id]
 
     assert reloaded.created_at == cat.created_at
     assert reloaded.updated_at == cat.updated_at
@@ -100,98 +94,98 @@ def test_json_category_timestamps_roundtrip(svc_path: tuple[TaxomeshService, Pat
 
 def test_json_item_timestamps_roundtrip(svc_path: tuple[TaxomeshService, Path]) -> None:
     svc, path = svc_path
-    item = svc.create_item("Apple")
+    item = svc.items.create("Apple")
 
     svc2 = TaxomeshService(repository=JsonRepository(path))
-    reloaded = svc2.get_item(item.item_id)
+    reloaded = svc2.items[item.item_id]
 
     assert reloaded.created_at == item.created_at
     assert reloaded.updated_at == item.updated_at
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 / User Story 2 — Version (T015)
+# Version
 # ---------------------------------------------------------------------------
 
 
-def test_create_category_version_is_zero(svc: TaxomeshService) -> None:
-    cat = svc.create_category("Fruits")
+def test_categories_create_version_is_zero(svc: TaxomeshService) -> None:
+    cat = svc.categories.create("Fruits")
     assert cat.version == 0
 
 
-def test_update_category_increments_version(svc: TaxomeshService) -> None:
-    cat = svc.create_category("Fruits")
-    updated1 = svc.update_category(cat.category_id, name="Veggies")
+def test_categories_update_increments_version(svc: TaxomeshService) -> None:
+    cat = svc.categories.create("Fruits")
+    updated1 = svc.categories.update(cat.category_id, name="Veggies")
     assert updated1.version == 1
-    updated2 = svc.update_category(cat.category_id, name="Grains")
+    updated2 = svc.categories.update(cat.category_id, name="Grains")
     assert updated2.version == 2
 
 
-def test_create_item_version_is_zero(svc: TaxomeshService) -> None:
-    item = svc.create_item("Apple")
+def test_items_create_version_is_zero(svc: TaxomeshService) -> None:
+    item = svc.items.create("Apple")
     assert item.version == 0
 
 
-def test_update_item_increments_version(svc: TaxomeshService) -> None:
-    item = svc.create_item("Apple")
-    updated1 = svc.update_item(item.item_id, name="Orange")
+def test_items_update_increments_version(svc: TaxomeshService) -> None:
+    item = svc.items.create("Apple")
+    updated1 = svc.items.update(item.item_id, name="Orange")
     assert updated1.version == 1
-    updated2 = svc.update_item(item.item_id, name="Grape")
+    updated2 = svc.items.update(item.item_id, name="Grape")
     assert updated2.version == 2
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 / User Story 2 — JSON version round-trip (T020)
+# JSON version round-trip
 # ---------------------------------------------------------------------------
 
 
 def test_json_category_version_roundtrip(svc_path: tuple[TaxomeshService, Path]) -> None:
     svc, path = svc_path
-    cat = svc.create_category("Fruits")
-    svc.update_category(cat.category_id, name="Veggies")
-    svc.update_category(cat.category_id, name="Grains")
+    cat = svc.categories.create("Fruits")
+    svc.categories.update(cat.category_id, name="Veggies")
+    svc.categories.update(cat.category_id, name="Grains")
 
     svc2 = TaxomeshService(repository=JsonRepository(path))
-    reloaded = svc2.get_category(cat.category_id)
+    reloaded = svc2.categories[cat.category_id]
     assert reloaded.version == 2
 
 
 def test_json_item_version_roundtrip(svc_path: tuple[TaxomeshService, Path]) -> None:
     svc, path = svc_path
-    item = svc.create_item("Apple")
-    svc.update_item(item.item_id, name="Orange")
-    svc.update_item(item.item_id, name="Grape")
+    item = svc.items.create("Apple")
+    svc.items.update(item.item_id, name="Orange")
+    svc.items.update(item.item_id, name="Grape")
 
     svc2 = TaxomeshService(repository=JsonRepository(path))
-    reloaded = svc2.get_item(item.item_id)
+    reloaded = svc2.items[item.item_id]
     assert reloaded.version == 2
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 — Edge cases and invariants (T021, T022)
+# Edge cases and invariants
 # ---------------------------------------------------------------------------
 
 
 def test_structural_operations_do_not_bump_version(svc: TaxomeshService) -> None:
     """Adding item to a category (structural) must not change item version or updated_at."""
-    item = svc.create_item("Apple")
-    cat = svc.create_category("Fruits")
+    item = svc.items.create("Apple")
+    cat = svc.categories.create("Fruits")
 
     original_version = item.version
     original_updated_at = item.updated_at
 
-    svc.place_item_in_category(item.item_id, cat.category_id)
+    svc.items.place_in(item.item_id, cat.category_id)
 
-    reloaded = svc.get_item(item.item_id)
+    reloaded = svc.items[item.item_id]
     assert reloaded.version == original_version
     assert reloaded.updated_at == original_updated_at
 
 
 def test_created_at_never_changes_after_multiple_updates(svc: TaxomeshService) -> None:
     """created_at is immutable across any number of updates."""
-    cat = svc.create_category("Fruits")
+    cat = svc.categories.create("Fruits")
     original_created_at = cat.created_at
 
     for name in ("Veggies", "Grains", "Herbs"):
-        cat = svc.update_category(cat.category_id, name=name)
+        cat = svc.categories.update(cat.category_id, name=name)
         assert cat.created_at == original_created_at

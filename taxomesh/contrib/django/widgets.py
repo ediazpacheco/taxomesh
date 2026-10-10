@@ -1,45 +1,46 @@
-"""Custom Django admin widgets for taxomesh FK fields."""
+"""The widgets and the form field of the taxomesh admin: the JSON editor and the linked select."""
 
 import json
 from typing import Any, Final
 
 from django import forms
 from django.contrib.admin.widgets import AutocompleteSelect
+from django.forms.renderers import BaseRenderer
 from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe
+from django.utils.safestring import SafeString, mark_safe
 
 ACE_EDITOR_CDN_URL: Final[str] = "https://cdn.jsdelivr.net/npm/ace-builds@1.43.3/src-min-noconflict/ace.js"
 ACE_EDITOR_BASE_PATH: Final[str] = "https://cdn.jsdelivr.net/npm/ace-builds@1.43.3/src-min-noconflict/"
 
 
 class JsonEditorWidget(forms.Widget):
-    """Ace Editor widget for JSONField — syntax highlighting + real-time validation.
+    """The Ace editor for a ``JSONField``: JSON highlighting, and a check of the JSON as you type.
 
-    Renders a hidden ``<textarea>`` (the actual form submission target) paired with an
-    Ace Editor div that provides JSON syntax highlighting, auto-indentation, and a
-    web-worker-powered real-time validation indicator.  A ``submit`` event listener
-    blocks form submission when the editor contains syntactically invalid JSON.
+    It renders a hidden ``<textarea>``, which the form submits, beside a ``<div>`` with the Ace
+    editor. The editor highlights and indents the JSON, and its web worker marks invalid JSON as
+    you type. A ``submit`` listener stops the submission while the editor holds invalid JSON.
 
-    The Ace library is loaded from jsDelivr CDN; no new Python runtime dependency is
-    introduced.
+    The page loads the Ace library from the jsDelivr CDN, so it is not a Python dependency.
     """
 
     class Media:
         js = (ACE_EDITOR_CDN_URL,)
 
+    # Any: an override takes what django-stubs' Widget.__init__ takes, whose attrs are dict[str, Any].
     def __init__(self, attrs: dict[str, Any] | None = None, height: str = "300px") -> None:
         super().__init__(attrs=attrs)
         self.height = height
 
+    # Any: an override takes what django-stubs' Widget.render takes, whose attrs are dict[str, Any].
     def render(
         self,
         name: str,
         value: object,
         attrs: dict[str, Any] | None = None,
-        renderer: object = None,
-    ) -> str:
-        """Render hidden textarea + Ace editor div + initialisation script."""
+        renderer: BaseRenderer | None = None,
+    ) -> SafeString:
+        """Render the hidden textarea, the ``<div>`` of the Ace editor and the script that starts it."""
         # Normalise value to a JSON string
         if value is None:
             json_str = "{}"
@@ -97,7 +98,7 @@ class JsonEditorWidget(forms.Widget):
             'var hasErrors=annotations.some(function(a){return a.type==="error";});'
             "if(hasErrors){"
             "event.preventDefault();"
-            'window.alert("Metadata contains invalid JSON. Please fix the errors before saving.");'
+            'window.alert("Metadata is not valid JSON. Correct it, then save.");'
             "}"
             "});"
             "}"
@@ -108,28 +109,32 @@ class JsonEditorWidget(forms.Widget):
 
 
 class JsonEditorFormField(forms.JSONField):
-    """JSONField subclass that normalises an empty string submission to ``{}``."""
+    """The form field of ``metadata``: an empty submission is ``{}``, and only a JSON object is accepted."""
 
     def clean(self, value: object) -> object:
-        """Convert an empty or blank string to ``{}`` before JSONField validation."""
-        if isinstance(value, str) and not value.strip():
+        """Convert an empty or blank submission to ``{}``, and refuse JSON that is not an object.
+
+        Metadata is a dict, so ``null``, a list, a number or a string is a form error here rather
+        than a ``TypeError`` from the service.
+        """
+        if value is None or (isinstance(value, str) and not value.strip()):
             value = "{}"
-        return super().clean(value)
+        cleaned = super().clean(value)
+        if not isinstance(cleaned, dict):
+            raise forms.ValidationError('Metadata must be a JSON object, such as {"key": "value"}.')
+        return cleaned
 
 
 class TaxomeshLinkedFKWidget(AutocompleteSelect):
-    """AutocompleteSelect widget that appends a '↗' admin change link when a value is selected.
+    """An ``AutocompleteSelect`` that adds a '↗' link to the admin page of the selected object.
 
-    Renders a compact Select2 autocomplete for any ForeignKey field, plus an inline
-    navigation link to the Django admin change page of the selected instance.  The
-    change URL is derived generically from the related model's ``_meta`` attributes so
-    the widget works for any FK target registered in the Django admin — no model names
-    are hardcoded.
+    It renders the Select2 autocomplete of a foreign key, and a link to the admin change page of
+    the selected object. The widget builds the change URL from the ``_meta`` of the related model,
+    so it works for any model that the admin registers, and names no model in its code.
 
-    The link is rendered server-side only: it reflects the value persisted at page-load
-    time and updates after the user saves the form.  When no value is selected, or when
-    the change URL cannot be resolved, the widget renders identically to the standard
-    ``AutocompleteSelect``.
+    The server renders the link: it shows the value that was stored when the page loaded, and
+    changes after the form is saved. When no value is selected, or when the change URL cannot be
+    built, the widget renders as the standard ``AutocompleteSelect`` does.
 
     Usage (per-field widget override)::
 
@@ -143,28 +148,30 @@ class TaxomeshLinkedFKWidget(AutocompleteSelect):
                     admin_site=admin.site,
                 )
 
-    For a drop-in solution that applies automatically, see
+    To use it on every taxomesh foreign key of an admin, with no code for each field, use
     ``taxomesh.contrib.django.admin.TaxomeshLinkedFKMixin``.
     """
 
+    # Any: an override takes what django-stubs' Widget.render takes, whose attrs are dict[str, Any].
     def render(
         self,
         name: str,
         value: object,
         attrs: dict[str, Any] | None = None,
-        renderer: object = None,
-    ) -> str:
-        """Render the autocomplete select and, when a value is set, a '↗' change link.
+        renderer: BaseRenderer | None = None,
+    ) -> SafeString:
+        """Render the autocomplete select and, when a value is selected, the '↗' change link.
 
         Args:
-            name: The HTML input name attribute.
-            value: The current field value (FK pk), or ``None`` / empty if not set.
-            attrs: Optional HTML attributes dict passed to the underlying widget.
-            renderer: Django form renderer (passed through to parent; added in Django 4.0).
+            name: The ``name`` attribute of the HTML input.
+            value: The value of the field, the primary key of the related object, or ``None`` or
+                empty when no value is selected.
+            attrs: The HTML attributes, passed to the parent widget.
+            renderer: The Django form renderer, passed to the parent widget.
 
         Returns:
-            Safe HTML string containing the Select2 widget and, conditionally, a
-            navigation link to the admin change page of the selected instance.
+            Safe HTML: the Select2 widget and, when a value is selected and its change URL can be
+            built, the link to the admin change page of the selected object.
         """
         output = super().render(name, value, attrs, renderer)
         if not value:
@@ -175,7 +182,7 @@ class TaxomeshLinkedFKWidget(AutocompleteSelect):
             model_name = target_model._meta.model_name
             url = reverse(f"admin:{app_label}_{model_name}_change", args=[value])
             link = format_html(
-                ' <a href="{}" title="Ver en admin" style="margin-left:4px">&#8599;</a>',
+                ' <a href="{}" title="View in admin" style="margin-left:4px">&#8599;</a>',
                 url,
             )
             return mark_safe(output + link)

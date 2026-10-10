@@ -1,13 +1,31 @@
 """Tests for service-level memoization caching."""
 
+import gc
+import math
+import re
+import weakref
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Final
 from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
-from taxomesh.application.service import TaxomeshService
+from taxomesh.application.collections.categories import CategoryCollection
+from taxomesh.application.service import DEFAULT_CACHE_TTL, TaxomeshService
+from taxomesh.domain.info import TaxomeshInfo
 from taxomesh.domain.models import Category, Item, Tag
-from taxomesh.utils.memoize import clear_all_caches
+from taxomesh.exceptions import TaxomeshError, TaxomeshValidationError
+from taxomesh.ports.repository import TaxomeshRepositoryBase
+from tests.service.conftest import BACKEND_PARAMS, CountedService, CountingRepository, _build_repository
+
+
+# Any: these calls pass what the annotations refuse, as an untyped caller can.
+def untyped(value: object) -> Any:
+    """Return ``value`` typed as anything, so a call can pass what its annotation refuses."""
+    return value
 
 
 def _make_service(repo: MagicMock) -> TaxomeshService:
@@ -22,97 +40,88 @@ def _mock_repo() -> MagicMock:
     item_id = uuid4()
     tag_id = uuid4()
     cat = Category(category_id=cat_id, name="TestCat")
-    item = Item(external_id="test-item", item_id=item_id)
+    item = Item(name="Item", external_id="test-item", item_id=item_id)
     tag = Tag(tag_id=tag_id, name="testtag")
-    repo.get_category.return_value = cat
+    repo.find_category.return_value = cat
     repo.list_categories.return_value = [cat]
-    repo.get_item.return_value = item
+    repo.find_item.return_value = item
     repo.list_items.return_value = [item]
     repo.list_tags.return_value = [tag]
     repo.list_category_parent_links.return_value = []
     repo.list_item_parent_links.return_value = []
-    repo.get_config_summary.return_value = "mock"
+    repo.config_summary = "mock"
     return repo
 
 
-class TestServiceGetCategoryCaching:
-    def setup_method(self) -> None:
-        clear_all_caches()
-
-    def test_get_category_called_once_when_cached(self) -> None:
+class TestServiceCategoriesSubscriptCaching:
+    def test_categories_subscript_called_once_when_cached(self) -> None:
         repo = _mock_repo()
         svc = _make_service(repo)
-        cat_id = repo.get_category.return_value.category_id
-        svc.get_category(cat_id)
-        svc.get_category(cat_id)
-        repo.get_category.assert_called_once()
+        cat_id = repo.find_category.return_value.category_id
+        svc.categories[cat_id]
+        svc.categories[cat_id]
+        repo.find_category.assert_called_once()
 
 
 class TestServiceCacheInvalidationOnWrite:
-    def setup_method(self) -> None:
-        clear_all_caches()
-
-    def test_create_category_invalidates_cache(self) -> None:
+    def test_categories_create_invalidates_cache(self) -> None:
         repo = _mock_repo()
         new_cat = Category(category_id=uuid4(), name="NewCat")
         repo.save_category.return_value = None
-        repo.get_category.return_value = new_cat
+        repo.find_category.return_value = new_cat
         svc = _make_service(repo)
 
         cat_id = new_cat.category_id
-        repo.get_category.return_value = new_cat
-        svc.get_category(cat_id)
+        repo.find_category.return_value = new_cat
+        svc.categories[cat_id]
 
-        svc.create_category(name="Another")
-        svc.get_category(cat_id)
-        assert repo.get_category.call_count == 2
+        svc.categories.create(name="Another")
+        svc.categories[cat_id]
+        assert repo.find_category.call_count == 2
 
 
 class TestServiceReadMethodsCaching:
-    def setup_method(self) -> None:
-        clear_all_caches()
-
-    def test_list_categories_cached(self) -> None:
+    def test_categories_list_cached(self) -> None:
         repo = _mock_repo()
         svc = _make_service(repo)
-        svc.list_categories()
-        svc.list_categories()
-        repo.list_categories.assert_called_once()
+        svc.categories.list()
+        svc.categories.list()
+        # One read from _ensure_root at construction, one from the first list(); the second
+        # adds none. Asserted through list() rather than roots(), which reaches
+        # list_category_parent_links and so could never move this count either way.
+        assert repo.list_categories.call_count == 2
 
-    def test_get_item_cached(self) -> None:
+    def test_items_subscript_cached(self) -> None:
         repo = _mock_repo()
         svc = _make_service(repo)
-        item_id = repo.get_item.return_value.item_id
-        svc.get_item(item_id)
-        svc.get_item(item_id)
-        repo.get_item.assert_called_once()
+        item_id = repo.find_item.return_value.item_id
+        svc.items[item_id]
+        svc.items[item_id]
+        repo.find_item.assert_called_once()
 
-    def test_list_items_cached(self) -> None:
+    def test_items_list_cached(self) -> None:
         repo = _mock_repo()
         svc = _make_service(repo)
-        svc.list_items()
-        svc.list_items()
+        svc.items.list()
+        svc.items.list()
         repo.list_items.assert_called_once()
 
-    def test_list_tags_cached(self) -> None:
+    def test_tags_list_cached(self) -> None:
         repo = _mock_repo()
         svc = _make_service(repo)
-        svc.list_tags()
-        svc.list_tags()
+        svc.tags.list()
+        svc.tags.list()
         repo.list_tags.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# T003 / T004 — write-invalidation bug fixes: relate_items, remove_item_relation
+# Write-invalidation bug fixes: items.relate, items.unrelate
 # ---------------------------------------------------------------------------
 
 
 class TestRelationWriteInvalidation:
-    def setup_method(self) -> None:
-        clear_all_caches()
-
-    def test_relate_items_invalidates_cache(self) -> None:
-        """relate_items must call clear_all_caches so subsequent reads are fresh."""
+    def test_relate_invalidates_cache(self) -> None:
+        """items.relate clears the service's cache, so the next read is fresh."""
         from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
 
         repo = _mock_repo()
@@ -121,24 +130,24 @@ class TestRelationWriteInvalidation:
         link = ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers")
         repo.list_item_relation_links.return_value = []
         repo.save_item_relation_link.return_value = None
-        repo.get_item.return_value = Item(external_id="x", item_id=src_id)
+        repo.find_item.return_value = Item(name="Item", external_id="x", item_id=src_id)
         svc = _make_service(repo)
 
         # Warm cache with empty result
-        svc.list_item_relations(src_id)
+        svc.items.list_relations(src_id)
         assert repo.list_item_relation_links.call_count == 1
 
         # Write — must invalidate
         repo.list_item_relation_links.return_value = [link]
-        svc.relate_items(src_id, tgt_id, "covers")
+        svc.items.relate(src_id, tgt_id, "covers")
 
         # Next read must hit repo again (cache was cleared)
-        result = svc.list_item_relations(src_id)
+        result = svc.items.list_relations(src_id)
         assert repo.list_item_relation_links.call_count == 2
         assert len(result) == 1
 
-    def test_remove_item_relation_invalidates_cache(self) -> None:
-        """remove_item_relation must call clear_all_caches so subsequent reads are fresh."""
+    def test_unrelate_invalidates_cache(self) -> None:
+        """items.unrelate clears the service's cache, so the next read is fresh."""
         from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
 
         repo = _mock_repo()
@@ -150,101 +159,95 @@ class TestRelationWriteInvalidation:
         svc = _make_service(repo)
 
         # Warm cache with one relation
-        svc.list_item_relations(src_id)
+        svc.items.list_relations(src_id)
         assert repo.list_item_relation_links.call_count == 1
 
         # Write — must invalidate
         repo.list_item_relation_links.return_value = []
-        svc.remove_item_relation(src_id, tgt_id, "covers")
+        svc.items.unrelate(src_id, tgt_id, "covers")
 
         # Next read must hit repo again
-        result = svc.list_item_relations(src_id)
+        result = svc.items.list_relations(src_id)
         assert repo.list_item_relation_links.call_count == 2
         assert len(result) == 0
 
 
 # ---------------------------------------------------------------------------
-# T005 / T006 / T007 — US1: get_item_by_external_id, get_category_by_external_id (spec 041)
+# items.get_by_external_id, categories.get_by_external_id
 # ---------------------------------------------------------------------------
 
 
 class TestExternalIdLookupCaching:
-    def setup_method(self) -> None:
-        clear_all_caches()
-
-    def test_get_item_by_external_id_cached(self) -> None:
-        """T005 — second call with same external_id must not hit repo."""
+    def test_items_get_by_external_id_cached(self) -> None:
+        """Second call with same external_id must not hit repo."""
         repo = _mock_repo()
-        item = Item(external_id="ext-001", item_id=uuid4())
-        repo.get_item_by_external_id.return_value = item
+        item = Item(name="Item", external_id="ext-001", item_id=uuid4())
+        repo.find_item_by_external_id.return_value = item
         svc = _make_service(repo)
 
-        svc.get_item_by_external_id("ext-001")
-        svc.get_item_by_external_id("ext-001")
-        repo.get_item_by_external_id.assert_called_once()
+        svc.items.get_by_external_id("ext-001")
+        svc.items.get_by_external_id("ext-001")
+        repo.find_item_by_external_id.assert_called_once()
 
-    def test_get_category_by_external_id_cached(self) -> None:
-        """T006 — second call with same external_id must not hit repo."""
+    def test_categories_get_by_external_id_cached(self) -> None:
+        """Second call with same external_id must not hit repo."""
         repo = _mock_repo()
         cat = Category(category_id=uuid4(), name="Cat", external_id="ext-cat-1")
-        repo.get_category_by_external_id.return_value = cat
-        repo.get_category.return_value = None  # root not involved
+        repo.find_category_by_external_id.return_value = cat
+        repo.find_category.return_value = None  # root not involved
         svc = _make_service(repo)
 
-        svc.get_category_by_external_id("ext-cat-1")
-        svc.get_category_by_external_id("ext-cat-1")
-        repo.get_category_by_external_id.assert_called_once()
+        svc.categories.get_by_external_id("ext-cat-1")
+        svc.categories.get_by_external_id("ext-cat-1")
+        repo.find_category_by_external_id.assert_called_once()
 
-    def test_get_item_by_external_id_none_result_cached(self) -> None:
-        """T007 — None result must also be cached (not re-queried)."""
+    def test_items_get_by_external_id_none_result_cached(self) -> None:
+        """None result must also be cached (not re-queried)."""
         repo = _mock_repo()
-        repo.get_item_by_external_id.return_value = None
+        repo.find_item_by_external_id.return_value = None
         svc = _make_service(repo)
 
-        result1 = svc.get_item_by_external_id("unknown")
-        result2 = svc.get_item_by_external_id("unknown")
+        result1 = svc.items.get_by_external_id("unknown")
+        result2 = svc.items.get_by_external_id("unknown")
         assert result1 is None
         assert result2 is None
-        repo.get_item_by_external_id.assert_called_once()
+        repo.find_item_by_external_id.assert_called_once()
 
-    def test_get_item_by_external_id_cache_expires_after_ttl(self) -> None:
-        """FR-007 — cached result must be re-fetched once the TTL window has elapsed."""
+    def test_items_get_by_external_id_cache_expires_after_ttl(self) -> None:
+        """Cached result must be re-fetched once the TTL window has elapsed."""
         repo = _mock_repo()
-        item = Item(external_id="ext-ttl", item_id=uuid4())
-        repo.get_item_by_external_id.return_value = item
+        item = Item(name="Item", external_id="ext-ttl", item_id=uuid4())
+        repo.find_item_by_external_id.return_value = item
         svc = _make_service(repo)
 
         with patch("taxomesh.utils.memoize.time") as mock_time:
             mock_time.monotonic.return_value = 0.0
-            svc.get_item_by_external_id("ext-ttl")
-            assert repo.get_item_by_external_id.call_count == 1
+            svc.items.get_by_external_id("ext-ttl")
+            assert repo.find_item_by_external_id.call_count == 1
 
             mock_time.monotonic.return_value = 6.0  # past DEFAULT_CACHE_TTL (5 s)
-            svc.get_item_by_external_id("ext-ttl")
-            assert repo.get_item_by_external_id.call_count == 2
+            svc.items.get_by_external_id("ext-ttl")
+            assert repo.find_item_by_external_id.call_count == 2
 
     def test_different_external_ids_are_independent_cache_entries(self) -> None:
         """Distinct external IDs must each hit the repo once."""
         repo = _mock_repo()
-        repo.get_item_by_external_id.return_value = None
+        repo.find_item_by_external_id.return_value = None
         svc = _make_service(repo)
 
-        svc.get_item_by_external_id("id-A")
-        svc.get_item_by_external_id("id-B")
-        assert repo.get_item_by_external_id.call_count == 2
+        svc.items.get_by_external_id("id-A")
+        svc.items.get_by_external_id("id-B")
+        assert repo.find_item_by_external_id.call_count == 2
 
 
 # ---------------------------------------------------------------------------
-# T010 / T011 / T012 — US2: list_item_relations, list_related_items
+# items.list_relations, items.list_related
 # ---------------------------------------------------------------------------
 
 
 class TestItemRelationCaching:
-    def setup_method(self) -> None:
-        clear_all_caches()
-
-    def test_list_item_relations_cached(self) -> None:
-        """T010 — second call with same args must not hit repo."""
+    def test_list_relations_cached(self) -> None:
+        """Second call with same args must not hit repo."""
         from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
 
         repo = _mock_repo()
@@ -253,37 +256,37 @@ class TestItemRelationCaching:
         repo.list_item_relation_links.return_value = [link]
         svc = _make_service(repo)
 
-        svc.list_item_relations(src_id)
-        svc.list_item_relations(src_id)
+        svc.items.list_relations(src_id)
+        svc.items.list_relations(src_id)
         repo.list_item_relation_links.assert_called_once()
 
-    def test_list_item_relations_direction_independent_cache(self) -> None:
-        """T011 — outgoing and incoming are distinct cache entries."""
+    def test_list_relations_direction_independent_cache(self) -> None:
+        """Outgoing and incoming are distinct cache entries."""
         repo = _mock_repo()
         src_id = uuid4()
         repo.list_item_relation_links.return_value = []
         svc = _make_service(repo)
 
-        svc.list_item_relations(src_id, direction="outgoing")
-        svc.list_item_relations(src_id, direction="incoming")
+        svc.items.list_relations(src_id, direction="outgoing")
+        svc.items.list_relations(src_id, direction="incoming")
         assert repo.list_item_relation_links.call_count == 2
 
-    def test_list_related_items_cached(self) -> None:
-        """T012 — second call with same args returns cached list[Item]."""
+    def test_list_related_cached(self) -> None:
+        """Second call with same args returns cached list[Item]."""
         repo = _mock_repo()
         src_id = uuid4()
         tgt_id = uuid4()
         repo.list_item_relation_links.return_value = []
-        repo.get_item.return_value = Item(external_id="t", item_id=tgt_id)
+        repo.find_item.return_value = Item(name="Item", external_id="t", item_id=tgt_id)
         svc = _make_service(repo)
 
-        svc.list_related_items(src_id)
-        svc.list_related_items(src_id)
+        svc.items.list_related(src_id)
+        svc.items.list_related(src_id)
         repo.list_item_relation_links.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# 055-memoize-batch-related — list_related_items_for_sources caching
+# items.get_many_related caching
 # ---------------------------------------------------------------------------
 
 
@@ -293,123 +296,120 @@ def _repo_with_batch_relation(src_id: UUID, tgt_id: UUID) -> MagicMock:
 
     repo = _mock_repo()
     link = ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers")
-    repo.list_item_relation_links_for_items.return_value = [link]
-    repo.get_items_by_ids.return_value = {
-        src_id: Item(external_id="src", item_id=src_id),
-        tgt_id: Item(external_id="tgt", item_id=tgt_id),
+    repo.list_item_relation_links_batch.return_value = [link]
+    repo.map_items_by_id.return_value = {
+        src_id: Item(name="Item", external_id="src", item_id=src_id),
+        tgt_id: Item(name="Item", external_id="tgt", item_id=tgt_id),
     }
     return repo
 
 
 class TestBatchRelatedItemsCaching:
-    def setup_method(self) -> None:
-        clear_all_caches()
-
     def test_identical_calls_hit_repo_once(self) -> None:
-        """US1 — two identical batched calls query the repository once."""
+        """Two identical batched calls query the repository once."""
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
         svc = _make_service(repo)
 
-        first = svc.list_related_items_for_sources([src_id])
-        second = svc.list_related_items_for_sources([src_id])
-        repo.list_item_relation_links_for_items.assert_called_once()
+        first = svc.items.get_many_related([src_id])
+        second = svc.items.get_many_related([src_id])
+        repo.list_item_relation_links_batch.assert_called_once()
         assert second == first
 
     def test_cache_expires_after_ttl(self) -> None:
-        """US1 — cached result is re-fetched once the TTL window has elapsed."""
+        """Cached result is re-fetched once the TTL window has elapsed."""
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
         svc = _make_service(repo)
 
         with patch("taxomesh.utils.memoize.time") as mock_time:
             mock_time.monotonic.return_value = 0.0
-            svc.list_related_items_for_sources([src_id])
-            assert repo.list_item_relation_links_for_items.call_count == 1
+            svc.items.get_many_related([src_id])
+            assert repo.list_item_relation_links_batch.call_count == 1
 
             mock_time.monotonic.return_value = 6.0  # past DEFAULT_CACHE_TTL (5 s)
-            svc.list_related_items_for_sources([src_id])
-            assert repo.list_item_relation_links_for_items.call_count == 2
+            svc.items.get_many_related([src_id])
+            assert repo.list_item_relation_links_batch.call_count == 2
 
     def test_different_source_ids_are_independent_entries(self) -> None:
-        """US1 — a different source set queries the repository again."""
+        """A different source set queries the repository again."""
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([src_id])
-        svc.list_related_items_for_sources([uuid4()])
-        assert repo.list_item_relation_links_for_items.call_count == 2
+        svc.items.get_many_related([src_id])
+        svc.items.get_many_related([uuid4()])
+        assert repo.list_item_relation_links_batch.call_count == 2
 
     def test_different_relation_type_filters_are_independent_entries(self) -> None:
-        """US1 — a different relation-type filter queries the repository again."""
+        """A different relation-type filter queries the repository again."""
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([src_id], relation_types=["covers"])
-        svc.list_related_items_for_sources([src_id], relation_types=["performs"])
-        assert repo.list_item_relation_links_for_items.call_count == 2
+        svc.items.get_many_related([src_id], relation_types=["covers"])
+        svc.items.get_many_related([src_id], relation_types=["performs"])
+        assert repo.list_item_relation_links_batch.call_count == 2
 
     def test_empty_source_ids_returns_empty_without_repo_call(self) -> None:
-        """US1 — empty input short-circuits before the cache and the repository."""
+        """Empty input short-circuits before the cache and the repository."""
         repo = _mock_repo()
         svc = _make_service(repo)
 
-        assert svc.list_related_items_for_sources([]) == {}
-        repo.list_item_relation_links_for_items.assert_not_called()
+        assert svc.items.get_many_related([]) == {}
+        repo.list_item_relation_links_batch.assert_not_called()
 
     def test_relation_type_variants_share_cache_entry(self) -> None:
-        """US2 — reordering, duplicates, casing and whitespace share one entry."""
+        """Reordering, duplicates, casing and whitespace share one entry."""
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([src_id], relation_types=["a", "b"])
-        svc.list_related_items_for_sources([src_id], relation_types=["b", "a"])
-        svc.list_related_items_for_sources([src_id], relation_types=["B", " a ", "b"])
-        repo.list_item_relation_links_for_items.assert_called_once()
+        svc.items.get_many_related([src_id], relation_types=["a", "b"])
+        svc.items.get_many_related([src_id], relation_types=["b", "a"])
+        svc.items.get_many_related([src_id], relation_types=["B", " a ", "b"])
+        repo.list_item_relation_links_batch.assert_called_once()
 
     def test_source_id_variants_share_cache_entry(self) -> None:
-        """US2 — reordered and duplicated source IDs share one entry."""
+        """Reordered and duplicated source IDs share one entry."""
         src_a, src_b, tgt_id = uuid4(), uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_a, tgt_id)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([src_a, src_b])
-        svc.list_related_items_for_sources([src_b, src_a, src_a])
-        repo.list_item_relation_links_for_items.assert_called_once()
+        svc.items.get_many_related([src_a, src_b])
+        svc.items.get_many_related([src_b, src_a, src_a])
+        repo.list_item_relation_links_batch.assert_called_once()
 
     def test_none_and_empty_relation_types_share_cache_entry(self) -> None:
-        """US2 — "no filter" as None and as an empty collection share one entry."""
+        """ "no filter" as None and as an empty collection share one entry."""
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([src_id], relation_types=None)
-        svc.list_related_items_for_sources([src_id], relation_types=[])
-        repo.list_item_relation_links_for_items.assert_called_once()
+        svc.items.get_many_related([src_id], relation_types=None)
+        svc.items.get_many_related([src_id], relation_types=[])
+        repo.list_item_relation_links_batch.assert_called_once()
 
-    def test_skip_on_error_values_are_distinct_entries(self) -> None:
-        """US2/FR-003 — skip_on_error changes behaviour, so it splits the key."""
+    def test_enabled_values_are_distinct_entries(self) -> None:
+        """``enabled`` changes which rows come back, so it splits the key."""
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([src_id], skip_on_error=True)
-        svc.list_related_items_for_sources([src_id], skip_on_error=False)
-        assert repo.list_item_relation_links_for_items.call_count == 2
+        svc.items.get_many_related([src_id], enabled=True)
+        svc.items.get_many_related([src_id], enabled=None)
+        assert repo.list_item_relation_links_batch.call_count == 2
 
-    def test_clear_all_caches_forces_refetch(self) -> None:
-        """US3 — explicit cache clearing re-queries the repository."""
+    def test_clearing_the_cache_forces_a_refetch(self) -> None:
+        """Clearing the service's cache re-queries the repository."""
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([src_id])
-        clear_all_caches()
-        svc.list_related_items_for_sources([src_id])
-        assert repo.list_item_relation_links_for_items.call_count == 2
+        svc.items.get_many_related([src_id])
+        svc._cache.clear()
+        svc.items.get_many_related([src_id])
+        assert repo.list_item_relation_links_batch.call_count == 2
 
     def test_direction_variants_are_independent_entries(self) -> None:
         """056 — outgoing/incoming/both are distinct cache keys (one unified query each)."""
@@ -417,11 +417,11 @@ class TestBatchRelatedItemsCaching:
         repo = _repo_with_batch_relation(a, b)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([a], direction="outgoing")
-        svc.list_related_items_for_sources([a], direction="incoming")
-        svc.list_related_items_for_sources([a], direction="both")
+        svc.items.get_many_related([a], direction="outgoing")
+        svc.items.get_many_related([a], direction="incoming")
+        svc.items.get_many_related([a], direction="both")
         # Three distinct directions → three distinct cache entries → three queries.
-        assert repo.list_item_relation_links_for_items.call_count == 3
+        assert repo.list_item_relation_links_batch.call_count == 3
 
     def test_incoming_identical_calls_hit_repo_once(self) -> None:
         """056 — two identical incoming calls query the repository once."""
@@ -429,68 +429,61 @@ class TestBatchRelatedItemsCaching:
         repo = _repo_with_batch_relation(a, b)
         svc = _make_service(repo)
 
-        svc.list_related_items_for_sources([b], direction="incoming")
-        svc.list_related_items_for_sources([b], direction="incoming")
-        repo.list_item_relation_links_for_items.assert_called_once()
+        svc.items.get_many_related([b], direction="incoming")
+        svc.items.get_many_related([b], direction="incoming")
+        repo.list_item_relation_links_batch.assert_called_once()
 
     def test_write_invalidates_batch_cache(self) -> None:
-        """US3 — a write between identical calls invalidates the cached entry."""
+        """A write between identical calls invalidates the cached entry."""
         from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
 
         src_id, tgt_id = uuid4(), uuid4()
         repo = _repo_with_batch_relation(src_id, tgt_id)
-        repo.get_item.return_value = Item(external_id="src", item_id=src_id)
+        repo.find_item.return_value = Item(name="Item", external_id="src", item_id=src_id)
         svc = _make_service(repo)
 
-        first = svc.list_related_items_for_sources([src_id])
-        assert set(first[src_id]) == {"covers"}
+        first = svc.items.get_many_related([src_id])
+        assert set(first[src_id].relation_types) == {"covers"}
 
         new_tgt = uuid4()
-        repo.list_item_relation_links_for_items.return_value = [
+        repo.list_item_relation_links_batch.return_value = [
             ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers"),
             ItemRelationLink(source_item_id=src_id, target_item_id=new_tgt, relation_type="performs"),
         ]
-        repo.get_items_by_ids.return_value = {
-            src_id: Item(external_id="src", item_id=src_id),
-            tgt_id: Item(external_id="tgt", item_id=tgt_id),
-            new_tgt: Item(external_id="new-tgt", item_id=new_tgt),
+        repo.map_items_by_id.return_value = {
+            src_id: Item(name="Item", external_id="src", item_id=src_id),
+            tgt_id: Item(name="Item", external_id="tgt", item_id=tgt_id),
+            new_tgt: Item(name="Item", external_id="new-tgt", item_id=new_tgt),
         }
-        svc.relate_items(src_id, new_tgt, "performs")
+        svc.items.relate(src_id, new_tgt, "performs")
 
-        second = svc.list_related_items_for_sources([src_id])
-        assert repo.list_item_relation_links_for_items.call_count == 2
-        assert set(second[src_id]) == {"covers", "performs"}
+        second = svc.items.get_many_related([src_id])
+        assert repo.list_item_relation_links_batch.call_count == 2
+        assert set(second[src_id].relation_types) == {"covers", "performs"}
 
     def test_raised_error_is_not_cached(self) -> None:
-        """US3 — a TaxomeshItemNotFoundError leaves no cache entry behind."""
-        from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
-        from taxomesh.exceptions import TaxomeshItemNotFoundError  # noqa: PLC0415
+        """A storage error leaves no cache entry behind, so the next call reads again."""
+        from taxomesh.exceptions import TaxomeshRepositoryError  # noqa: PLC0415
 
-        src_id, tgt_id = uuid4(), uuid4()
         repo = _mock_repo()
-        repo.list_item_relation_links_for_items.return_value = [
-            ItemRelationLink(source_item_id=src_id, target_item_id=tgt_id, relation_type="covers")
-        ]
-        repo.get_items_by_ids.return_value = {src_id: Item(external_id="src", item_id=src_id)}  # tgt dangling
+        repo.list_item_relation_links_batch.side_effect = TaxomeshRepositoryError("storage down")
         svc = _make_service(repo)
+        src_id = uuid4()
 
-        with pytest.raises(TaxomeshItemNotFoundError):
-            svc.list_related_items_for_sources([src_id], skip_on_error=False)
-        with pytest.raises(TaxomeshItemNotFoundError):
-            svc.list_related_items_for_sources([src_id], skip_on_error=False)
-        assert repo.list_item_relation_links_for_items.call_count == 2
+        with pytest.raises(TaxomeshRepositoryError):
+            svc.items.get_many_related([src_id])
+        with pytest.raises(TaxomeshRepositoryError):
+            svc.items.get_many_related([src_id])
+        assert repo.list_item_relation_links_batch.call_count == 2
 
 
 # ---------------------------------------------------------------------------
-# 055-memoize-batch-related (FR-009) — bulk target resolution in
-# list_related_items: one get_items_by_ids call instead of N get_item calls
+# Bulk target resolution in
+# items.list_related: one map_items_by_id call instead of N items[...] calls
 # ---------------------------------------------------------------------------
 
 
-class TestListRelatedItemsBulkResolution:
-    def setup_method(self) -> None:
-        clear_all_caches()
-
+class TestListRelatedBulkResolution:
     def _repo_with_links(self, src_id: UUID, tgt_ids: list[UUID]) -> MagicMock:
         from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
 
@@ -498,48 +491,44 @@ class TestListRelatedItemsBulkResolution:
         repo.list_item_relation_links.return_value = [
             ItemRelationLink(source_item_id=src_id, target_item_id=tgt, relation_type="covers") for tgt in tgt_ids
         ]
-        repo.get_items_by_ids.return_value = {
-            tgt: Item(external_id=f"t{i}", item_id=tgt) for i, tgt in enumerate(tgt_ids)
+        repo.map_items_by_id.return_value = {
+            tgt: Item(name="Item", external_id=f"t{i}", item_id=tgt) for i, tgt in enumerate(tgt_ids)
         }
         return repo
 
     def test_cold_cache_uses_single_bulk_lookup(self) -> None:
-        """FR-009 — targets resolve via one get_items_by_ids call, never get_item."""
+        """Targets resolve via one map_items_by_id call, never items[...]."""
         src_id = uuid4()
         tgt_ids = [uuid4(), uuid4(), uuid4()]
         repo = self._repo_with_links(src_id, tgt_ids)
         svc = _make_service(repo)
 
-        svc.list_related_items(src_id)
-        repo.get_items_by_ids.assert_called_once_with(set(tgt_ids), enabled=None)
-        repo.get_item.assert_not_called()
+        svc.items.list_related(src_id)
+        repo.map_items_by_id.assert_called_once_with({*tgt_ids, src_id}, enabled=None)
+        repo.find_item.assert_not_called()
 
     def test_link_order_is_preserved(self) -> None:
-        """FR-009 — result order follows link order, not the bulk dict's order."""
+        """The result is in link order, not in the order of the batch dict."""
         src_id = uuid4()
         tgt_ids = [uuid4(), uuid4(), uuid4()]
         repo = self._repo_with_links(src_id, tgt_ids)
         svc = _make_service(repo)
 
-        result = svc.list_related_items(src_id)
+        result = svc.items.list_related(src_id)
         assert [item.item_id for item in result] == tgt_ids
 
-    def test_missing_target_raises_item_not_found(self) -> None:
-        """FR-009 — a dangling target raises with the same message as get_item."""
-        from taxomesh.exceptions import TaxomeshItemNotFoundError  # noqa: PLC0415
-
+    def test_missing_target_is_skipped(self) -> None:
+        """A target no stored item carries is left out of the answer, which the rest keeps."""
         src_id = uuid4()
         tgt_ids = [uuid4(), uuid4()]
         repo = self._repo_with_links(src_id, tgt_ids)
-        missing = tgt_ids[1]
-        del repo.get_items_by_ids.return_value[missing]
+        del repo.map_items_by_id.return_value[tgt_ids[1]]
         svc = _make_service(repo)
 
-        with pytest.raises(TaxomeshItemNotFoundError, match=f"Item not found: {missing}"):
-            svc.list_related_items(src_id)
+        assert [item.item_id for item in svc.items.list_related(src_id)] == [tgt_ids[0]]
 
     def test_incoming_direction_resolves_sources_in_bulk(self) -> None:
-        """FR-009 — direction="incoming" bulk-resolves source items the same way."""
+        """Direction="incoming" bulk-resolves source items the same way."""
         from taxomesh.domain.models import ItemRelationLink  # noqa: PLC0415
 
         tgt_id = uuid4()
@@ -548,103 +537,362 @@ class TestListRelatedItemsBulkResolution:
         repo.list_item_relation_links.return_value = [
             ItemRelationLink(source_item_id=src, target_item_id=tgt_id, relation_type="covers") for src in src_ids
         ]
-        repo.get_items_by_ids.return_value = {
-            src: Item(external_id=f"s{i}", item_id=src) for i, src in enumerate(src_ids)
+        repo.map_items_by_id.return_value = {
+            src: Item(name="Item", external_id=f"s{i}", item_id=src) for i, src in enumerate(src_ids)
         }
         svc = _make_service(repo)
 
-        result = svc.list_related_items(tgt_id, direction="incoming")
-        repo.get_items_by_ids.assert_called_once_with(set(src_ids), enabled=None)
-        repo.get_item.assert_not_called()
+        result = svc.items.list_related(tgt_id, direction="incoming")
+        repo.map_items_by_id.assert_called_once_with({*src_ids, tgt_id}, enabled=None)
+        repo.find_item.assert_not_called()
         assert [item.item_id for item in result] == src_ids
 
     def test_no_links_returns_empty_without_bulk_lookup(self) -> None:
-        """FR-009 — zero links short-circuits before the bulk item query."""
+        """Zero links short-circuits before the bulk item query."""
         repo = _mock_repo()
         repo.list_item_relation_links.return_value = []
         svc = _make_service(repo)
 
-        assert svc.list_related_items(uuid4()) == []
-        repo.get_items_by_ids.assert_not_called()
+        assert svc.items.list_related(uuid4()) == ()
+        repo.map_items_by_id.assert_not_called()
 
 
 class TestPlacementReadCaching:
-    """Spec 060: batching the placement reads must not change their cache behaviour.
+    """Batching the placement reads must not change their cache behaviour.
 
-    FR-018 — results stay cached for the TTL and stay invalidated on write. These
+    Results stay cached for the TTL and stay invalidated on write. These
     run against a real in-memory backend rather than a mock, because what is being
     checked is that the rewritten call path still sits behind the memoize decorator.
     """
-
-    def setup_method(self) -> None:
-        clear_all_caches()
 
     @staticmethod
     def _service_with_one_placement() -> tuple[TaxomeshService, UUID, UUID]:
         from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
 
         service = TaxomeshService(repository=InMemoryRepository())
-        category = service.create_category("Cached")
-        item = service.create_item(name="Cached Item")
-        service.place_item_in_category(item.item_id, category.category_id)
-        clear_all_caches()
+        category = service.categories.create("Cached")
+        item = service.items.create(name="Cached Item")
+        service.items.place_in(item.item_id, category.category_id)
+        service._cache.clear()
         return service, category.category_id, item.item_id
 
-    def test_list_items_by_category_is_served_from_cache_on_repeat(self) -> None:
+    def test_items_list_by_category_is_served_from_cache_on_repeat(self) -> None:
         service, category_id, _ = self._service_with_one_placement()
 
-        first = service.list_items(category_id=category_id)
+        first = service.items.list(category=category_id)
         with patch.object(service.repository, "list_item_parent_links") as spy:
-            second = service.list_items(category_id=category_id)
+            second = service.items.list(category=category_id)
 
         assert spy.call_count == 0, "the second call reached storage — memoization was lost"
         assert [item.item_id for item in first] == [item.item_id for item in second]
 
-    def test_list_items_by_category_is_invalidated_by_a_write(self) -> None:
+    def test_items_list_by_category_is_invalidated_by_a_write(self) -> None:
         service, category_id, _ = self._service_with_one_placement()
-        assert len(service.list_items(category_id=category_id)) == 1
+        assert len(service.items.list(category=category_id)) == 1
 
-        added = service.create_item(name="Added Later")
-        service.place_item_in_category(added.item_id, category_id, sort_index=1)
+        added = service.items.create(name="Added Later")
+        service.items.place_in(added.item_id, category_id, sort_index=1)
 
-        assert len(service.list_items(category_id=category_id)) == 2, "a write did not invalidate the cache"
+        assert len(service.items.list(category=category_id)) == 2, "a write did not invalidate the cache"
 
-    def test_list_items_by_category_reflects_a_removal(self) -> None:
+    def test_items_list_by_category_reflects_a_removal(self) -> None:
         service, category_id, item_id = self._service_with_one_placement()
-        assert len(service.list_items(category_id=category_id)) == 1
+        assert len(service.items.list(category=category_id)) == 1
 
-        service.remove_item_from_category(item_id, category_id)
+        service.items.remove_from(item_id, category_id)
 
-        assert service.list_items(category_id=category_id) == []
+        assert service.items.list(category=category_id) == ()
 
-    def test_list_categories_by_parent_is_served_from_cache_on_repeat(self) -> None:
-        """FR-018 for the children path."""
+    def test_categories_list_by_parent_is_served_from_cache_on_repeat(self) -> None:
+        """For the children path."""
         from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
 
         service = TaxomeshService(repository=InMemoryRepository())
-        parent = service.create_category("Cached Parent")
-        child = service.create_category("Cached Child")
-        service.add_category_parent(child.category_id, parent.category_id)
-        clear_all_caches()
+        parent = service.categories.create("Cached Parent")
+        child = service.categories.create("Cached Child")
+        service.categories.add_parent(child.category_id, parent.category_id)
+        service._cache.clear()
 
-        first = service.list_categories(parent_id=parent.category_id)
+        first = service.categories.list(parent=parent.category_id)
         with patch.object(service.repository, "list_category_parent_links") as spy:
-            second = service.list_categories(parent_id=parent.category_id)
+            second = service.categories.list(parent=parent.category_id)
 
         assert spy.call_count == 0
         assert [c.category_id for c in first] == [c.category_id for c in second]
 
-    def test_list_categories_by_parent_is_invalidated_by_a_write(self) -> None:
+    def test_categories_list_by_parent_is_invalidated_by_a_write(self) -> None:
         from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
 
         service = TaxomeshService(repository=InMemoryRepository())
-        parent = service.create_category("Cached Parent")
-        child = service.create_category("Cached Child")
-        service.add_category_parent(child.category_id, parent.category_id)
-        clear_all_caches()
-        assert len(service.list_categories(parent_id=parent.category_id)) == 1
+        parent = service.categories.create("Cached Parent")
+        child = service.categories.create("Cached Child")
+        service.categories.add_parent(child.category_id, parent.category_id)
+        service._cache.clear()
+        assert len(service.categories.list(parent=parent.category_id)) == 1
 
-        added = service.create_category("Added Later")
-        service.add_category_parent(added.category_id, parent.category_id, sort_index=1)
+        added = service.categories.create("Added Later")
+        service.categories.add_parent(added.category_id, parent.category_id, sort_index=1)
 
-        assert len(service.list_categories(parent_id=parent.category_id)) == 2
+        assert len(service.categories.list(parent=parent.category_id)) == 2
+
+
+# ---------------------------------------------------------------------------
+# The cache belongs to one service
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _Stored:
+    """The rows every read form below is asked about."""
+
+    category: Category
+    item: Item
+    related: Item
+    tag: Tag
+
+
+def _store(service: TaxomeshService) -> _Stored:
+    """Store one row of each kind every read form needs, with the links between them."""
+    category = service.categories.create("Music", slug="music", external_id="cat-ext")
+    item = service.items.create("Tango", slug="tango", external_id="item-ext")
+    related = service.items.create("Milonga")
+    tag = service.tags.create("classic")
+    service.items.place_in(item, category)
+    service.items.tag(item, tag)
+    service.items.relate(item, related, "cover")
+    return _Stored(category=category, item=item, related=related, tag=tag)
+
+
+type _Read = Callable[[TaxomeshService, _Stored], object]
+
+# One form for each memoized read the service offers, and one for each search, whose corpus is
+# held for the same lifetime.
+_READ_FORMS: Final[Mapping[str, _Read]] = {
+    "categories[key]": lambda svc, stored: svc.categories[stored.category],
+    "categories.get_many": lambda svc, stored: svc.categories.get_many(stored.category),
+    "categories.list": lambda svc, stored: svc.categories.list(),
+    "categories.roots": lambda svc, stored: svc.categories.roots(),
+    "categories.get_by_slug": lambda svc, stored: svc.categories.get_by_slug("music"),
+    "categories.get_by_external_id": lambda svc, stored: svc.categories.get_by_external_id("cat-ext"),
+    "categories.get_many_by_external_id": lambda svc, stored: svc.categories.get_many_by_external_id(["cat-ext"]),
+    "categories.search": lambda svc, stored: svc.categories.search("music"),
+    "items[key]": lambda svc, stored: svc.items[stored.item],
+    "items.get_many": lambda svc, stored: svc.items.get_many(stored.item),
+    "items.list": lambda svc, stored: svc.items.list(),
+    "items.get_by_slug": lambda svc, stored: svc.items.get_by_slug("tango"),
+    "items.get_by_external_id": lambda svc, stored: svc.items.get_by_external_id("item-ext"),
+    "items.get_many_by_external_id": lambda svc, stored: svc.items.get_many_by_external_id(["item-ext"]),
+    "items.list_relations": lambda svc, stored: svc.items.list_relations(stored.item),
+    "items.list_related": lambda svc, stored: svc.items.list_related(stored.item),
+    "items.get_many_related": lambda svc, stored: svc.items.get_many_related([stored.item]),
+    "items.search": lambda svc, stored: svc.items.search("tango"),
+    "tags.get_many": lambda svc, stored: svc.tags.get_many(stored.tag),
+    "tags.list": lambda svc, stored: svc.tags.list(),
+    "graph": lambda svc, stored: svc.graph(),
+}
+
+# Each entity's search, and the size its corpus reports through ``info``.
+_CORPORA: Final[Mapping[str, tuple[_Read, Callable[[TaxomeshInfo], int | None]]]] = {
+    "items": (_READ_FORMS["items.search"], lambda info: info.item_corpus_size),
+    "categories": (_READ_FORMS["categories.search"], lambda info: info.category_corpus_size),
+}
+
+# The batch lookups, each answering a new dict.
+_BATCH_LOOKUPS: Final[tuple[str, ...]] = ("categories.get_many", "items.get_many", "tags.get_many")
+
+
+@pytest.fixture(params=BACKEND_PARAMS)
+def repository(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshRepositoryBase:
+    """Return a fresh repository for each backend, for a test that builds its own services."""
+    return _build_repository(request, tmp_path)
+
+
+class TestNoLifetime:
+    """With ``cache_ttl=0`` every read reaches storage."""
+
+    @pytest.mark.parametrize("form", _READ_FORMS)
+    def test_a_repeated_read_costs_its_reads_again(self, counting_service: CountedService, form: str) -> None:
+        stored = _store(counting_service.service)
+        uncached = TaxomeshService(repository=counting_service.reads, cache_ttl=0)
+        read = _READ_FORMS[form]
+
+        counting_service.reads.reset()
+        read(uncached, stored)
+        first = counting_service.reads.total
+        counting_service.reads.reset()
+        read(uncached, stored)
+
+        assert first > 0
+        assert counting_service.reads.total == first
+
+    def test_no_corpus_is_held(self, counting_service: CountedService) -> None:
+        _store(counting_service.service)
+        uncached = TaxomeshService(repository=counting_service.reads, cache_ttl=0)
+
+        uncached.items.search("tango")
+        uncached.categories.search("music")
+
+        assert uncached.info.item_corpus_size is None
+        assert uncached.info.category_corpus_size is None
+
+
+class TestDefaultLifetime:
+    """At the default lifetime a repeated read is served from the service's cache."""
+
+    @pytest.mark.parametrize("form", _READ_FORMS)
+    def test_a_repeated_read_costs_nothing(self, counting_service: CountedService, form: str) -> None:
+        stored = _store(counting_service.service)
+        read = _READ_FORMS[form]
+        counting_service.cold()
+        read(counting_service.service, stored)
+
+        counting_service.reads.reset()
+        read(counting_service.service, stored)
+
+        assert counting_service.reads.total == 0
+
+    @pytest.mark.parametrize("entity", _CORPORA)
+    def test_a_corpus_past_its_lifetime_is_built_again(self, counting_service: CountedService, entity: str) -> None:
+        svc = counting_service.service
+        stored = _store(svc)
+        search, size_of = _CORPORA[entity]
+        with patch("taxomesh.utils.memoize.time") as clock:
+            clock.monotonic.return_value = 100.0
+            counting_service.cold()
+            search(svc, stored)
+            held = size_of(svc.info)
+
+            clock.monotonic.return_value = 100.0 + DEFAULT_CACHE_TTL + 1
+            expired = size_of(svc.info)
+            counting_service.reads.reset()
+            search(svc, stored)
+
+        assert held is not None
+        assert expired is None
+        assert counting_service.reads.total > 0
+
+    @pytest.mark.parametrize("entity", _CORPORA)
+    def test_cold_drops_the_corpus_too(self, counting_service: CountedService, entity: str) -> None:
+        """``cold()`` is where every read count starts, so the search after it reads storage."""
+        svc = counting_service.service
+        stored = _store(svc)
+        search, size_of = _CORPORA[entity]
+        search(svc, stored)
+
+        counting_service.cold()
+
+        assert size_of(svc.info) is None
+        search(svc, stored)
+        assert counting_service.reads.total > 0
+
+    @pytest.mark.parametrize("form", _BATCH_LOOKUPS)
+    def test_a_batch_lookup_hands_back_a_new_dict_each_call(self, service: TaxomeshService, form: str) -> None:
+        """The cached answer is copied out, so a caller changing one answer leaves the next whole."""
+        stored = _store(service)
+        read = _READ_FORMS[form]
+        first = read(service, stored)
+        assert isinstance(first, dict)
+
+        first.clear()
+
+        assert read(service, stored)
+
+    def test_lookups_past_the_lifetime_drop_the_expired_entries(self, service: TaxomeshService) -> None:
+        """Lookups over an open key space, such as slugs taken from URLs, hold one lifetime of keys.
+
+        An entry is dropped when its member stores the next one after it expired, so a long-lived
+        service asked about ever new keys holds the keys of the last ``cache_ttl``, not every key.
+        """
+        with patch("taxomesh.utils.memoize.time") as clock:
+            clock.monotonic.return_value = 100.0
+            for n in range(50):
+                service.categories.get_by_slug(f"early-{n}")
+            clock.monotonic.return_value = 100.0 + DEFAULT_CACHE_TTL + 1
+            for n in range(50):
+                service.categories.get_by_slug(f"late-{n}")
+
+        assert len(service._cache.entries(CategoryCollection._by_slug)) == 50
+
+
+class TestConstruction:
+    """Building a service reads every category once, to find the root.
+
+    The root is found by its reserved name, and the port has no lookup by name, so the read is the
+    price of the one top level. It is paid once per service, which is why a service is built once
+    and shared rather than built per request.
+    """
+
+    def test_building_a_service_reads_the_categories_once(self, repository: TaxomeshRepositoryBase) -> None:
+        counter = CountingRepository(repository)
+
+        first = TaxomeshService(repository=counter)
+
+        assert counter.calls == ["list_categories"]
+        for name in ("Music", "Jazz"):
+            first.categories.create(name)
+        counter.reset()
+
+        TaxomeshService(repository=counter)
+
+        assert counter.calls == ["list_categories"]
+
+
+class TestOneServicesCache:
+    """A write clears the cache of the service it went through, and no other."""
+
+    def test_a_write_through_another_service_leaves_this_cache_as_it_was(
+        self, counting_service: CountedService
+    ) -> None:
+        reader = counting_service.service
+        writer = TaxomeshService(repository=counting_service.reads)
+        category = reader.categories.create("Before")
+        counting_service.cold()
+        assert reader.categories[category].name == "Before"
+
+        writer.categories.update(category, name="After")
+        counting_service.reads.reset()
+
+        assert reader.categories[category].name == "Before"
+        assert counting_service.reads.total == 0
+        assert writer.categories[category].name == "After"
+
+    def test_a_service_no_longer_referenced_is_collected_with_its_entries(
+        self, repository: TaxomeshRepositoryBase
+    ) -> None:
+        svc = TaxomeshService(repository=repository)
+        _READ_FORMS["graph"](svc, _store(svc))
+        svc.categories.list()
+        collected = weakref.ref(svc)
+
+        del svc
+        gc.collect()
+
+        assert collected() is None
+
+    @pytest.mark.parametrize("lifetime", [-1, -0.5, math.nan])
+    def test_a_lifetime_below_zero_is_refused_before_storage_is_touched(
+        self, lifetime: float, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(TaxomeshValidationError, match=re.escape(f"cache_ttl must be ≥ 0, got {lifetime!r}")):
+            TaxomeshService(cache_ttl=lifetime)
+
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.parametrize("lifetime", ["5", None, [1]], ids=["str", "None", "list"])
+    def test_a_lifetime_that_is_no_number_is_a_type_error_naming_it(
+        self, lifetime: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(TypeError) as caught:
+            TaxomeshService(cache_ttl=untyped(lifetime))
+
+        assert str(caught.value).startswith("cache_ttl ")
+        assert not isinstance(caught.value, TaxomeshError)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_lifetime_of_true_is_one_second(self, repository: TaxomeshRepositoryBase) -> None:
+        """``True`` is the integer 1, as ``limit=True`` and ``expected_version=True`` are."""
+        assert TaxomeshService(repository=repository, cache_ttl=True).categories.list() == ()
