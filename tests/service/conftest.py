@@ -1,19 +1,21 @@
 """Shared pytest fixtures for the service test suite."""
 
 import contextlib
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 from uuid import UUID
 
 import pytest
 
-from taxomesh.adapters.repositories._external_id import bulk_lookup_by_external_id
+from taxomesh.adapters.repositories._external_id import bulk_lookup_by_external_id, check_external_id_unique
+from taxomesh.adapters.repositories._version import row_to_store
 from taxomesh.adapters.repositories.json_repository import JsonRepository
-from taxomesh.adapters.repositories.yaml_repository import YAMLRepository
+from taxomesh.adapters.repositories.yaml_repository import YamlRepository
 from taxomesh.application.service import TaxomeshService
+from taxomesh.domain.info import RepositoryInfo
 from taxomesh.domain.models import (
     Category,
     CategoryParentLink,
@@ -23,7 +25,7 @@ from taxomesh.domain.models import (
     ItemTagLink,
     Tag,
 )
-from taxomesh.utils.memoize import clear_all_caches
+from taxomesh.ports.repository import TaxomeshRepositoryBase
 
 
 class InMemoryRepository:
@@ -51,53 +53,70 @@ class InMemoryRepository:
 
     # --- Category ---
 
-    def save_category(self, category: Category) -> None:
-        """Insert or update a category."""
-        self._categories[category.category_id] = category
+    def save_category(self, category: Category, *, expected_version: int | None = None) -> Category:
+        """Insert or update a category; an update stores the replaced row's version plus one."""
+        stored = row_to_store(
+            category,
+            self._categories.get(category.category_id),
+            expected_version=expected_version,
+            entity_name="category",
+            entity_id=category.category_id,
+        )
+        check_external_id_unique(category.category_id, category.external_id, self._categories, "category")
+        self._categories[category.category_id] = stored
+        return stored
 
-    def get_category(self, category_id: UUID) -> Category | None:
+    def find_category(self, category_id: UUID) -> Category | None:
         """Return category by id, or None."""
         return self._categories.get(category_id)
 
     def list_categories(self, *, enabled: bool | None = True) -> list[Category]:
-        """Return categories, filtered by enabled state."""
+        """Return categories, filtered by enabled state, ordered by name then category_id."""
         cats = list(self._categories.values())
         if enabled is not None:
             cats = [c for c in cats if c.enabled == enabled]
-        return cats
+        return sorted(cats, key=lambda c: (c.name, str(c.category_id)))
 
     def delete_category(self, category_id: UUID) -> bool:
-        """Delete category; return True if it existed."""
+        """Delete category and every link naming it; return True if it existed."""
         if category_id not in self._categories:
             return False
         del self._categories[category_id]
+        self._drop_dangling_links()
         return True
 
     # --- Item ---
 
-    def save_item(self, item: Item) -> None:
-        """Insert or update an item."""
-        self._items[item.item_id] = item
+    def save_item(self, item: Item, *, expected_version: int | None = None) -> Item:
+        """Insert or update an item; an update stores the replaced row's version plus one."""
+        stored = row_to_store(
+            item,
+            self._items.get(item.item_id),
+            expected_version=expected_version,
+            entity_name="item",
+            entity_id=item.item_id,
+        )
+        check_external_id_unique(item.item_id, item.external_id, self._items, "item")
+        self._items[item.item_id] = stored
+        return stored
 
-    def get_item(self, item_id: UUID) -> Item | None:
+    def find_item(self, item_id: UUID) -> Item | None:
         """Return item by id, or None."""
         return self._items.get(item_id)
 
     def list_items(self, *, enabled: bool | None = True) -> list[Item]:
-        """Return items, filtered by enabled state."""
+        """Return items, filtered by enabled state, ordered by name then item_id."""
         items = list(self._items.values())
         if enabled is not None:
             items = [i for i in items if i.enabled == enabled]
-        return items
+        return sorted(items, key=lambda i: (i.name, str(i.item_id)))
 
     def delete_item(self, item_id: UUID) -> bool:
-        """Delete item; return True if it existed. Cascades relation links."""
+        """Delete item and every link naming it; return True if it existed."""
         if item_id not in self._items:
             return False
         del self._items[item_id]
-        self._item_relation_links = [
-            lnk for lnk in self._item_relation_links if item_id not in {lnk.source_item_id, lnk.target_item_id}
-        ]
+        self._drop_dangling_links()
         return True
 
     # --- Tag ---
@@ -106,7 +125,7 @@ class InMemoryRepository:
         """Insert or update a tag."""
         self._tags[tag.tag_id] = tag
 
-    def get_tag(self, tag_id: UUID) -> Tag | None:
+    def find_tag(self, tag_id: UUID) -> Tag | None:
         """Return tag by id, or None."""
         return self._tags.get(tag_id)
 
@@ -114,19 +133,39 @@ class InMemoryRepository:
         """Return all tags."""
         return list(self._tags.values())
 
+    def map_tags_by_id(self, tag_ids: Collection[UUID]) -> Mapping[UUID, Tag]:
+        """Return the found tags keyed by id."""
+        return {tag_id: self._tags[tag_id] for tag_id in tag_ids if tag_id in self._tags}
+
     # --- Tag ↔ Item association ---
 
-    def assign_tag(self, tag_id: UUID, item_id: UUID) -> None:
+    def add_item_tag_link(self, item_id: UUID, tag_id: UUID) -> None:
         """Associate tag with item; idempotent."""
         already_linked = any(lnk.tag_id == tag_id and lnk.item_id == item_id for lnk in self._links)
         if not already_linked:
             self._links.append(ItemTagLink(tag_id=tag_id, item_id=item_id))
 
-    def remove_tag(self, tag_id: UUID, item_id: UUID) -> bool:
+    def delete_item_tag_link(self, item_id: UUID, tag_id: UUID) -> bool:
         """Remove tag-item association; return True if it existed."""
         before = len(self._links)
         self._links = [lnk for lnk in self._links if not (lnk.tag_id == tag_id and lnk.item_id == item_id)]
         return len(self._links) < before
+
+    def list_item_tag_links(
+        self,
+        *,
+        item_ids: Collection[UUID] | None = None,
+        tag_ids: Collection[UUID] | None = None,
+    ) -> list[ItemTagLink]:
+        """Return tag links, AND-filtered by either end, ordered by (item_id, tag_id)."""
+        links = self._links
+        if item_ids is not None:
+            wanted_items = set(item_ids)
+            links = [lnk for lnk in links if lnk.item_id in wanted_items]
+        if tag_ids is not None:
+            wanted_tags = set(tag_ids)
+            links = [lnk for lnk in links if lnk.tag_id in wanted_tags]
+        return sorted(links, key=lambda lnk: (lnk.item_id, lnk.tag_id))
 
     # --- Category parent links ---
 
@@ -141,10 +180,14 @@ class InMemoryRepository:
     def list_category_parent_links(
         self,
         *,
+        category_ids: Collection[UUID] | None = None,
         parent_category_ids: Collection[UUID] | None = None,
     ) -> list[CategoryParentLink]:
-        """Return category parent links, optionally filtered by parent."""
+        """Return category parent links, optionally filtered by either end."""
         links = self._category_parent_links
+        if category_ids is not None:
+            wanted_children = set(category_ids)
+            links = [lnk for lnk in links if lnk.category_id in wanted_children]
         if parent_category_ids is not None:
             wanted = set(parent_category_ids)
             links = [lnk for lnk in links if lnk.parent_category_id in wanted]
@@ -156,37 +199,58 @@ class InMemoryRepository:
     # --- Tag delete ---
 
     def delete_tag(self, tag_id: UUID) -> bool:
-        """Delete tag; return True if it existed."""
+        """Delete tag and every link naming it; return True if it existed."""
         if tag_id not in self._tags:
             return False
         del self._tags[tag_id]
+        self._drop_dangling_links()
         return True
+
+    def _drop_dangling_links(self) -> None:
+        """Drop every link that names a row not stored, as the file backends do."""
+        self._links = [lnk for lnk in self._links if lnk.item_id in self._items and lnk.tag_id in self._tags]
+        self._category_parent_links = [
+            lnk
+            for lnk in self._category_parent_links
+            if lnk.category_id in self._categories and lnk.parent_category_id in self._categories
+        ]
+        self._item_parent_links = [
+            lnk
+            for lnk in self._item_parent_links
+            if lnk.item_id in self._items and lnk.category_id in self._categories
+        ]
+        self._item_relation_links = [
+            lnk
+            for lnk in self._item_relation_links
+            if lnk.source_item_id in self._items and lnk.target_item_id in self._items
+        ]
 
     # --- Item → Category placement ---
 
     def save_item_parent_link(self, link: ItemParentLink) -> None:
         """Upsert item→category placement."""
-        for existing in self._item_parent_links:
+        for i, existing in enumerate(self._item_parent_links):
             if existing.item_id == link.item_id and existing.category_id == link.category_id:
-                existing.sort_index = link.sort_index
+                self._item_parent_links[i] = link
                 return
         self._item_parent_links.append(link)
 
     def list_item_parent_links(
         self,
         *,
-        item_id: UUID | None = None,
+        item_ids: Collection[UUID] | None = None,
         category_ids: Collection[UUID] | None = None,
     ) -> list[ItemParentLink]:
         """Return item→category placements in contract order, optionally filtered.
 
-        Ordering follows the port contract: ``(category_id ASC, sort_index ASC,
-        item_id ASC)``. An empty ``category_ids`` collection returns ``[]``;
+        The order is the port contract's: ``(category_id ASC, sort_index ASC,
+        item_id ASC)``. An empty collection in either filter returns ``[]``;
         both filters together apply AND semantics.
         """
         links: list[ItemParentLink] = self._item_parent_links
-        if item_id is not None:
-            links = [lnk for lnk in links if lnk.item_id == item_id]
+        if item_ids is not None:
+            wanted_items = set(item_ids)
+            links = [lnk for lnk in links if lnk.item_id in wanted_items]
         if category_ids is not None:
             wanted = set(category_ids)
             links = [lnk for lnk in links if lnk.category_id in wanted]
@@ -215,21 +279,21 @@ class InMemoryRepository:
 
     # --- External-ID lookup ---
 
-    def get_item_by_external_id(self, external_id: str) -> Item | None:
+    def find_item_by_external_id(self, external_id: str) -> Item | None:
         """Return the item with the given external_id, or None."""
         return next((item for item in self._items.values() if item.external_id == external_id), None)
 
-    def get_category_by_external_id(self, external_id: str) -> Category | None:
+    def find_category_by_external_id(self, external_id: str) -> Category | None:
         """Return the category with the given external_id, or None."""
         return next((cat for cat in self._categories.values() if cat.external_id == external_id), None)
 
-    def get_items_by_ids(
+    def map_items_by_id(
         self,
         item_ids: Collection[UUID],
         *,
         enabled: bool | None = None,
-    ) -> dict[UUID, Item]:
-        """Return items whose item_id is in item_ids; missing IDs silently absent."""
+    ) -> Mapping[UUID, Item]:
+        """Return the items whose item_id is in item_ids; an identifier that names no stored item is left out."""
         result: dict[UUID, Item] = {}
         for item_id in item_ids:
             item = self._items.get(item_id)
@@ -237,13 +301,13 @@ class InMemoryRepository:
                 result[item_id] = item
         return result
 
-    def get_categories_by_ids(
+    def map_categories_by_id(
         self,
         category_ids: Collection[UUID],
         *,
         enabled: bool | None = None,
-    ) -> dict[UUID, Category]:
-        """Return categories by id, missing ids silently absent."""
+    ) -> Mapping[UUID, Category]:
+        """Return the categories whose category_id is in category_ids; an identifier that names none is left out."""
         result: dict[UUID, Category] = {}
         for category_id in category_ids:
             category = self._categories.get(category_id)
@@ -251,29 +315,29 @@ class InMemoryRepository:
                 result[category_id] = category
         return result
 
-    def get_items_by_external_ids(
+    def map_items_by_external_id(
         self,
         external_ids: Collection[str],
         *,
         enabled: bool | None = None,
-    ) -> dict[str, Item]:
+    ) -> Mapping[str, Item]:
         """Return items whose external_id is in external_ids."""
         return bulk_lookup_by_external_id(self._items, external_ids, enabled)
 
-    def get_categories_by_external_ids(
+    def map_categories_by_external_id(
         self,
         external_ids: Collection[str],
         *,
         enabled: bool | None = None,
-    ) -> dict[str, Category]:
+    ) -> Mapping[str, Category]:
         """Return categories whose external_id is in external_ids."""
         return bulk_lookup_by_external_id(self._categories, external_ids, enabled)
 
-    def get_item_by_slug(self, slug: str) -> Item | None:
+    def find_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with the given slug, or None."""
         return next((i for i in self._items.values() if i.slug == slug), None)
 
-    def get_category_by_slug(self, slug: str) -> Category | None:
+    def find_category_by_slug(self, slug: str) -> Category | None:
         """Return the category with the given slug, or None."""
         return next((c for c in self._categories.values() if c.slug == slug), None)
 
@@ -295,7 +359,7 @@ class InMemoryRepository:
         self,
         item_id: UUID,
         *,
-        relation_type: str | None = None,
+        relation_types: Collection[str] | None = None,
         direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[ItemRelationLink]:
         """Return item relation links for the given item."""
@@ -305,9 +369,12 @@ class InMemoryRepository:
             result = [lnk for lnk in self._item_relation_links if lnk.target_item_id == item_id]
         else:  # "both"
             result = [lnk for lnk in self._item_relation_links if item_id in (lnk.source_item_id, lnk.target_item_id)]
-        if relation_type is not None:
-            result = [lnk for lnk in result if lnk.relation_type == relation_type]
-        return result
+        if relation_types:
+            type_set = set(relation_types)
+            result = [lnk for lnk in result if lnk.relation_type in type_set]
+        # The port orders every direction by `(sort_index ASC, source_item_id ASC, target_item_id ASC)`,
+        # which tests/adapters/repositories/test_repository_contract.py asserts.
+        return sorted(result, key=lambda lnk: (lnk.sort_index, str(lnk.source_item_id), str(lnk.target_item_id)))
 
     def delete_item_relation_link(
         self,
@@ -328,12 +395,12 @@ class InMemoryRepository:
         ]
         return len(self._item_relation_links) < before
 
-    def list_item_relation_links_for_items(
+    def list_item_relation_links_batch(
         self,
         item_ids: Collection[UUID],
         *,
-        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
         relation_types: Collection[str] | None = None,
+        direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[ItemRelationLink]:
         """Return relation links for many items in a single pass, by direction."""
         id_set = set(item_ids)
@@ -366,39 +433,44 @@ class InMemoryRepository:
 
     # --- Configuration introspection ---
 
-    def get_debug_info(self) -> dict[str, Any]:
+    def describe(self) -> RepositoryInfo:
         """Return a fixed description identifying this as an in-memory test repository."""
-        return {"type": "InMemoryRepository"}
+        return RepositoryInfo(backend=type(self).__name__, path=None, diagnostics={})
 
-    def get_config_summary(self) -> str:
-        """Return a fixed description identifying this as an in-memory test repository."""
+    @property
+    def config_summary(self) -> str:
+        """A fixed description identifying this as an in-memory test repository."""
         return "InMemoryRepository (test)"
 
 
-def _build_repository(request: pytest.FixtureRequest, tmp_path: Path) -> Any:
+# The Django parameter carries the ``django_db`` mark, so pytest-django creates the test
+# database for any selection of tests, including one file run alone.
+DJANGO_PARAM: Final = pytest.param("django", marks=pytest.mark.django_db)
+
+# The four backends a parametrized fixture runs over.
+BACKEND_PARAMS: Final = ("in_memory", "json", "yaml", DJANGO_PARAM)
+
+
+def _build_repository(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshRepositoryBase:
     """Return a fresh repository for the backend named by ``request.param``."""
     if request.param == "in_memory":
         return InMemoryRepository()
     if request.param == "json":
         return JsonRepository(tmp_path / "test.json")
     if request.param == "yaml":
-        return YAMLRepository(tmp_path / "test.yaml")
+        return YamlRepository(tmp_path / "test.yaml")
     # django
     pytest.importorskip("django", reason="django not installed")
-    request.getfixturevalue("db")
     from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
 
     return DjangoRepository()
 
 
-@pytest.fixture(
-    params=["in_memory", "json", "yaml", "django"],
-    ids=["in_memory", "json", "yaml", "django"],
-)
+@pytest.fixture(params=BACKEND_PARAMS)
 def service(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshService:
     """Return a TaxomeshService backed by a fresh repository for each backend.
 
-    Parametrized over InMemoryRepository, JsonRepository, YAMLRepository, and
+    Parametrized over InMemoryRepository, JsonRepository, YamlRepository, and
     DjangoRepository (optional — skips when Django is not configured) so that every
     behavioral test runs once per backend, ensuring parity.
     """
@@ -408,21 +480,23 @@ def service(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshService:
 class CountingRepository:
     """Wrap any backend and count the repository reads a service call issues.
 
-    One repository call counts as one storage read — the equivalence spec 060 established
-    against ``CaptureQueriesContext`` on Django. Delegation is generic, so a single set of
+    One repository call counts as one storage read, which holds against
+    ``CaptureQueriesContext`` on Django. Delegation is generic, so a single set of
     exact constants holds on every backend. ``RecordingRepository`` in
     ``test_service_no_full_scan.py`` cannot do that: it subclasses ``InMemoryRepository``
     and overrides a fixed list of eight methods, so it counts nothing on the file or Django
     backends.
 
-    A read is any callable whose name starts with ``get_`` or ``list_``, minus
-    ``get_config_summary``, which reports configuration rather than reading storage.
+    A read is any callable whose name starts with ``get_``, ``list_``, ``find_`` or ``map_``.
+    The port's single-row lookups are ``find_*`` and its keyed batch reads ``map_*``: without
+    those prefixes the proxy would count none of them, and every read-count assertion would
+    pass while measuring nothing. Configuration introspection needs no exclusion: the
+    ``config_summary`` property and ``describe()`` carry no read prefix.
     """
 
-    _READ_PREFIXES = ("get_", "list_")
-    _NOT_READS = frozenset({"get_config_summary"})
+    _READ_PREFIXES = ("get_", "list_", "find_", "map_")
 
-    def __init__(self, wrapped: Any) -> None:
+    def __init__(self, wrapped: TaxomeshRepositoryBase) -> None:
         self._wrapped = wrapped
         self.calls: list[str] = []
 
@@ -439,14 +513,17 @@ class CountingRepository:
         """Discard recorded calls, so a measurement excludes fixture setup."""
         self.calls.clear()
 
+    # Any: a proxy forwards whatever attribute the wrapped repository has, called with whatever it takes.
     def __getattr__(self, name: str) -> Any:
         # Only reached for names not found on the instance or class, so `_wrapped` and
         # `calls` (set in __init__) cannot recurse. Writes and `atomic()` fall through
-        # untouched — they are not reads.
+        # untouched — they are not reads. `getattr` evaluates a property here, so
+        # `config_summary` arrives as a plain str and the non-callable guard returns it.
         attr = getattr(self._wrapped, name)
-        if not callable(attr) or not name.startswith(self._READ_PREFIXES) or name in self._NOT_READS:
+        if not callable(attr) or not name.startswith(self._READ_PREFIXES):
             return attr
 
+        # Any: the forwarded read takes and returns whatever the port member does.
         def proxy(*args: Any, **kwargs: Any) -> Any:
             self.calls.append(name)
             return attr(*args, **kwargs)
@@ -462,29 +539,19 @@ class CountedService:
     reads: CountingRepository
 
     def cold(self) -> None:
-        """Drop every cache entry and every recorded read, so the next measurement is cold."""
-        clear_all_caches()
+        """Drop the service's cache, both search corpora and every recorded read, so the next measurement is cold."""
+        self.service._cache.clear()
+        self.service._item_corpus.invalidate()
+        self.service._category_corpus.invalidate()
         self.reads.reset()
 
 
-@pytest.fixture(
-    params=["in_memory", "json", "yaml", "django"],
-    ids=["in_memory", "json", "yaml", "django"],
-)
+@pytest.fixture(params=BACKEND_PARAMS)
 def counting_service(request: pytest.FixtureRequest, tmp_path: Path) -> CountedService:
     """Return a read-counting service for each backend.
 
     Parametrized exactly like :func:`service`, so a read-count assertion written once is
-    asserted on all four backends (spec 061 FR-011).
+    asserted on all four backends.
     """
     counter = CountingRepository(_build_repository(request, tmp_path))
     return CountedService(service=TaxomeshService(repository=counter), reads=counter)
-
-
-@pytest.fixture
-def tmp_json_path(tmp_path: Path) -> Path:
-    """Return a temporary file path for JsonRepository tests.
-
-    The file does not exist yet; JsonRepository must create it.
-    """
-    return tmp_path / "taxomesh_test.json"

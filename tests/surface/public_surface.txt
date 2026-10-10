@@ -1,0 +1,82 @@
+TaxomeshService.graph(self, *, root: CategoryRef | None = None, enabled: bool | None = True, include_items: builtins.bool = True) -> taxomesh.domain.graph.TaxomeshGraph
+TaxomeshService.info: property -> taxomesh.domain.info.TaxomeshInfo
+TaxomeshService.repository: property -> taxomesh.ports.repository.TaxomeshRepositoryBase
+TaxomeshRepositoryBase.add_item_tag_link(self, item_id: uuid.UUID, tag_id: uuid.UUID) -> None
+TaxomeshRepositoryBase.atomic(self) -> contextlib.AbstractContextManager[None]
+TaxomeshRepositoryBase.config_summary: property -> builtins.str
+TaxomeshRepositoryBase.delete_category(self, category_id: uuid.UUID) -> builtins.bool
+TaxomeshRepositoryBase.delete_category_parent_link(self, category_id: uuid.UUID, parent_category_id: uuid.UUID) -> builtins.bool
+TaxomeshRepositoryBase.delete_item(self, item_id: uuid.UUID) -> builtins.bool
+TaxomeshRepositoryBase.delete_item_parent_link(self, item_id: uuid.UUID, category_id: uuid.UUID) -> builtins.bool
+TaxomeshRepositoryBase.delete_item_relation_link(self, source_item_id: uuid.UUID, target_item_id: uuid.UUID, relation_type: builtins.str) -> builtins.bool
+TaxomeshRepositoryBase.delete_item_tag_link(self, item_id: uuid.UUID, tag_id: uuid.UUID) -> builtins.bool
+TaxomeshRepositoryBase.delete_tag(self, tag_id: uuid.UUID) -> builtins.bool
+TaxomeshRepositoryBase.describe(self) -> taxomesh.domain.info.RepositoryInfo
+TaxomeshRepositoryBase.find_category(self, category_id: uuid.UUID) -> taxomesh.domain.models.category.Category | None
+TaxomeshRepositoryBase.find_category_by_external_id(self, external_id: builtins.str) -> Category | None
+TaxomeshRepositoryBase.find_category_by_slug(self, slug: builtins.str) -> taxomesh.domain.models.category.Category | None
+TaxomeshRepositoryBase.find_item(self, item_id: uuid.UUID) -> taxomesh.domain.models.item.Item | None
+TaxomeshRepositoryBase.find_item_by_external_id(self, external_id: builtins.str) -> Item | None
+TaxomeshRepositoryBase.find_item_by_slug(self, slug: builtins.str) -> taxomesh.domain.models.item.Item | None
+TaxomeshRepositoryBase.find_tag(self, tag_id: uuid.UUID) -> taxomesh.domain.models.tag.Tag | None
+TaxomeshRepositoryBase.list_categories(self, *, enabled: bool | None = True) -> collections.abc.Sequence[taxomesh.domain.models.category.Category]
+TaxomeshRepositoryBase.list_category_parent_links(self, *, category_ids: collections.abc.Collection[uuid.UUID] | None = None, parent_category_ids: collections.abc.Collection[uuid.UUID] | None = None) -> collections.abc.Sequence[taxomesh.domain.models.category_parent_link.CategoryParentLink]
+TaxomeshRepositoryBase.list_item_parent_links(self, *, item_ids: collections.abc.Collection[uuid.UUID] | None = None, category_ids: collections.abc.Collection[uuid.UUID] | None = None) -> collections.abc.Sequence[taxomesh.domain.models.item_parent_link.ItemParentLink]
+TaxomeshRepositoryBase.list_item_relation_links(self, item_id: uuid.UUID, *, relation_types: collections.abc.Collection[str] | None = None, direction: typing.Literal['outgoing', 'incoming', 'both'] = 'outgoing') -> collections.abc.Sequence[taxomesh.domain.models.item_relation_link.ItemRelationLink]
+TaxomeshRepositoryBase.list_item_relation_links_batch(self, item_ids: collections.abc.Collection[uuid.UUID], *, relation_types: collections.abc.Collection[str] | None = None, direction: typing.Literal['outgoing', 'incoming', 'both'] = 'outgoing') -> collections.abc.Sequence[taxomesh.domain.models.item_relation_link.ItemRelationLink]
+TaxomeshRepositoryBase.list_item_tag_links(self, *, item_ids: collections.abc.Collection[uuid.UUID] | None = None, tag_ids: collections.abc.Collection[uuid.UUID] | None = None) -> collections.abc.Sequence[taxomesh.domain.models.item_tag_link.ItemTagLink]
+TaxomeshRepositoryBase.list_items(self, *, enabled: bool | None = True) -> collections.abc.Sequence[taxomesh.domain.models.item.Item]
+TaxomeshRepositoryBase.list_tags(self) -> collections.abc.Sequence[taxomesh.domain.models.tag.Tag]
+TaxomeshRepositoryBase.map_categories_by_external_id(self, external_ids: collections.abc.Collection[str], *, enabled: bool | None = None) -> Mapping[str, Category]
+TaxomeshRepositoryBase.map_categories_by_id(self, category_ids: collections.abc.Collection[uuid.UUID], *, enabled: bool | None = None) -> Mapping[UUID, Category]
+TaxomeshRepositoryBase.map_items_by_external_id(self, external_ids: collections.abc.Collection[str], *, enabled: bool | None = None) -> Mapping[str, Item]
+TaxomeshRepositoryBase.map_items_by_id(self, item_ids: collections.abc.Collection[uuid.UUID], *, enabled: bool | None = None) -> Mapping[UUID, Item]
+TaxomeshRepositoryBase.map_tags_by_id(self, tag_ids: collections.abc.Collection[uuid.UUID]) -> Mapping[UUID, Tag]
+TaxomeshRepositoryBase.save_category(self, category: taxomesh.domain.models.category.Category, *, expected_version: int | None = None) -> taxomesh.domain.models.category.Category
+TaxomeshRepositoryBase.save_category_parent_link(self, link: taxomesh.domain.models.category_parent_link.CategoryParentLink) -> None
+TaxomeshRepositoryBase.save_item(self, item: taxomesh.domain.models.item.Item, *, expected_version: int | None = None) -> taxomesh.domain.models.item.Item
+TaxomeshRepositoryBase.save_item_parent_link(self, link: taxomesh.domain.models.item_parent_link.ItemParentLink) -> None
+TaxomeshRepositoryBase.save_item_relation_link(self, link: taxomesh.domain.models.item_relation_link.ItemRelationLink) -> None
+TaxomeshRepositoryBase.save_tag(self, tag: taxomesh.domain.models.tag.Tag) -> None
+CategoryCollection.add_parent(self, category: CategoryRef, parent: CategoryRef, *, sort_index: int = 0) -> CategoryParentLink
+CategoryCollection.create(self, name: str, *, description: str = '', slug: str = '', external_id: ExternalId = None, metadata: dict[str, Any] | None = None) -> Category
+CategoryCollection.delete(self, key: CategoryRef, /) -> None
+CategoryCollection.get(self, key: K, default: D | None = None, /) -> T | D | None
+CategoryCollection.get_by_external_id(self, external_id: ExternalId, /) -> Category | None
+CategoryCollection.get_by_slug(self, slug: str, /) -> Category | None
+CategoryCollection.get_many(self, categories: CategoryRef | Collection[CategoryRef], /, *, enabled: bool | None = None) -> Mapping[UUID, Category]
+CategoryCollection.get_many_by_external_id(self, external_ids: ExternalId | Collection[ExternalId], /, *, enabled: bool | None = None) -> Mapping[str, Category]
+CategoryCollection.list(self, *, parent: CategoryRef | None = None, item: ItemRef | None = None, enabled: bool | None = True) -> Sequence[Category]
+CategoryCollection.move(self, category: CategoryRef, *, from_parent: CategoryRef | None, to_parent: CategoryRef | None, before: CategoryRef | None = None) -> None
+CategoryCollection.remove_parent(self, category: CategoryRef, parent: CategoryRef) -> None
+CategoryCollection.reorder(self, parent: CategoryRef | None, categories: Sequence[CategoryRef]) -> None
+CategoryCollection.roots(self, *, enabled: bool | None = True) -> Sequence[Category]
+CategoryCollection.search(self, query: str, *, limit: int = 20, parent: CategoryRef | None = None, enabled: bool | None = True, fuzzy: bool = True) -> Sequence[Category]
+CategoryCollection.update(self, category: CategoryRef, *, name: str | UnsetType = UNSET, description: str | UnsetType = UNSET, slug: str | UnsetType = UNSET, external_id: ExternalId | UnsetType = UNSET, enabled: bool | UnsetType = UNSET, metadata: dict[str, Any] | UnsetType = UNSET, expected_version: int | None = None) -> Category
+ItemCollection.create(self, name: str, *, slug: str = '', external_id: ExternalId = None, metadata: dict[str, Any] | None = None) -> Item
+ItemCollection.delete(self, key: ItemRef, /) -> None
+ItemCollection.get(self, key: K, default: D | None = None, /) -> T | D | None
+ItemCollection.get_by_external_id(self, external_id: ExternalId, /) -> Item | None
+ItemCollection.get_by_slug(self, slug: str, /) -> Item | None
+ItemCollection.get_many(self, items: ItemRef | Collection[ItemRef], /, *, enabled: bool | None = None) -> Mapping[UUID, Item]
+ItemCollection.get_many_by_external_id(self, external_ids: ExternalId | Collection[ExternalId], /, *, enabled: bool | None = None) -> Mapping[str, Item]
+ItemCollection.get_many_related(self, items: ItemRef | Collection[ItemRef], /, *, relation_types: str | Collection[str] | None = None, direction: Direction | Literal['outgoing', 'incoming', 'both'] = 'outgoing', enabled: bool | None = True) -> Mapping[UUID, RelatedItems]
+ItemCollection.list(self, *, category: CategoryRef | None = None, recursive: bool = False, tag: TagRef | None = None, enabled: bool | None = True) -> Sequence[Item]
+ItemCollection.list_related(self, item: ItemRef, *, relation_types: str | Collection[str] | None = None, direction: Direction | Literal['outgoing', 'incoming', 'both'] = 'outgoing', enabled: bool | None = True) -> Sequence[Item]
+ItemCollection.list_relations(self, item: ItemRef, *, relation_types: str | Collection[str] | None = None, direction: Direction | Literal['outgoing', 'incoming', 'both'] = 'outgoing') -> Sequence[ItemRelationLink]
+ItemCollection.move(self, item: ItemRef, *, from_category: CategoryRef, to_category: CategoryRef, before: ItemRef | None = None) -> ItemParentLink
+ItemCollection.place_in(self, item: ItemRef, category: CategoryRef, *, sort_index: int = 0) -> ItemParentLink
+ItemCollection.relate(self, source: ItemRef, target: ItemRef, relation_type: str, *, sort_index: int = 0, metadata: dict[str, Any] | None = None) -> ItemRelationLink
+ItemCollection.remove_from(self, item: ItemRef, category: CategoryRef) -> None
+ItemCollection.reorder(self, category: CategoryRef, items: Sequence[ItemRef]) -> None
+ItemCollection.search(self, query: str, *, limit: int = 20, category: CategoryRef | None = None, recursive: bool = False, enabled: bool | None = True, fuzzy: bool = True) -> Sequence[Item]
+ItemCollection.tag(self, item: ItemRef, tag: TagRef) -> None
+ItemCollection.unrelate(self, source: ItemRef, target: ItemRef, relation_type: str) -> None
+ItemCollection.untag(self, item: ItemRef, tag: TagRef) -> None
+ItemCollection.update(self, item: ItemRef, *, name: str | UnsetType = UNSET, slug: str | UnsetType = UNSET, external_id: ExternalId | UnsetType = UNSET, enabled: bool | UnsetType = UNSET, metadata: dict[str, Any] | UnsetType = UNSET, expected_version: int | None = None) -> Item
+TagCollection.create(self, name: str, *, metadata: dict[str, Any] | None = None) -> Tag
+TagCollection.delete(self, key: TagRef, /) -> None
+TagCollection.get(self, key: K, default: D | None = None, /) -> T | D | None
+TagCollection.get_many(self, tags: TagRef | Collection[TagRef], /) -> Mapping[UUID, Tag]
+TagCollection.list(self, *, item: ItemRef | None = None) -> Sequence[Tag]
+TagCollection.update(self, tag: TagRef, *, name: str | UnsetType = UNSET, metadata: dict[str, Any] | UnsetType = UNSET) -> Tag

@@ -8,7 +8,8 @@ import sys
 import pytest
 
 import taxomesh.exceptions as exceptions_module
-from taxomesh.contrib.api.errors import GENERIC_SERVER_ERROR_DETAIL, to_tuple
+from taxomesh.contrib.api import errors as errors_module
+from taxomesh.contrib.api.errors import GENERIC_SERVER_ERROR_DETAIL, TaxomeshGraphTooLargeError, to_tuple
 from taxomesh.exceptions import (
     TaxomeshCategoryNotFoundError,
     TaxomeshConfigError,
@@ -23,11 +24,12 @@ from taxomesh.exceptions import (
     TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
     TaxomeshValidationError,
+    TaxomeshVersionConflictError,
 )
 
 
 class TestGenericServerErrorDetail:
-    """T002 — the constant clients receive for every 500 (FR-004)."""
+    """The constant clients receive for every 500."""
 
     def test_constant_is_a_non_empty_string(self) -> None:
         """The generic detail is a usable, displayable string."""
@@ -72,10 +74,16 @@ class TestToTuple:
         assert body["detail"] == "slug taken"
 
     def test_external_id_conflict_is_409(self) -> None:
-        """TaxomeshExternalIdConflictError → 409 (conflict), not 422 — identical to the slug conflict (FR-006)."""
+        """TaxomeshExternalIdConflictError → 409 (conflict), not 422 — identical to the slug conflict."""
         status, body = to_tuple(TaxomeshExternalIdConflictError("external_id taken"))
         assert status == 409
         assert body["detail"] == "external_id taken"
+
+    def test_version_conflict_is_409(self) -> None:
+        """TaxomeshVersionConflictError → 409: the request was valid, and the stored row moved."""
+        status, body = to_tuple(TaxomeshVersionConflictError("category changed since version 3"))
+        assert status == 409
+        assert body["detail"] == "category changed since version 3"
 
     def test_validation_error_is_422(self) -> None:
         """TaxomeshValidationError → 422."""
@@ -95,29 +103,25 @@ class TestToTuple:
         assert "detail" in body
 
     def test_base_error_fallback_is_500(self) -> None:
-        """Unrecognised TaxomeshError subclass → 500 fallback, redacted (T008, FR-002).
-
-        Before 059 this asserted body["detail"] == "unexpected" — the exception's own text
-        reached the client. The 500 body is now a fixed constant.
-        """
+        """Unrecognised TaxomeshError subclass → 500 fallback, redacted to a fixed constant."""
         status, body = to_tuple(TaxomeshError("unexpected"))
         assert status == 500
         assert body["detail"] == GENERIC_SERVER_ERROR_DETAIL
 
 
 class TestServerErrorRedaction:
-    """US1 — a failing backend does not describe itself to the caller (FR-001..FR-003)."""
+    """A failing backend does not describe itself to the caller."""
 
     _LEAKY_MESSAGE = 'duplicate key value violates unique constraint "taxomesh_item_external_id_key"'
 
     def test_repository_error_body_is_the_generic_constant(self) -> None:
-        """T005 — the TaxomeshRepositoryError branch returns the constant, not str(exc)."""
+        """The TaxomeshRepositoryError branch returns the constant, not str(exc)."""
         status, body = to_tuple(TaxomeshRepositoryError(self._LEAKY_MESSAGE))
         assert status == 500
         assert body == {"detail": GENERIC_SERVER_ERROR_DETAIL}
 
     def test_repository_error_leaks_no_fragment_of_the_original_message(self) -> None:
-        """T006 — proven by absence, not by equality (SC-001).
+        """Proven by absence, not by equality.
 
         Asserting equality with the constant would still pass if a future change appended
         detail to it. This asserts that no 8-character window of the backend message
@@ -136,14 +140,14 @@ class TestServerErrorRedaction:
 
     @pytest.mark.parametrize(
         "error_type",
-        [TaxomeshError, TaxomeshConfigError, TaxomeshRootCategoryError],
+        [TaxomeshError, TaxomeshConfigError],
         ids=lambda c: c.__name__,
     )
     def test_fallback_branch_types_are_redacted(self, error_type: type[TaxomeshError]) -> None:
-        """T007 — every type reaching the unmatched branch is redacted.
+        """Every type reaching the unmatched branch is redacted.
 
-        TaxomeshConfigError and TaxomeshRootCategoryError match no branch and land on the
-        fallback; a config error's message can carry the taxomesh.toml path.
+        TaxomeshConfigError matches no branch and lands on the fallback; its message can carry
+        the taxomesh.toml path.
         """
         status, body = to_tuple(error_type("/Users/someone/private/taxomesh.toml is malformed"))
         assert status == 500
@@ -151,7 +155,7 @@ class TestServerErrorRedaction:
 
 
 class TestClientErrorMessagesArePreserved:
-    """US2 — the redaction must be narrow (FR-006, G2).
+    """The redaction must be narrow.
 
     These fail if a future change over-redacts. 4xx messages describe the caller's own
     input and are the only reason a client can correct its request.
@@ -159,11 +163,11 @@ class TestClientErrorMessagesArePreserved:
 
     @pytest.mark.parametrize(
         "error_type",
-        [TaxomeshDuplicateSlugError, TaxomeshExternalIdConflictError],
+        [TaxomeshDuplicateSlugError, TaxomeshExternalIdConflictError, TaxomeshVersionConflictError],
         ids=lambda c: c.__name__,
     )
     def test_conflict_messages_survive_verbatim(self, error_type: type[TaxomeshError]) -> None:
-        """T010 — 409 bodies are byte-identical to the exception message."""
+        """409 bodies are byte-identical to the exception message."""
         message = "slug 'jazz' already exists"
         status, body = to_tuple(error_type(message))
         assert status == 409
@@ -180,7 +184,7 @@ class TestClientErrorMessagesArePreserved:
         ids=lambda c: c.__name__,
     )
     def test_not_found_messages_survive_verbatim(self, error_type: type[TaxomeshError]) -> None:
-        """T011 — 404 bodies are byte-identical to the exception message."""
+        """404 bodies are byte-identical to the exception message."""
         message = "category 'jazz' does not exist"
         status, body = to_tuple(error_type(message))
         assert status == 404
@@ -188,11 +192,11 @@ class TestClientErrorMessagesArePreserved:
 
     @pytest.mark.parametrize(
         "error_type",
-        [TaxomeshValidationError, TaxomeshCyclicDependencyError, TaxomeshRelationError],
+        [TaxomeshValidationError, TaxomeshCyclicDependencyError, TaxomeshRelationError, TaxomeshRootCategoryError],
         ids=lambda c: c.__name__,
     )
     def test_validation_messages_survive_verbatim(self, error_type: type[TaxomeshError]) -> None:
-        """T012 — 422 bodies are byte-identical to the exception message."""
+        """422 bodies are byte-identical to the exception message."""
         message = "adding 'music' under 'jazz' would create a cycle"
         status, body = to_tuple(error_type(message))
         assert status == 422
@@ -203,10 +207,10 @@ _ERRORS_LOGGER = "taxomesh.contrib.api.errors"
 
 
 class TestServerErrorLogging:
-    """US3 — the detail is relocated to the logger, not destroyed (FR-005, FR-007)."""
+    """The detail is relocated to the logger, not destroyed."""
 
     def test_server_error_emits_exactly_one_error_record_with_exc_info(self, caplog: pytest.LogCaptureFixture) -> None:
-        """T014 — one ERROR record on the module logger, carrying the exception (G4, SC-003)."""
+        """One ERROR log record on the module logger, carrying the exception."""
         exc = TaxomeshRepositoryError("constraint taxomesh_item_external_id_key on taxomesh_item")
         with caplog.at_level(logging.ERROR, logger=_ERRORS_LOGGER):
             to_tuple(exc)
@@ -219,9 +223,9 @@ class TestServerErrorLogging:
         assert record.exc_info[1] is exc
 
     def test_log_message_itself_carries_no_backend_text(self, caplog: pytest.LogCaptureFixture) -> None:
-        """T015 — the detail lives in exc_info, not in the formatted message.
+        """The detail lives in exc_info, not in the formatted message.
 
-        A handler configured to log only record.getMessage() must not leak either.
+        A handler configured to log only the log record's ``getMessage()`` must not leak either.
         """
         marker = "S3CR3T-TABLE-NAME"
         with caplog.at_level(logging.ERROR, logger=_ERRORS_LOGGER):
@@ -236,22 +240,24 @@ class TestServerErrorLogging:
             TaxomeshNotFoundError,
             TaxomeshDuplicateSlugError,
             TaxomeshExternalIdConflictError,
+            TaxomeshVersionConflictError,
             TaxomeshValidationError,
             TaxomeshCyclicDependencyError,
+            TaxomeshRootCategoryError,
         ],
         ids=lambda c: c.__name__,
     )
     def test_client_errors_emit_no_records(
         self, error_type: type[TaxomeshError], caplog: pytest.LogCaptureFixture
     ) -> None:
-        """T016 — 4xx mappings log nothing; they are client mistakes, not operator events (G5)."""
+        """4xx mappings log nothing; they are client mistakes, not operator events."""
         with caplog.at_level(logging.DEBUG, logger=_ERRORS_LOGGER):
             to_tuple(error_type("client mistake"))
 
         assert [r for r in caplog.records if r.name == _ERRORS_LOGGER] == []
 
     def test_unconfigured_application_sees_nothing_on_stderr(self) -> None:
-        """T017 — silence by default (G6, SC-005).
+        """Silence by default.
 
         Run in a clean interpreter: pytest installs its own logging handlers, which would
         mask whether taxomesh is silent on its own. The NullHandler registered in
@@ -275,13 +281,10 @@ class TestServerErrorLogging:
 
 
 class TestToTupleIsTotal:
-    """FR-010 — to_tuple must not raise, whatever it is handed."""
+    """to_tuple must not raise, whatever it is handed."""
 
     def test_exception_with_a_raising_str_still_maps(self) -> None:
-        """A 500 body never touches str(exc), so a broken __str__ cannot break the mapping.
-
-        Closes analyze finding C1: FR-010 was argued in research §7 but never asserted.
-        """
+        """A 500 body never touches str(exc), so a broken __str__ cannot break the mapping."""
 
         class HostileError(TaxomeshError):
             def __str__(self) -> str:
@@ -310,8 +313,8 @@ class TestToTupleBodyShape:
 
 # The intended HTTP status for every TaxomeshError type the mapping can receive. Semantically
 # equivalent errors MUST assert identical statuses: both uniqueness conflicts (slug, external_id)
-# map to 409. Errors that never reach a public handler (config/root-category) map to the 500
-# fallback and are listed explicitly so the guard below can prove the mapping is exhaustive.
+# map to 409. A configuration error never reaches a public handler; it maps to the 500 fallback
+# and is listed explicitly so the guard below can prove the mapping is exhaustive.
 EXPECTED_STATUS: dict[type[TaxomeshError], int] = {
     TaxomeshError: 500,
     TaxomeshNotFoundError: 404,
@@ -323,26 +326,33 @@ EXPECTED_STATUS: dict[type[TaxomeshError], int] = {
     TaxomeshRelationError: 422,
     TaxomeshDuplicateSlugError: 409,
     TaxomeshExternalIdConflictError: 409,
+    TaxomeshVersionConflictError: 409,
     TaxomeshRepositoryError: 500,
     TaxomeshConfigError: 500,
-    TaxomeshRootCategoryError: 500,
+    TaxomeshRootCategoryError: 422,
+    TaxomeshGraphTooLargeError: 500,
 }
 
 
 def _all_taxomesh_error_types() -> set[type[TaxomeshError]]:
-    """Discover every TaxomeshError subclass defined in taxomesh.exceptions."""
-    return {obj for _, obj in inspect.getmembers(exceptions_module, inspect.isclass) if issubclass(obj, TaxomeshError)}
+    """Discover every TaxomeshError subclass in taxomesh.exceptions and in the HTTP errors module."""
+    return {
+        obj
+        for module in (exceptions_module, errors_module)
+        for _, obj in inspect.getmembers(module, inspect.isclass)
+        if issubclass(obj, TaxomeshError)
+    }
 
 
 class TestMappingCompleteness:
-    """FR-018 / SC-006 — guard against a new error type silently inheriting a generic status."""
+    """Guard against a new error type silently inheriting a generic status."""
 
     def test_every_error_type_is_listed(self) -> None:
         """Every TaxomeshError subclass must have an intended status recorded.
 
-        This is the guard the divergence FR-006 corrects would have caught: when 041 added
-        TaxomeshExternalIdConflictError, nothing forced contrib.api to assign it a status, so it
-        silently inherited 422. A newly added error type now fails this test until it is mapped.
+        Without it, a new error type would silently inherit its base class's status, as a
+        conflict error would inherit 422 from a validation base. A newly added error type fails
+        this test until it is mapped.
         """
         unlisted = _all_taxomesh_error_types() - set(EXPECTED_STATUS)
         assert not unlisted, (

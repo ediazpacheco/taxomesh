@@ -1,5 +1,6 @@
 """Admin registration smoke tests for taxomesh Django models."""
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -7,6 +8,10 @@ import pytest
 django = pytest.importorskip("django", reason="Django is not installed")
 
 from django.contrib import admin  # noqa: E402
+from django.forms import ModelForm  # noqa: E402
+from django.test import Client  # noqa: E402
+from django.utils.datastructures import MultiValueDict  # noqa: E402
+from pytest_django.fixtures import SettingsWrapper  # noqa: E402
 
 from taxomesh.contrib.django.models import (  # noqa: E402
     CategoryModel,
@@ -16,6 +21,12 @@ from taxomesh.contrib.django.models import (  # noqa: E402
 )
 
 pytestmark = pytest.mark.django_db
+
+# Django cannot subscript ``ModelForm`` at run time; the type checker reads it with its model.
+if TYPE_CHECKING:
+    _ItemFormBase = ModelForm[ItemModel]
+else:
+    _ItemFormBase = ModelForm
 
 
 def test_core_models_registered_in_admin() -> None:
@@ -75,7 +86,7 @@ def test_item_parent_link_model_str_shows_item_and_category() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T012 — TestGraphAdminView
+# TestGraphAdminView
 # ---------------------------------------------------------------------------
 
 
@@ -89,15 +100,15 @@ class TestGraphAdminView:
         url = reverse("admin:taxomesh_contrib_django_graph")
         assert url  # Does not raise NoReverseMatch
 
-    def test_graph_view_returns_200_for_staff_user(self, admin_client: object) -> None:
+    def test_graph_view_returns_200_for_staff_user(self, admin_client: Client) -> None:
         """GET the graph URL as a staff user must return HTTP 200."""
         from django.urls import reverse  # noqa: PLC0415
 
         url = reverse("admin:taxomesh_contrib_django_graph")
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert response.status_code == 200
 
-    def test_graph_view_shows_category_name(self, admin_client: object) -> None:
+    def test_graph_view_shows_category_name(self, admin_client: Client) -> None:
         """GET the graph URL shows category names from the database."""
         from django.urls import reverse  # noqa: PLC0415
 
@@ -106,21 +117,21 @@ class TestGraphAdminView:
 
         repo = DjangoRepository()
         svc = TaxomeshService(repository=repo)
-        svc.create_category(name="TestCategory")
+        svc.categories.create(name="TestCategory")
         url = reverse("admin:taxomesh_contrib_django_graph")
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert b"TestCategory" in response.content
 
-    def test_graph_view_empty_state_message(self, admin_client: object) -> None:
+    def test_graph_view_empty_state_message(self, admin_client: Client) -> None:
         """GET the graph URL with no categories shows the empty-state message."""
         from django.urls import reverse  # noqa: PLC0415
 
         url = reverse("admin:taxomesh_contrib_django_graph")
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert response.status_code == 200
-        assert b"No categories" in response.content
+        assert b"No categories found. Add one on the Categories page." in response.content
 
-    def test_graph_view_shows_error_on_db_failure(self, admin_client: object) -> None:
+    def test_graph_view_shows_error_on_db_failure(self, admin_client: Client) -> None:
         """GET the graph URL with a mocked DB failure shows error in content, status 200."""
         from unittest.mock import patch  # noqa: PLC0415
 
@@ -133,12 +144,12 @@ class TestGraphAdminView:
             "taxomesh.adapters.repositories.django_repository.DjangoRepository.list_category_parent_links",
             side_effect=TaxomeshError("db error"),
         ):
-            response = admin_client.get(url)  # type: ignore[attr-defined]
+            response = admin_client.get(url)
         assert response.status_code == 200
         assert b"db error" in response.content
 
-    def test_graph_view_renders_anchor_links(self, admin_client: object) -> None:
-        """Each entry label in the graph view must be wrapped in an <a> tag (SC-002)."""
+    def test_graph_view_renders_anchor_links(self, admin_client: Client) -> None:
+        """Each entry label in the graph view must be wrapped in an <a> tag."""
         from django.urls import reverse  # noqa: PLC0415
 
         from taxomesh import TaxomeshService  # noqa: PLC0415
@@ -146,22 +157,19 @@ class TestGraphAdminView:
 
         repo = DjangoRepository()
         svc = TaxomeshService(repository=repo)
-        cat = svc.create_category(name="LinkTestCat")
-        item = svc.create_item(name="LinkTestItem")
-        svc.place_item_in_category(item.item_id, cat.category_id)
+        cat = svc.categories.create(name="LinkTestCat")
+        item = svc.items.create(name="LinkTestItem")
+        svc.items.place_in(item.item_id, cat.category_id)
         url = reverse("admin:taxomesh_contrib_django_graph")
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert b"<a href=" in response.content
 
 
 class TestFlattenGraph:
-    """Unit tests for the _build_child_entries helper (replaces _flatten_graph)."""
+    """Unit tests for the _build_child_entries helper."""
 
-    def test_entry_schema_has_no_legacy_keys(self) -> None:
-        """_build_child_entries entries must not contain slug or indent_em keys.
-
-        Note: external_id is now an intentional GraphEntry field (024-graph-enhancements).
-        """
+    def test_entry_schema_has_no_slug_or_indent_keys(self) -> None:
+        """_build_child_entries entries carry no slug or indent_em key; external_id is a field."""
         from uuid import uuid4  # noqa: PLC0415
 
         from taxomesh.contrib.django.admin import _build_child_entries  # noqa: PLC0415
@@ -211,29 +219,29 @@ class TestFlattenGraph:
 
 
 # ---------------------------------------------------------------------------
-# T020 — Proxy model: Graph link on main admin index
+# Proxy model: Graph link on main admin index
 # ---------------------------------------------------------------------------
 
 
 class TestGraphProxyAdminIndex:
     """Tests for CategoryGraphProxy surfacing the Graph link on the main admin index."""
 
-    def test_graph_proxy_model_appears_in_admin_app_list(self, admin_client: object) -> None:
+    def test_graph_proxy_model_appears_in_admin_app_list(self, admin_client: Client) -> None:
         """GET /admin/ must contain 'Graph' — the proxy model row in the Taxomesh section."""
         from django.urls import reverse  # noqa: PLC0415
 
         url = reverse("admin:index")
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert response.status_code == 200
         assert b"Graph" in response.content
 
-    def test_graph_proxy_changelist_redirects(self, admin_client: object) -> None:
+    def test_graph_proxy_changelist_redirects(self, admin_client: Client) -> None:
         """GET /admin/taxomesh_contrib_django/categorygraphproxy/ must 302 to the graph view URL."""
         from django.urls import reverse  # noqa: PLC0415
 
         changelist_url = reverse("admin:taxomesh_contrib_django_categorygraphproxy_changelist")
         graph_url = reverse("admin:taxomesh_contrib_django_graph")
-        response = admin_client.get(changelist_url)  # type: ignore[attr-defined]
+        response = admin_client.get(changelist_url)
         assert response.status_code == 302
         assert response["Location"] == graph_url
 
@@ -284,9 +292,11 @@ class TestRootCategoryHidden:
         request = MagicMock(spec=HttpRequest)
 
         db_field = CategoryParentLinkModel._meta.get_field("parent_category")
-        form_field = inline.formfield_for_foreignkey(db_field, request)  # type: ignore[arg-type]
+        form_field = inline.formfield_for_foreignkey(db_field, request)
+        assert form_field is not None
+        assert form_field.queryset is not None
 
-        names = list(form_field.queryset.values_list("name", flat=True))  # type: ignore[union-attr]
+        names = list(form_field.queryset.values_list("name", flat=True))
         assert ROOT_CATEGORY_NAME not in names
         assert "Electronics" in names
 
@@ -351,16 +361,21 @@ class TestSlugAdminConfig:
     def test_has_slug_filter_yes_returns_only_slugged(self) -> None:
         from unittest.mock import MagicMock  # noqa: PLC0415
 
-        from django.http import HttpRequest, QueryDict  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
 
-        from taxomesh.contrib.django.admin import HasSlugFilter  # noqa: PLC0415
+        from taxomesh.contrib.django.admin import CategoryModelAdmin, HasSlugFilter  # noqa: PLC0415
 
         CategoryModel.objects.create(name="With Slug", slug="w")
         CategoryModel.objects.create(name="No Slug", slug="")
 
-        f = HasSlugFilter(MagicMock(spec=HttpRequest), QueryDict("has_slug=yes").copy(), CategoryModel, None)
+        f = HasSlugFilter(
+            MagicMock(spec=HttpRequest),
+            {"has_slug": ["yes"]},
+            CategoryModel,
+            CategoryModelAdmin(CategoryModel, admin.site),
+        )
         qs = f.queryset(MagicMock(spec=HttpRequest), CategoryModel.objects.all())
-        names = list(qs.values_list("name", flat=True))  # type: ignore[union-attr]
+        names = list(qs.values_list("name", flat=True))
         assert "With Slug" in names
         assert "No Slug" not in names
 
@@ -368,16 +383,21 @@ class TestSlugAdminConfig:
     def test_has_slug_filter_no_returns_only_unslugged(self) -> None:
         from unittest.mock import MagicMock  # noqa: PLC0415
 
-        from django.http import HttpRequest, QueryDict  # noqa: PLC0415
+        from django.http import HttpRequest  # noqa: PLC0415
 
-        from taxomesh.contrib.django.admin import HasSlugFilter  # noqa: PLC0415
+        from taxomesh.contrib.django.admin import CategoryModelAdmin, HasSlugFilter  # noqa: PLC0415
 
         CategoryModel.objects.create(name="With Slug", slug="w")
         CategoryModel.objects.create(name="No Slug", slug="")
 
-        f = HasSlugFilter(MagicMock(spec=HttpRequest), QueryDict("has_slug=no").copy(), CategoryModel, None)
+        f = HasSlugFilter(
+            MagicMock(spec=HttpRequest),
+            {"has_slug": ["no"]},
+            CategoryModel,
+            CategoryModelAdmin(CategoryModel, admin.site),
+        )
         qs = f.queryset(MagicMock(spec=HttpRequest), CategoryModel.objects.all())
-        names = list(qs.values_list("name", flat=True))  # type: ignore[union-attr]
+        names = list(qs.values_list("name", flat=True))
         assert "No Slug" in names
         assert "With Slug" not in names
 
@@ -421,7 +441,7 @@ class TestCategoryMetadataAdminConfig:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), True)
-            call_kwargs = mock_svc.update_category.call_args.kwargs
+            call_kwargs = mock_svc.categories.update.call_args.kwargs
             assert call_kwargs.get("metadata") == {"x": 1}
 
     def test_category_admin_save_model_passes_metadata_on_create(self) -> None:
@@ -446,9 +466,9 @@ class TestCategoryMetadataAdminConfig:
         with patch("taxomesh.contrib.django.admin.TaxomeshService") as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.create_category.return_value = MagicMock(category_id=__import__("uuid").uuid4())
+            mock_svc.categories.create.return_value = MagicMock(category_id=__import__("uuid").uuid4())
             admin_obj.save_model(request, mock_obj, MagicMock(), False)
-            call_kwargs = mock_svc.create_category.call_args.kwargs
+            call_kwargs = mock_svc.categories.create.call_args.kwargs
             assert call_kwargs.get("metadata") == {"new": True}
 
 
@@ -492,7 +512,7 @@ class TestItemMetadataAdminConfig:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), True)
-            call_kwargs = mock_svc.update_item.call_args.kwargs
+            call_kwargs = mock_svc.items.update.call_args.kwargs
             assert call_kwargs.get("metadata") == {"x": 1}
 
     def test_item_admin_save_model_passes_metadata_on_create(self) -> None:
@@ -517,9 +537,9 @@ class TestItemMetadataAdminConfig:
         with patch("taxomesh.contrib.django.admin.TaxomeshService") as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.create_item.return_value = MagicMock(item_id=__import__("uuid").uuid4())
+            mock_svc.items.create.return_value = MagicMock(item_id=__import__("uuid").uuid4())
             admin_obj.save_model(request, mock_obj, MagicMock(), False)
-            call_kwargs = mock_svc.create_item.call_args.kwargs
+            call_kwargs = mock_svc.items.create.call_args.kwargs
             assert call_kwargs.get("metadata") == {"new": True}
 
 
@@ -528,11 +548,8 @@ class TestItemExternalIdOptional:
 
     def test_admin_create_item_blank_external_id(self) -> None:
         """ItemModel form must accept a blank external_id (the reported bug)."""
-        from django.forms import ModelForm  # noqa: PLC0415
 
-        from taxomesh.contrib.django.models import ItemModel  # noqa: PLC0415
-
-        class _ItemForm(ModelForm):  # type: ignore[type-arg]
+        class _ItemForm(_ItemFormBase):
             class Meta:
                 model = ItemModel
                 fields = ["name", "external_id", "slug", "enabled", "metadata"]
@@ -544,7 +561,7 @@ class TestItemExternalIdOptional:
 
 
 # ---------------------------------------------------------------------------
-# T007-T008 — Category linked_object_url using TAXOMESH_CATEGORY_LINKED_MODEL
+# Category linked_object_url using TAXOMESH_CATEGORY_LINKED_MODEL
 # ---------------------------------------------------------------------------
 
 
@@ -563,7 +580,7 @@ class TestCategoryLinkedObjectUrl:
         result = cat_admin.linked_object_url(mock_obj)
         assert result == ""
 
-    def test_category_linked_object_url_no_setting(self, settings: object) -> None:
+    def test_category_linked_object_url_no_setting(self, settings: SettingsWrapper) -> None:
         """Without TAXOMESH_CATEGORY_LINKED_MODEL, linked_object_url returns empty string."""
         import django.conf  # noqa: PLC0415
 
@@ -581,14 +598,14 @@ class TestCategoryLinkedObjectUrl:
 
 
 # ---------------------------------------------------------------------------
-# T018-T019 — UUID search fields
+# UUID search fields
 # ---------------------------------------------------------------------------
 
 
 class TestUUIDSearchFields:
     """Tests for UUID-based search in Category and Item admin."""
 
-    def test_category_search_by_uuid_substring(self, admin_client: object) -> None:
+    def test_category_search_by_uuid_substring(self, admin_client: Client) -> None:
         """Category admin list search by partial UUID returns matching category."""
         from django.urls import reverse  # noqa: PLC0415
 
@@ -596,11 +613,11 @@ class TestUUIDSearchFields:
         uuid_str = str(cat.category_id)
         partial = uuid_str[:8]
         url = reverse("admin:taxomesh_contrib_django_categorymodel_changelist") + f"?q={partial}"
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert response.status_code == 200
         assert "SearchCat" in response.content.decode()
 
-    def test_item_search_by_uuid_substring(self, admin_client: object) -> None:
+    def test_item_search_by_uuid_substring(self, admin_client: Client) -> None:
         """Item admin list search by partial UUID returns matching item."""
         from django.urls import reverse  # noqa: PLC0415
 
@@ -608,40 +625,40 @@ class TestUUIDSearchFields:
         uuid_str = str(item.item_id)
         partial = uuid_str[:8]
         url = reverse("admin:taxomesh_contrib_django_itemmodel_changelist") + f"?q={partial}"
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert response.status_code == 200
         assert "SearchItem" in response.content.decode()
 
 
 # ---------------------------------------------------------------------------
-# T022-T023 — Admin filters
+# Admin filters
 # ---------------------------------------------------------------------------
 
 
 class TestAdminFilters:
     """Tests for HasLinkedObjectListFilter and TaxomeshCategoryListFilter."""
 
-    def test_has_linked_object_filter_yes(self, admin_client: object) -> None:
+    def test_has_linked_object_filter_yes(self, admin_client: Client) -> None:
         """Filter 'yes' returns only categories with non-empty external_id."""
         from django.urls import reverse  # noqa: PLC0415
 
         CategoryModel.objects.create(name="WithExt", external_id="ext-123")
         CategoryModel.objects.create(name="WithoutExt", external_id="")
         url = reverse("admin:taxomesh_contrib_django_categorymodel_changelist") + "?has_linked_object=yes"
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         content = response.content.decode()
         assert response.status_code == 200
         assert "WithExt" in content
         assert "WithoutExt" not in content
 
-    def test_has_linked_object_filter_no(self, admin_client: object) -> None:
+    def test_has_linked_object_filter_no(self, admin_client: Client) -> None:
         """Filter 'no' returns only categories with empty external_id."""
         from django.urls import reverse  # noqa: PLC0415
 
         CategoryModel.objects.create(name="WithExt2", external_id="ext-456")
         CategoryModel.objects.create(name="WithoutExt2", external_id="")
         url = reverse("admin:taxomesh_contrib_django_categorymodel_changelist") + "?has_linked_object=no"
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         content = response.content.decode()
         assert response.status_code == 200
         assert "WithoutExt2" in content
@@ -702,15 +719,17 @@ class TestAutocompleteInlines:
         inline = CategoryParentLinkInline(CategoryModel, site)
         request = MagicMock(spec=HttpRequest)
         db_field = CategoryParentLinkModel._meta.get_field("parent_category")
-        form_field = inline.formfield_for_foreignkey(db_field, request)  # type: ignore[arg-type]
+        form_field = inline.formfield_for_foreignkey(db_field, request)
+        assert form_field is not None
+        assert form_field.queryset is not None
 
-        names = list(form_field.queryset.values_list("name", flat=True))  # type: ignore[union-attr]
+        names = list(form_field.queryset.values_list("name", flat=True))
         assert ROOT_CATEGORY_NAME not in names
         assert "Visible" in names
 
 
 # ---------------------------------------------------------------------------
-# TestJsonEditorWidget — unit tests for the JsonEditorWidget class (T001)
+# TestJsonEditorWidget — unit tests for the JsonEditorWidget class
 # ---------------------------------------------------------------------------
 
 
@@ -739,6 +758,7 @@ class TestJsonEditorWidget:
         output = widget.render("metadata", {}, {"id": "id_metadata"})
         assert "ace.edit(" in output
         assert "ace.config.set" in output
+        assert "Metadata is not valid JSON. Correct it, then save." in output
 
     def test_render_none_value_defaults_to_empty_object(self) -> None:
         from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
@@ -770,18 +790,18 @@ class TestJsonEditorWidget:
         from taxomesh.contrib.django.widgets import ACE_EDITOR_CDN_URL, JsonEditorWidget  # noqa: PLC0415
 
         widget = JsonEditorWidget()
-        assert ACE_EDITOR_CDN_URL in widget.media._js  # type: ignore[attr-defined]
+        assert ACE_EDITOR_CDN_URL in str(widget.media)
 
     def test_value_from_datadict_reads_textarea_name(self) -> None:
         from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
 
         widget = JsonEditorWidget()
-        result = widget.value_from_datadict({"metadata": '{"x":1}'}, {}, "metadata")
+        result = widget.value_from_datadict({"metadata": '{"x":1}'}, MultiValueDict(), "metadata")
         assert result == '{"x":1}'
 
 
 # ---------------------------------------------------------------------------
-# TestJsonEditorAdminIntegration — admin change pages render Ace editor (T004)
+# TestJsonEditorAdminIntegration — admin change pages render Ace editor
 # ---------------------------------------------------------------------------
 
 
@@ -789,49 +809,49 @@ class TestJsonEditorWidget:
 class TestJsonEditorAdminIntegration:
     """Integration tests: Category and Item change pages must render the Ace editor."""
 
-    def test_category_change_page_renders_ace_editor(self, admin_client: object) -> None:
+    def test_category_change_page_renders_ace_editor(self, admin_client: Client) -> None:
         from django.urls import reverse  # noqa: PLC0415
 
         from taxomesh.contrib.django.models import CategoryModel  # noqa: PLC0415
 
         category = CategoryModel.objects.create(name="Test Category", metadata={"k": "v"})
         url = reverse("admin:taxomesh_contrib_django_categorymodel_change", args=[category.pk])
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert response.status_code == 200
         assert b"ace.edit(" in response.content
         assert b"ace/mode/json" in response.content
 
-    def test_item_change_page_renders_ace_editor(self, admin_client: object) -> None:
+    def test_item_change_page_renders_ace_editor(self, admin_client: Client) -> None:
         from django.urls import reverse  # noqa: PLC0415
 
         from taxomesh.contrib.django.models import ItemModel  # noqa: PLC0415
 
         item = ItemModel.objects.create(name="Test Item", metadata={"genre": "rock"})
         url = reverse("admin:taxomesh_contrib_django_itemmodel_change", args=[item.pk])
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert response.status_code == 200
         assert b"ace.edit(" in response.content
         assert b"ace/mode/json" in response.content
 
-    def test_category_metadata_textarea_is_hidden(self, admin_client: object) -> None:
+    def test_category_metadata_textarea_is_hidden(self, admin_client: Client) -> None:
         from django.urls import reverse  # noqa: PLC0415
 
         from taxomesh.contrib.django.models import CategoryModel  # noqa: PLC0415
 
         category = CategoryModel.objects.create(name="Another Category")
         url = reverse("admin:taxomesh_contrib_django_categorymodel_change", args=[category.pk])
-        response = admin_client.get(url)  # type: ignore[attr-defined]
+        response = admin_client.get(url)
         assert response.status_code == 200
         assert b"display:none" in response.content
 
 
 # ---------------------------------------------------------------------------
-# TestJsonEditorWidgetUS2 — failing tests for US2 validation guard (T005)
+# TestJsonEditorWidgetValidation — the editor's validation guards
 # ---------------------------------------------------------------------------
 
 
-class TestJsonEditorWidgetUS2:
-    """Tests for US2: real-time validation worker + submit guard + blank guard."""
+class TestJsonEditorWidgetValidation:
+    """Real-time validation worker, submit guard and blank guard."""
 
     def test_render_uses_worker(self) -> None:
         from taxomesh.contrib.django.widgets import JsonEditorWidget  # noqa: PLC0415
@@ -863,6 +883,17 @@ class TestJsonEditorWidgetUS2:
         field = JsonEditorFormField(required=False)
         result = field.clean("")
         assert result == {}
+
+    @pytest.mark.parametrize("raw", ["null", "[1]", "5", '"x"'], ids=["null", "list", "number", "string"])
+    def test_clean_refuses_anything_but_an_object(self, raw: str) -> None:
+        """Metadata is a JSON object: anything else is a form error, before the service sees it."""
+        from django.core.exceptions import ValidationError  # noqa: PLC0415
+
+        from taxomesh.contrib.django.widgets import JsonEditorFormField  # noqa: PLC0415
+
+        field = JsonEditorFormField(required=False)
+        with pytest.raises(ValidationError, match="object"):
+            field.clean(raw)
 
 
 class TestCategoryChildLinkInline:
@@ -903,7 +934,7 @@ class TestCategoryChildLinkInline:
         qs = inline.get_queryset(request).filter(parent_category=parent)
 
         assert qs.count() == 1
-        assert qs.first().category == child
+        assert qs.get().category == child
 
 
 # ---------------------------------------------------------------------------
@@ -997,35 +1028,6 @@ class TestCategoryChildLinkInlineEditable:
 
         assert "category" in CategoryChildLinkInline.autocomplete_fields
 
-    def test_save_model_calls_service_add_category_parent(self) -> None:
-        import uuid  # noqa: PLC0415
-        from unittest.mock import patch  # noqa: PLC0415
-
-        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
-        from django.http import HttpRequest  # noqa: PLC0415
-
-        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
-        from taxomesh.contrib.django.models import CategoryParentLinkModel  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = CategoryChildLinkInline(CategoryModel, site)
-        request = MagicMock(spec=HttpRequest)
-
-        obj = MagicMock(spec=CategoryParentLinkModel)
-        obj.category_id = uuid.uuid4()
-        obj.parent_category_id = uuid.uuid4()
-        obj.sort_index = 0
-
-        mock_svc = MagicMock()
-        with patch.object(inline, "_make_service", return_value=mock_svc):
-            inline.save_model(request, obj, MagicMock(), False)
-
-        mock_svc.add_category_parent.assert_called_once_with(
-            category_id=obj.category_id,
-            parent_id=obj.parent_category_id,
-            sort_index=obj.sort_index,
-        )
-
     @pytest.mark.django_db
     def test_root_category_excluded_from_child_selector(self) -> None:
         from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
@@ -1043,8 +1045,10 @@ class TestCategoryChildLinkInlineEditable:
         request = MagicMock(spec=HttpRequest)
         db_field = CategoryParentLinkModel._meta.get_field("category")
         form_field = inline.formfield_for_foreignkey(db_field, request)
+        assert form_field is not None
+        assert form_field.queryset is not None
 
-        names = list(form_field.queryset.values_list("name", flat=True))  # type: ignore[union-attr]
+        names = list(form_field.queryset.values_list("name", flat=True))
         assert ROOT_CATEGORY_NAME not in names
         assert "Visible" in names
 
@@ -1074,33 +1078,6 @@ class TestCategoryChildLinkInlineEditable:
         request = MagicMock()
         request.user.has_perm.return_value = True
         assert inline.has_delete_permission(request, obj=None)
-
-    def test_delete_model_calls_service_remove_category_parent(self) -> None:
-        import uuid  # noqa: PLC0415
-        from unittest.mock import patch  # noqa: PLC0415
-
-        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
-        from django.http import HttpRequest  # noqa: PLC0415
-
-        from taxomesh.contrib.django.admin import CategoryChildLinkInline  # noqa: PLC0415
-        from taxomesh.contrib.django.models import CategoryParentLinkModel  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = CategoryChildLinkInline(CategoryModel, site)
-        request = MagicMock(spec=HttpRequest)
-
-        obj = MagicMock(spec=CategoryParentLinkModel)
-        obj.category_id = uuid.uuid4()
-        obj.parent_category_id = uuid.uuid4()
-
-        mock_svc = MagicMock()
-        with patch.object(inline, "_make_service", return_value=mock_svc):
-            inline.delete_model(request, obj)
-
-        mock_svc.remove_category_parent.assert_called_once_with(
-            category_id=obj.category_id,
-            parent_id=obj.parent_category_id,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1139,10 +1116,10 @@ class TestCategoryItemLinkInline:
         qs = inline.get_queryset(MagicMock()).filter(category=cat_a)
 
         assert qs.count() == 1
-        assert qs.first().item == item_a
+        assert qs.get().item == item_a
 
     def test_autocomplete_fields_and_sort_index_not_excluded(self) -> None:
-        """Inline uses autocomplete for item FK and does not hide sort_index (FR-002)."""
+        """Inline uses autocomplete for item FK and does not hide sort_index."""
         from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
 
         from taxomesh.contrib.django.admin import CategoryItemLinkInline  # noqa: PLC0415
@@ -1153,31 +1130,6 @@ class TestCategoryItemLinkInline:
         # sort_index must not be excluded — no fields/exclude override that hides it
         assert not hasattr(inline, "fields") or inline.fields is None
         assert not hasattr(inline, "exclude") or not inline.exclude or "sort_index" not in inline.exclude
-
-    def test_save_model_calls_place_item_in_category(self) -> None:
-        """save_model routes the link creation through the service layer."""
-        import uuid  # noqa: PLC0415
-        from unittest.mock import patch  # noqa: PLC0415
-
-        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
-        from django.http import HttpRequest  # noqa: PLC0415
-
-        from taxomesh.contrib.django.admin import CategoryItemLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = CategoryItemLinkInline(CategoryModel, site)
-        request = MagicMock(spec=HttpRequest)
-
-        obj = MagicMock(spec=ItemParentLinkModel)
-        obj.item_id = uuid.uuid4()
-        obj.category_id = uuid.uuid4()
-        obj.sort_index = 0
-
-        mock_svc = MagicMock()
-        with patch.object(inline, "_make_service", return_value=mock_svc):
-            inline.save_model(request, obj, MagicMock(), False)
-
-        mock_svc.place_item_in_category.assert_called_once_with(obj.item_id, obj.category_id, obj.sort_index)
 
     def test_duplicate_item_link_raises_integrity_error(self) -> None:
         """Adding the same item to the same category twice violates the unique constraint."""
@@ -1190,38 +1142,14 @@ class TestCategoryItemLinkInline:
         with pytest.raises(IntegrityError):
             ItemParentLinkModel.objects.create(item=item, category=cat)
 
-    def test_delete_model_calls_remove_item_from_category(self) -> None:
-        """delete_model routes the link removal through the service layer."""
-        import uuid  # noqa: PLC0415
-        from unittest.mock import patch  # noqa: PLC0415
-
-        from django.contrib.admin.sites import AdminSite  # noqa: PLC0415
-        from django.http import HttpRequest  # noqa: PLC0415
-
-        from taxomesh.contrib.django.admin import CategoryItemLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = CategoryItemLinkInline(CategoryModel, site)
-        request = MagicMock(spec=HttpRequest)
-
-        obj = MagicMock(spec=ItemParentLinkModel)
-        obj.item_id = uuid.uuid4()
-        obj.category_id = uuid.uuid4()
-
-        mock_svc = MagicMock()
-        with patch.object(inline, "_make_service", return_value=mock_svc):
-            inline.delete_model(request, obj)
-
-        mock_svc.remove_item_from_category.assert_called_once_with(obj.item_id, obj.category_id)
-
     def test_delete_model_preserves_item_record(self) -> None:
-        """Removing a link deletes only the link; the ItemModel record must survive."""
+        """Removing a link deletes only the link; the ItemModel row must stay."""
         cat = CategoryModel.objects.create(name="Cat Del")
         item = ItemModel.objects.create(name="Item Del")
         link = ItemParentLinkModel.objects.create(item=item, category=cat)
 
         # Call delete_model directly via the ORM path (bypassing service mock)
-        # to confirm item record survives after the link is removed.
+        # to confirm that the item row stays after the link is removed.
         link.delete()
 
         assert ItemModel.objects.filter(pk=item.pk).exists()

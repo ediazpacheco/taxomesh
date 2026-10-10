@@ -1,4 +1,4 @@
-"""Tests for TaxomeshService config_path parameter and repository property (FR-008–FR-012)."""
+"""Tests for TaxomeshService config_path parameter and repository property."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -11,7 +11,7 @@ from taxomesh.exceptions import TaxomeshConfigError
 
 
 def test_no_args_no_config_file_falls_back_to_yaml_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """TaxomeshService() with no config_path and no taxomesh.toml in CWD uses YAMLRepository."""
+    """TaxomeshService() with no config_path and no taxomesh.toml in CWD uses YamlRepository."""
     monkeypatch.chdir(tmp_path)
     TaxomeshService()
     assert (tmp_path / "data" / "taxomesh.yaml").exists()
@@ -27,7 +27,7 @@ def test_auto_discovers_toml_from_cwd(tmp_path: Path, monkeypatch: pytest.Monkey
 
 
 def test_explicit_config_path_yaml(tmp_path: Path) -> None:
-    """TaxomeshService(config_path=...) reads YAML config and creates YAMLRepository."""
+    """TaxomeshService(config_path=...) reads YAML config and creates YamlRepository."""
     custom_db = tmp_path / "custom.yaml"
     cfg = tmp_path / "my.toml"
     cfg.write_text(f'[repository]\ntype = "yaml"\npath = "{custom_db}"\n', encoding="utf-8")
@@ -98,7 +98,7 @@ def test_unsupported_type_raises_config_error(tmp_path: Path) -> None:
 
 
 def test_nonexistent_config_path_falls_back_to_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """When config_path points to a non-existent file, falls back to YAMLRepository."""
+    """When config_path points to a non-existent file, falls back to YamlRepository."""
     monkeypatch.chdir(tmp_path)
     nonexistent = tmp_path / "does-not-exist.toml"
     TaxomeshService(config_path=nonexistent)
@@ -122,7 +122,7 @@ def test_repository_property_returns_injected_repo(tmp_path: Path) -> None:
 
 
 def test_os_error_on_config_read_raises_config_error_with_chain(tmp_path: Path) -> None:
-    """PermissionError during config file read raises TaxomeshConfigError with chaining (FR-011)."""
+    """PermissionError during config file read raises TaxomeshConfigError with chaining."""
     cfg = tmp_path / "taxomesh.toml"
     cfg.write_text('[repository]\ntype = "yaml"\n', encoding="utf-8")
     with (
@@ -134,7 +134,7 @@ def test_os_error_on_config_read_raises_config_error_with_chain(tmp_path: Path) 
 
 
 # ---------------------------------------------------------------------------
-# US6 — TOML config: type = "django" (FR-013, FR-014)
+# TOML config: type = "django"
 # ---------------------------------------------------------------------------
 
 
@@ -147,7 +147,7 @@ def test_build_repo_from_config_django_type(tmp_path: Path) -> None:
     mock_repo.list_categories.return_value = []
 
     with patch(
-        "taxomesh.adapters.repositories.django_repository.DjangoRepository",
+        "taxomesh._config.DjangoRepository",
         return_value=mock_repo,
     ):
         svc = TaxomeshService(config_path=cfg)
@@ -164,7 +164,7 @@ def test_build_repo_from_config_django_type_with_using(tmp_path: Path) -> None:
     mock_repo.list_categories.return_value = []
 
     with patch(
-        "taxomesh.adapters.repositories.django_repository.DjangoRepository",
+        "taxomesh._config.DjangoRepository",
     ) as MockDjangoRepo:
         MockDjangoRepo.return_value = mock_repo
         TaxomeshService(config_path=cfg)
@@ -172,7 +172,7 @@ def test_build_repo_from_config_django_type_with_using(tmp_path: Path) -> None:
 
 
 def test_build_repo_from_config_unsupported_type_lists_django_in_error(tmp_path: Path) -> None:
-    """Error message for unsupported type mentions 'django' as supported option (FR-014)."""
+    """Error message for unsupported type mentions 'django' as supported option."""
     cfg = tmp_path / "bad_type.toml"
     cfg.write_text('[repository]\ntype = "mongodb"\n', encoding="utf-8")
     with pytest.raises(TaxomeshConfigError, match="'django'"):
@@ -180,7 +180,7 @@ def test_build_repo_from_config_unsupported_type_lists_django_in_error(tmp_path:
 
 
 # ---------------------------------------------------------------------------
-# T001 — DJANGO_REPO_TYPE named constant
+# DJANGO_REPO_TYPE named constant
 # ---------------------------------------------------------------------------
 
 
@@ -192,76 +192,81 @@ def test_django_repo_type_importable_and_equals_django() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T002 — get_debug_info() on JsonRepository and YAMLRepository
+# describe() on JsonRepository and YamlRepository
 # ---------------------------------------------------------------------------
 
 
-def test_json_repository_get_debug_info(tmp_path: Path) -> None:
-    """JsonRepository.get_debug_info() returns a dict with a 'path' key."""
+def test_json_repository_describe(tmp_path: Path) -> None:
+    """JsonRepository.describe() reports its class, its path and no extras."""
     from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
 
     repo = JsonRepository(tmp_path / "t.json")
-    info = repo.get_debug_info()
-    assert isinstance(info, dict)
-    assert "path" in info
-    assert str(tmp_path / "t.json") in info["path"]
+    info = repo.describe()
+    assert info.backend == "JsonRepository"
+    assert info.path is not None
+    assert str(tmp_path / "t.json") in info.path
+    assert info.diagnostics == {}
 
 
-def test_yaml_repository_get_debug_info(tmp_path: Path) -> None:
-    """YAMLRepository.get_debug_info() returns a dict with a 'path' key."""
-    from taxomesh.adapters.repositories.yaml_repository import YAMLRepository  # noqa: PLC0415
+def test_yaml_repository_describe(tmp_path: Path) -> None:
+    """YamlRepository.describe() reports its class, its path and no extras."""
+    from taxomesh.adapters.repositories.yaml_repository import YamlRepository  # noqa: PLC0415
 
-    repo = YAMLRepository(tmp_path / "t.yaml")
-    info = repo.get_debug_info()
-    assert isinstance(info, dict)
-    assert "path" in info
-    assert str(tmp_path / "t.yaml") in info["path"]
+    repo = YamlRepository(tmp_path / "t.yaml")
+    info = repo.describe()
+    assert info.backend == "YamlRepository"
+    assert info.path is not None
+    assert str(tmp_path / "t.yaml") in info.path
+    assert info.diagnostics == {}
 
 
 # ---------------------------------------------------------------------------
-# T032-T033 — TaxomeshService.get_debug()
+# TaxomeshService.info
 # ---------------------------------------------------------------------------
 
 
-def test_get_debug_returns_required_keys(tmp_path: Path) -> None:
-    """TaxomeshService.get_debug() returns a dict with all required keys."""
-    from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+def test_info_populates_every_field(tmp_path: Path) -> None:
+    """``svc.info`` populates every field it declares.
 
-    repo = JsonRepository(tmp_path / "t.json")
-    svc = TaxomeshService(repository=repo)
-    info = svc.get_debug()
-    assert "version" in info
-    assert "config_name" in info
-    assert "repository_type" in info
-    assert "working_path" in info
-    assert "repository_info" in info
-
-
-def test_get_debug_repository_type_matches_class(tmp_path: Path) -> None:
-    """get_debug()['repository_type'] matches the class name of the active repo."""
+    The dataclass declares the fields, and ``tests/domain/test_info_models.py`` pins the list, so
+    this test asserts what the declaration cannot: that the *service* populates each field rather
+    than leaving it empty.
+    """
     from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
 
     repo = JsonRepository(tmp_path / "t.json")
     svc = TaxomeshService(repository=repo)
-    info = svc.get_debug()
-    assert info["repository_type"] == "JsonRepository"
-    assert info["working_path"] is not None
+    info = svc.info
+    assert info.version
+    assert info.repository.backend == "JsonRepository"
+    assert info.repository.path is not None
 
 
-def test_get_debug_django_repo_has_none_working_path(request: pytest.FixtureRequest) -> None:
-    """get_debug() with DjangoRepository returns None for working_path."""
+def test_info_repository_backend_matches_class(tmp_path: Path) -> None:
+    """``info.repository.backend`` matches the class name of the active repo."""
+    from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
+
+    repo = JsonRepository(tmp_path / "t.json")
+    svc = TaxomeshService(repository=repo)
+    info = svc.info
+    assert info.repository.backend == "JsonRepository"
+    assert info.repository.path is not None
+
+
+@pytest.mark.django_db
+def test_info_django_repo_has_no_path() -> None:
+    """``info.repository.path`` is None with DjangoRepository, which has no file."""
     pytest.importorskip("django", reason="django not installed")
-    request.getfixturevalue("db")
     svc = TaxomeshService(repository=DjangoRepository())
-    info = svc.get_debug()
-    assert info["repository_type"] == "DjangoRepository"
-    assert info["working_path"] is None
+    info = svc.info
+    assert info.repository.backend == "DjangoRepository"
+    assert info.repository.path is None
 
 
-def test_get_debug_config_name_none_when_no_config(tmp_path: Path) -> None:
-    """get_debug()['config_name'] is None when no TOML config was loaded."""
+def test_info_config_name_none_when_no_config(tmp_path: Path) -> None:
+    """``info.config_name`` is None when no TOML config was loaded."""
     from taxomesh.adapters.repositories.json_repository import JsonRepository  # noqa: PLC0415
 
     repo = JsonRepository(tmp_path / "t.json")
     svc = TaxomeshService(repository=repo)
-    assert svc.get_debug()["config_name"] is None
+    assert svc.info.config_name is None

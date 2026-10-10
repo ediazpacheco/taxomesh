@@ -1,282 +1,214 @@
-"""Tests for list_related_items_for_sources() resilience: skip_on_error and warning logging."""
+"""Neither related read raises for the other end of a relation, whatever that end's state.
 
+``items.list_related`` and ``items.get_many_related`` both take ``enabled``, defaulting to ``True``,
+and filter the related rows by it as a listing does: a disabled row is left out without a log. A
+relation whose other end is not stored is skipped, with one WARNING that names that end absent.
+
+Only the JSON, YAML and in-memory stores can hold a relation to an item that is not stored, planted
+through the port as data written outside taxomesh would be. Django's foreign keys never store one,
+so the absent-row cases run on the three backends that can hold one.
+"""
+
+import inspect
 import logging
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
+from taxomesh.adapters.repositories.json_repository import JsonRepository
+from taxomesh.adapters.repositories.yaml_repository import YamlRepository
+from taxomesh.application.collections.items import ItemCollection
 from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.models import Item, ItemRelationLink
-from taxomesh.exceptions import TaxomeshItemNotFoundError
+from taxomesh.domain.types import Direction
 from tests.service.conftest import InMemoryRepository
 
-SERVICE_LOGGER = "taxomesh.application.service"
+SERVICE_LOGGER = "taxomesh.application.collections.items"
+
+type Read = Callable[..., list[str]]
 
 
-def _make_service_with_links(items: list[Item], links: list[ItemRelationLink]) -> TaxomeshService:
-    """Return a TaxomeshService backed by an InMemoryRepository pre-loaded with items and links."""
-    repo = InMemoryRepository()
-    for item in items:
-        repo.save_item(item)
-    repo._item_relation_links = list(links)
-    return TaxomeshService(repository=repo)
+# Any: the options are handed to either read unchanged, and each read checks its own.
+def _via_list_related(service: TaxomeshService, item: Item, **options: Any) -> list[str]:
+    """The names ``list_related`` returns for one item."""
+    return [related.name for related in service.items.list_related(item, **options)]
 
 
-# ---------------------------------------------------------------------------
-# US1 — T002: single dangling link
-# ---------------------------------------------------------------------------
+def _via_get_many_related(service: TaxomeshService, item: Item, **options: Any) -> list[str]:
+    """The names ``get_many_related`` returns for one item, across its relation types."""
+    found = service.items.get_many_related([item], **options).get(item.item_id)
+    return [] if found is None else [related.name for related in found]
 
 
-def test_single_dangling_link_no_exception(caplog: pytest.LogCaptureFixture) -> None:
-    """Single dangling link: returns {}, emits one WARNING, no exception."""
-    source = Item(name="Source")
-    missing_target_id = uuid4()
-    link = ItemRelationLink(
-        source_item_id=source.item_id,
-        target_item_id=missing_target_id,
-        relation_type="related_to",
+READS: list[tuple[str, Read]] = [("list_related", _via_list_related), ("get_many_related", _via_get_many_related)]
+READ_IDS = [name for name, _ in READS]
+
+
+@pytest.fixture(params=["in_memory", "json", "yaml"])
+def holding_service(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshService:
+    """A service over a store that can hold a relation to an item that is not stored."""
+    if request.param == "json":
+        return TaxomeshService(repository=JsonRepository(tmp_path / "store.json"))
+    if request.param == "yaml":
+        return TaxomeshService(repository=YamlRepository(tmp_path / "store.yaml"))
+    return TaxomeshService(repository=InMemoryRepository())
+
+
+def _plant(service: TaxomeshService, source: UUID, target: UUID, relation_type: str = "covers") -> None:
+    """Store a relation through the port, which checks neither end."""
+    service.repository.save_item_relation_link(
+        ItemRelationLink(source_item_id=source, target_item_id=target, relation_type=relation_type)
     )
-    svc = _make_service_with_links([source], [link])
 
+
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+@pytest.mark.parametrize(("name", "read"), READS, ids=READ_IDS)
+class TestAnAbsentRowIsSkipped:
+    """A relation whose other end is not stored is left out, with one WARNING naming that end absent."""
+
+    def test_outgoing(
+        self, holding_service: TaxomeshService, caplog: pytest.LogCaptureFixture, name: str, read: Read
+    ) -> None:
+        source = holding_service.items.create("Source")
+        missing = uuid4()
+        _plant(holding_service, source.item_id, missing)
+
+        with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+            assert read(holding_service, source) == []
+
+        (message,) = _warnings(caplog)
+        assert f"target item {missing} is absent" in message
+        assert source.name in message
+        assert "covers" in message
+
+    def test_incoming(
+        self, holding_service: TaxomeshService, caplog: pytest.LogCaptureFixture, name: str, read: Read
+    ) -> None:
+        target = holding_service.items.create("Target")
+        missing = uuid4()
+        _plant(holding_service, missing, target.item_id)
+
+        with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+            assert read(holding_service, target, direction=Direction.INCOMING) == []
+
+        (message,) = _warnings(caplog)
+        assert f"source item {missing} is absent" in message
+        assert target.name in message
+
+    def test_beside_a_stored_row(
+        self, holding_service: TaxomeshService, caplog: pytest.LogCaptureFixture, name: str, read: Read
+    ) -> None:
+        source = holding_service.items.create("Source")
+        kept = holding_service.items.create("Kept")
+        holding_service.items.relate(source, kept, "covers")
+        _plant(holding_service, source.item_id, uuid4())
+
+        with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+            assert read(holding_service, source) == ["Kept"]
+
+        assert len(_warnings(caplog)) == 1
+
+    def test_a_disabled_queried_item_is_named_in_the_warning(
+        self, holding_service: TaxomeshService, caplog: pytest.LogCaptureFixture, name: str, read: Read
+    ) -> None:
+        source = holding_service.items.create("Source")
+        holding_service.items.update(source, enabled=False)
+        _plant(holding_service, source.item_id, uuid4())
+
+        with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+            read(holding_service, source)
+
+        (message,) = _warnings(caplog)
+        assert "Source" in message
+        assert "unknown" not in message
+
+    def test_a_type_filter_that_leaves_it_out_logs_nothing(
+        self, holding_service: TaxomeshService, caplog: pytest.LogCaptureFixture, name: str, read: Read
+    ) -> None:
+        source = holding_service.items.create("Source")
+        _plant(holding_service, source.item_id, uuid4(), "other")
+
+        with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
+            assert read(holding_service, source, relation_types=["covers"]) == []
+
+        assert _warnings(caplog) == []
+
+    def test_a_queried_item_whose_str_raises_is_still_logged(
+        self, holding_service: TaxomeshService, caplog: pytest.LogCaptureFixture, name: str, read: Read
+    ) -> None:
+        source = holding_service.items.create("Broken")
+        missing = uuid4()
+        _plant(holding_service, source.item_id, missing)
+
+        def _raise(self: Item) -> str:
+            raise RuntimeError("__str__ intentionally broken")
+
+        with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER), patch.object(Item, "__str__", _raise):
+            read(holding_service, source)
+
+        (message,) = _warnings(caplog)
+        assert str(missing) in message
+        assert "str() failed" in message
+
+
+@pytest.mark.parametrize(("name", "read"), READS, ids=READ_IDS)
+class TestADisabledRowIsFiltered:
+    """``enabled`` filters the related rows as a listing does, defaulting to enabled only."""
+
+    def test_by_default_without_a_log(
+        self, service: TaxomeshService, caplog: pytest.LogCaptureFixture, name: str, read: Read
+    ) -> None:
+        source = service.items.create("Source")
+        on = service.items.create("On")
+        off = service.items.create("Off")
+        service.items.relate(source, on, "covers")
+        service.items.relate(source, off, "covers", sort_index=1)
+        service.items.update(off, enabled=False)
+
+        with caplog.at_level(logging.DEBUG, logger=SERVICE_LOGGER):
+            assert read(service, source) == ["On"]
+
+        assert caplog.records == []
+
+    def test_each_value_selects_as_a_listing_does(self, service: TaxomeshService, name: str, read: Read) -> None:
+        source = service.items.create("Source")
+        on = service.items.create("On")
+        off = service.items.create("Off")
+        service.items.relate(source, on, "covers")
+        service.items.relate(source, off, "covers", sort_index=1)
+        service.items.update(off, enabled=False)
+
+        assert read(service, source, enabled=True) == ["On"]
+        assert read(service, source, enabled=False) == ["Off"]
+        assert read(service, source, enabled=None) == ["On", "Off"]
+
+    def test_a_disabled_queried_item_still_has_its_relations(
+        self, service: TaxomeshService, name: str, read: Read
+    ) -> None:
+        source = service.items.create("Source")
+        target = service.items.create("Target")
+        service.items.relate(source, target, "covers")
+        service.items.update(source, enabled=False)
+
+        assert read(service, source) == ["Target"]
+
+
+def test_an_empty_request_reads_and_logs_nothing(service: TaxomeshService, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
-        result = svc.list_related_items_for_sources([source.item_id])
+        assert service.items.get_many_related([]) == {}
+        assert service.items.get_many_related([], direction="incoming") == {}
 
-    assert result == {}
-    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warning_records) == 1
-    msg = warning_records[0].getMessage()
-    assert "list_related_items_for_sources" in msg
-    assert source.name in msg
-    assert "orphaned" in msg
-    assert str(missing_target_id) in msg
-    assert "related_to" in msg
+    assert _warnings(caplog) == []
 
 
-def test_empty_source_item_ids_returns_empty(caplog: pytest.LogCaptureFixture) -> None:
-    """Empty source_item_ids: returns {} immediately, no WARNING (EC-02)."""
-    svc = _make_service_with_links([], [])
-
-    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
-        result = svc.list_related_items_for_sources([])
-
-    assert result == {}
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-
-
-# ---------------------------------------------------------------------------
-# US1 — T003: mixed valid + dangling links
-# ---------------------------------------------------------------------------
-
-
-def test_mixed_valid_and_dangling_link(caplog: pytest.LogCaptureFixture) -> None:
-    """Valid target appears in result; dangling target absent; one WARNING."""
-    source = Item(name="Source")
-    valid_target = Item(name="Valid Target")
-    missing_id = uuid4()
-    link_valid = ItemRelationLink(
-        source_item_id=source.item_id,
-        target_item_id=valid_target.item_id,
-        relation_type="covers",
-    )
-    link_dangling = ItemRelationLink(
-        source_item_id=source.item_id,
-        target_item_id=missing_id,
-        relation_type="covers",
-    )
-    svc = _make_service_with_links([source, valid_target], [link_valid, link_dangling])
-
-    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
-        result = svc.list_related_items_for_sources([source.item_id])
-
-    assert source.item_id in result
-    covers = result[source.item_id]["covers"]
-    assert valid_target in covers
-    assert not any(i.item_id == missing_id for i in covers)
-    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warning_records) == 1
-
-
-def test_relation_types_filter_excludes_dangling_no_warning(caplog: pytest.LogCaptureFixture) -> None:
-    """relation_types filter excludes the dangling link → no WARNING emitted (EC-04)."""
-    source = Item(name="Source")
-    missing_id = uuid4()
-    link_dangling = ItemRelationLink(
-        source_item_id=source.item_id,
-        target_item_id=missing_id,
-        relation_type="other_type",
-    )
-    svc = _make_service_with_links([source], [link_dangling])
-
-    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
-        # filter only "covers" — the dangling "other_type" link is excluded
-        result = svc.list_related_items_for_sources([source.item_id], relation_types=["covers"])
-
-    assert result == {}
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-
-
-# ---------------------------------------------------------------------------
-# US1 — T004: all dangling for one source, valid links for another
-# ---------------------------------------------------------------------------
-
-
-def test_all_dangling_source_absent_other_source_present(caplog: pytest.LogCaptureFixture) -> None:
-    """All links for source_a dangling → absent from result; source_b valid → present."""
-    source_a = Item(name="Source A")
-    source_b = Item(name="Source B")
-    valid_target = Item(name="Valid Target")
-    missing_id_1 = uuid4()
-    missing_id_2 = uuid4()
-
-    links = [
-        ItemRelationLink(source_item_id=source_a.item_id, target_item_id=missing_id_1, relation_type="rel"),
-        ItemRelationLink(source_item_id=source_a.item_id, target_item_id=missing_id_2, relation_type="rel"),
-        ItemRelationLink(source_item_id=source_b.item_id, target_item_id=valid_target.item_id, relation_type="rel"),
-    ]
-    svc = _make_service_with_links([source_a, source_b, valid_target], links)
-
-    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
-        result = svc.list_related_items_for_sources([source_a.item_id, source_b.item_id])
-
-    assert source_a.item_id not in result
-    assert source_b.item_id in result
-    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warning_records) == 2  # one per dangling link
-
-
-# ---------------------------------------------------------------------------
-# US2 — T008: skip_on_error=False raises
-# ---------------------------------------------------------------------------
-
-
-def test_skip_on_error_false_raises(caplog: pytest.LogCaptureFixture) -> None:
-    """skip_on_error=False: TaxomeshItemNotFoundError raised, no WARNING logged."""
-    source = Item(name="Source")
-    missing_id = uuid4()
-    link = ItemRelationLink(
-        source_item_id=source.item_id,
-        target_item_id=missing_id,
-        relation_type="rel",
-    )
-    svc = _make_service_with_links([source], [link])
-
-    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER), pytest.raises(TaxomeshItemNotFoundError):
-        svc.list_related_items_for_sources([source.item_id], skip_on_error=False)
-
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-
-
-# ---------------------------------------------------------------------------
-# US2 — T009: valid links + skip_on_error=False — normal result, no exception
-# ---------------------------------------------------------------------------
-
-
-def test_skip_on_error_false_valid_links_returns_normally() -> None:
-    """Valid links only + skip_on_error=False: normal result, no exception."""
-    source = Item(name="Source")
-    target = Item(name="Target")
-    link = ItemRelationLink(
-        source_item_id=source.item_id,
-        target_item_id=target.item_id,
-        relation_type="covers",
-    )
-    svc = _make_service_with_links([source, target], [link])
-
-    result = svc.list_related_items_for_sources([source.item_id], skip_on_error=False)
-
-    assert source.item_id in result
-    assert target in result[source.item_id]["covers"]
-
-
-# ---------------------------------------------------------------------------
-# US1 — source item __str__ raises: warning still emits safely
-# ---------------------------------------------------------------------------
-
-
-def test_source_str_raises_warning_still_emits(caplog: pytest.LogCaptureFixture) -> None:
-    """WARNING emits safely even if the source item's __str__ raises an exception."""
-    source = Item(name="Broken Source")
-    missing_target_id = uuid4()
-    link = ItemRelationLink(
-        source_item_id=source.item_id,
-        target_item_id=missing_target_id,
-        relation_type="rel",
-    )
-    svc = _make_service_with_links([source], [link])
-
-    def _raise_str(self: Item) -> str:
-        raise RuntimeError("__str__ intentionally broken")
-
-    with (
-        caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER),
-        patch.object(Item, "__str__", _raise_str),
-    ):
-        result = svc.list_related_items_for_sources([source.item_id])
-
-    assert result == {}
-    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warning_records) == 1
-    msg = warning_records[0].getMessage()
-    assert str(missing_target_id) in msg
-    assert "str() failed" in msg
-
-
-# ---------------------------------------------------------------------------
-# 056 — incoming direction resilience (symmetric to the outgoing cases above)
-# ---------------------------------------------------------------------------
-
-
-def test_incoming_single_dangling_link_no_exception(caplog: pytest.LogCaptureFixture) -> None:
-    """Incoming dangling link (missing source): returns {}, one WARNING naming the orphan source."""
-    target = Item(name="Target")
-    missing_source_id = uuid4()
-    link = ItemRelationLink(
-        source_item_id=missing_source_id,
-        target_item_id=target.item_id,
-        relation_type="related_to",
-    )
-    svc = _make_service_with_links([target], [link])
-
-    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
-        result = svc.list_related_items_for_sources([target.item_id], direction="incoming")
-
-    assert result == {}
-    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warning_records) == 1
-    msg = warning_records[0].getMessage()
-    assert "list_related_items_for_sources" in msg
-    assert target.name in msg
-    assert "orphaned" in msg
-    assert str(missing_source_id) in msg
-    assert "related_to" in msg
-    # Role wording is mirrored for incoming: the orphan is the source endpoint.
-    assert f"source: <orphaned item {missing_source_id}>" in msg
-
-
-def test_incoming_empty_input_no_warning(caplog: pytest.LogCaptureFixture) -> None:
-    """Incoming empty input: returns {} immediately, no WARNING."""
-    svc = _make_service_with_links([], [])
-
-    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER):
-        result = svc.list_related_items_for_sources([], direction="incoming")
-
-    assert result == {}
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-
-
-def test_incoming_skip_on_error_false_raises(caplog: pytest.LogCaptureFixture) -> None:
-    """Incoming skip_on_error=False: TaxomeshItemNotFoundError raised, no WARNING logged."""
-    target = Item(name="Target")
-    missing_source_id = uuid4()
-    link = ItemRelationLink(
-        source_item_id=missing_source_id,
-        target_item_id=target.item_id,
-        relation_type="rel",
-    )
-    svc = _make_service_with_links([target], [link])
-
-    with caplog.at_level(logging.WARNING, logger=SERVICE_LOGGER), pytest.raises(TaxomeshItemNotFoundError):
-        svc.list_related_items_for_sources([target.item_id], skip_on_error=False, direction="incoming")
-
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
+@pytest.mark.parametrize("member", [ItemCollection.list_related, ItemCollection.get_many_related])
+def test_neither_read_can_be_told_to_raise(member: Callable[..., object]) -> None:
+    """Nothing a related row can be makes either read raise, so no option asks it to."""
+    assert "skip_on_error" not in inspect.signature(member).parameters

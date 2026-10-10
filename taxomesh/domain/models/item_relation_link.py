@@ -1,47 +1,55 @@
 """ItemRelationLink domain model."""
 
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import Field, field_validator, model_validator
 
 from taxomesh.domain.constants import RELATION_TYPE_MAX_LENGTH
 from taxomesh.domain.models.base import ModelBase
+from taxomesh.domain.types import FrozenDict, Metadata
 from taxomesh.exceptions import TaxomeshRelationError
 
 
 class ItemRelationLink(ModelBase):
-    """A directed, typed relation from one item to another.
+    """A relation: a directed, typed link from a source item to a target item.
 
-    The triple ``(source_item_id, target_item_id, relation_type)`` is the
-    natural composite key — two links with the same triple are the same record.
-    ``relation_type`` is always stored in lowercase; callers may supply any
-    casing and it will be normalized transparently.
+    The triple ``(source_item_id, target_item_id, relation_type)`` is the key of a relation: two
+    links with the same triple are the same link. The model strips ``relation_type`` and puts it in
+    lowercase, so the caller can give it in any case.
+
+    Attributes:
+        source_item_id: The item the relation goes from.
+        target_item_id: The item the relation goes to; never the source.
+        relation_type: Your own label for the relation, at most ``RELATION_TYPE_MAX_LENGTH``
+            characters, stored stripped and in lowercase.
+        sort_index: The relation's position among the item's relations, lower first.
+        metadata: Plain JSON, frozen all the way down.
     """
 
     source_item_id: UUID
     target_item_id: UUID
     relation_type: Annotated[str, Field(max_length=RELATION_TYPE_MAX_LENGTH)]
     sort_index: int = 0
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Metadata = Field(default_factory=FrozenDict)
 
     @field_validator("relation_type", mode="before")
     @classmethod
     def _normalise_relation_type(cls, v: object) -> str:
-        """Strip whitespace and lowercase the relation type before validation.
+        """Strip the relation type and put it in lowercase, before the field is validated.
 
         Args:
-            v: Raw value passed to the field.
+            v: The value given for the field.
 
         Returns:
-            Normalised lowercase string.
+            The stripped text, in lowercase.
 
         Raises:
-            TaxomeshRelationError: If the value is not a non-empty string after
-                stripping whitespace.
+            TypeError: If the value is not a string.
+            TaxomeshRelationError: If the string is empty after stripping whitespace.
         """
         if not isinstance(v, str):
-            raise TaxomeshRelationError(f"relation_type must be a string, got {type(v).__name__}")
+            raise TypeError(f"relation_type must be a str, not {type(v).__name__}")
         normalised = v.strip().lower()
         if not normalised:
             raise TaxomeshRelationError("relation_type must not be empty or whitespace-only")
@@ -49,16 +57,17 @@ class ItemRelationLink(ModelBase):
 
     @model_validator(mode="after")
     def _reject_self_relation(self) -> "ItemRelationLink":
-        """Reject relations where source and target are the same item.
+        """Refuse a relation from an item to itself.
 
         Returns:
-            This instance if valid.
+            This link, when it is valid.
 
         Raises:
             TaxomeshRelationError: If source_item_id == target_item_id.
         """
         if self.source_item_id == self.target_item_id:
             raise TaxomeshRelationError(
-                f"self-relation not allowed: source_item_id and target_item_id are both {self.source_item_id}"
+                "An item cannot be related to itself: source_item_id and target_item_id are both "
+                f"{self.source_item_id}"
             )
         return self

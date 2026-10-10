@@ -1,7 +1,7 @@
 [project]
 name = "taxomesh"
-version = "0.1.0a50"
-description = "Flexible taxonomy management for generic items — categories, tags, and multi-parent hierarchies with pluggable storage."
+version = "0.2.0"
+description = "taxomesh stores a graph of categories in a YAML file, a JSON file or the Django ORM, and a category can have more than one parent. In Python, you read and delete categories, items and tags with five forms that a dict also has: subscript, get, in, len and del."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.13"
@@ -20,34 +20,25 @@ classifiers = [
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
-    "rich>=13.0",
-    "typer>=0.12",
     "rapidfuzz>=3.0",
 ]
 
 [project.optional-dependencies]
+cli = [
+    "typer>=0.12",
+    "rich>=13.0",
+]
 django = [
     "django>=6.0",  # CI runs the matrix against 6.0; any 6.x is supported
 ]
-dev = [
-    "pytest>=8.0",
-    "pytest-cov>=5.0",
-    "pytest-django>=4.8",
-    "ruff>=0.4",
-    "mypy>=1.10",
-    "pyyaml>=6.0",
-    "types-PyYAML>=6.0",
-    "pre-commit>=3.0",
-]
 
 [project.scripts]
-taxomesh = "taxomesh.adapters.cli.main:app"
+taxomesh = "taxomesh.adapters.cli:run"
 
 [project.urls]
 Homepage = "https://github.com/ediazpacheco/taxomesh"
 Repository = "https://github.com/ediazpacheco/taxomesh"
 Issues = "https://github.com/ediazpacheco/taxomesh/issues"
-"What Taxomesh Solves" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/what-is-taxomesh.md"
 "Python API" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md"
 "HTTP API integration" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/http-api-integration.md"
 "Django integration" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/django-integration.md"
@@ -62,10 +53,6 @@ build-backend = "hatchling.build"
 [tool.ruff]
 target-version = "py313"
 line-length = 119
-# Measurement harnesses recorded alongside a spec are provenance, not shipped code: they
-# pin old releases, patch throwaway variants, and two of them must fail type checking on
-# purpose. They are never imported by the package or the suite.
-exclude = ["specs/*/measurements"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
@@ -77,7 +64,7 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["PLR2004"]  # magic-value comparisons are idiomatic in test assertions
 "taxomesh/adapters/cli/main.py" = ["PLR0913"]  # CLI functions intentionally have many options
-"taxomesh/application/service.py" = ["PLR0913"]  # service update methods intentionally have multiple optional fields
+"taxomesh/application/collections/*.py" = ["PLR0913"]  # update and search take one keyword per optional field or filter
 "taxomesh/**/migrations/*.py" = ["E501"]  # Django generates long lines in migrations
 
 [tool.mypy]
@@ -85,7 +72,10 @@ python_version = "3.13"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-exclude = ["taxomesh/contrib/django/", "tests/contrib/django/", "tests/django_urls.py", "specs/[^/]*/measurements/"]
+plugins = ["mypy_django_plugin.main"]
+
+[tool.django-stubs]
+django_settings_module = "tests.django_settings"
 
 [tool.pytest.ini_options]
 addopts = "--cov=taxomesh --cov-report=term-missing --cov-fail-under=80"
@@ -103,9 +93,12 @@ omit = [
 
 [dependency-groups]
 dev = [
+    "django-stubs>=6.0",
     "mypy>=1.19.1",
+    "pre-commit>=3.0",
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
+    "pytest-django>=4.8",
     "ruff>=0.15.2",
     "types-pyyaml>=6.0",
 ]

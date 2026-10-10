@@ -1,4 +1,4 @@
-"""Tests for Django admin external_id handling when value is None (spec 041)."""
+"""Tests for Django admin external_id handling when value is None."""
 
 import pytest
 
@@ -11,7 +11,7 @@ class TestResolveLinkedUrl:
     def test_returns_none_for_none_external_id(self) -> None:
         from taxomesh.contrib.django.admin import _resolve_linked_url  # noqa: PLC0415
 
-        result = _resolve_linked_url(None)  # type: ignore[arg-type]
+        result = _resolve_linked_url(None)
         assert result is None
 
     def test_returns_none_for_empty_string(self) -> None:
@@ -27,13 +27,13 @@ class TestGraphEntryExternalId:
     def test_graph_entry_external_id_type_allows_none(self) -> None:
         import typing  # noqa: PLC0415
 
-        from taxomesh.contrib.django.admin import GraphEntry  # noqa: PLC0415
+        from taxomesh.contrib.django.graph_types import GraphEntry  # noqa: PLC0415
 
         hints = typing.get_type_hints(GraphEntry)
         # external_id must be annotated as str | None (not plain str)
         field_type = hints["external_id"]
         # Accept Union[str, None] or str | None (both are Optional[str])
-        assert field_type is not str, "GraphEntry.external_id must be str | None after spec 041, got plain str"
+        assert field_type is not str, "GraphEntry.external_id must be str | None, got plain str"
 
 
 class TestExternalIdWithLinkRendering:

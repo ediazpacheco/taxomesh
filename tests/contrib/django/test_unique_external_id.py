@@ -1,4 +1,4 @@
-"""Tests for DjangoRepository external_id uniqueness and lookup (spec 041)."""
+"""Tests for DjangoRepository external_id uniqueness and lookup."""
 
 import pytest
 
@@ -17,38 +17,38 @@ def repo() -> DjangoRepository:
 
 
 # ---------------------------------------------------------------------------
-# get_item_by_external_id — found/not-found
+# find_item_by_external_id — found/not-found
 # ---------------------------------------------------------------------------
 
 
-def test_get_item_by_external_id_found(repo: DjangoRepository) -> None:
-    item = Item(external_id="django-ext")
+def test_find_item_by_external_id_found(repo: DjangoRepository) -> None:
+    item = Item(name="Item", external_id="django-ext")
     repo.save_item(item)
-    result = repo.get_item_by_external_id("django-ext")
+    result = repo.find_item_by_external_id("django-ext")
     assert result is not None
     assert result.item_id == item.item_id
 
 
-def test_get_item_by_external_id_not_found(repo: DjangoRepository) -> None:
-    result = repo.get_item_by_external_id("no-such-id")
+def test_find_item_by_external_id_not_found(repo: DjangoRepository) -> None:
+    result = repo.find_item_by_external_id("no-such-id")
     assert result is None
 
 
 # ---------------------------------------------------------------------------
-# get_category_by_external_id — found/not-found
+# find_category_by_external_id — found/not-found
 # ---------------------------------------------------------------------------
 
 
-def test_get_category_by_external_id_found(repo: DjangoRepository) -> None:
+def test_find_category_by_external_id_found(repo: DjangoRepository) -> None:
     cat = Category(name="Test", external_id="django-cat-ext")
     repo.save_category(cat)
-    result = repo.get_category_by_external_id("django-cat-ext")
+    result = repo.find_category_by_external_id("django-cat-ext")
     assert result is not None
     assert result.category_id == cat.category_id
 
 
-def test_get_category_by_external_id_not_found(repo: DjangoRepository) -> None:
-    result = repo.get_category_by_external_id("no-such-cat")
+def test_find_category_by_external_id_not_found(repo: DjangoRepository) -> None:
+    result = repo.find_category_by_external_id("no-such-cat")
     assert result is None
 
 
@@ -58,19 +58,18 @@ def test_get_category_by_external_id_not_found(repo: DjangoRepository) -> None:
 
 
 def test_save_item_duplicate_external_id_raises(repo: DjangoRepository) -> None:
-    item_a = Item(external_id="dj-dup-ext")
+    item_a = Item(name="Item", external_id="dj-dup-ext")
     repo.save_item(item_a)
-    item_b = Item(external_id="dj-dup-ext")
+    item_b = Item(name="Item", external_id="dj-dup-ext")
     with pytest.raises(TaxomeshExternalIdConflictError):
         repo.save_item(item_b)
 
 
 def test_save_item_resave_same_item_does_not_raise(repo: DjangoRepository) -> None:
-    item = Item(external_id="dj-resave-ext")
+    item = Item(name="Item", external_id="dj-resave-ext")
     repo.save_item(item)
-    item.name = "Updated"
-    repo.save_item(item)
-    result = repo.get_item(item.item_id)
+    repo.save_item(item.model_copy(update={"name": "Updated"}))
+    result = repo.find_item(item.item_id)
     assert result is not None
     assert result.name == "Updated"
 
@@ -78,7 +77,7 @@ def test_save_item_resave_same_item_does_not_raise(repo: DjangoRepository) -> No
 def test_save_item_none_external_id_does_not_conflict(repo: DjangoRepository) -> None:
     """Multiple NULL external_ids must not trigger unique constraint violation."""
     for _ in range(3):
-        item = Item(external_id=None)
+        item = Item(name="Item", external_id=None)
         repo.save_item(item)
     count = repo._ItemModel.objects.filter(external_id__isnull=True).count()
     assert count >= 3
@@ -100,9 +99,8 @@ def test_save_category_duplicate_external_id_raises(repo: DjangoRepository) -> N
 def test_save_category_resave_same_category_does_not_raise(repo: DjangoRepository) -> None:
     cat = Category(name="Original", external_id="dj-resave-cat-ext")
     repo.save_category(cat)
-    cat.name = "Updated"
-    repo.save_category(cat)
-    result = repo.get_category(cat.category_id)
+    repo.save_category(cat.model_copy(update={"name": "Updated"}))
+    result = repo.find_category(cat.category_id)
     assert result is not None
     assert result.name == "Updated"
 
@@ -117,14 +115,14 @@ def test_save_category_none_external_id_does_not_conflict(repo: DjangoRepository
 
 
 # ---------------------------------------------------------------------------
-# None round-trip (US4)
+# None round-trip
 # ---------------------------------------------------------------------------
 
 
 def test_item_none_external_id_round_trip(repo: DjangoRepository) -> None:
-    item = Item(external_id=None)
+    item = Item(name="Item", external_id=None)
     repo.save_item(item)
-    result = repo.get_item(item.item_id)
+    result = repo.find_item(item.item_id)
     assert result is not None
     assert result.external_id is None
 
@@ -132,6 +130,6 @@ def test_item_none_external_id_round_trip(repo: DjangoRepository) -> None:
 def test_category_none_external_id_round_trip(repo: DjangoRepository) -> None:
     cat = Category(name="Test", external_id=None)
     repo.save_category(cat)
-    result = repo.get_category(cat.category_id)
+    result = repo.find_category(cat.category_id)
     assert result is not None
     assert result.external_id is None

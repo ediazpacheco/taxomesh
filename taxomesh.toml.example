@@ -1,45 +1,69 @@
 # taxomesh.toml.example
 #
-# Reference configuration template for taxomesh.
+# A template for taxomesh.toml, the optional configuration file.
 #
-# The CLI works out of the box with no configuration file — all settings below
-# have built-in defaults. This file documents every supported setting so you
-# know exactly what can be customised.
+# TaxomeshService() and the taxomesh command read taxomesh.toml in the working directory.
+# Without the file, the repository is a YAML file at data/taxomesh.yaml. The file keeps the
+# choice of storage out of application code, so the same code runs on another storage backend
+# in another environment.
 #
-# To use:
-#   1. Copy this file to your project root:  cp taxomesh.toml.example taxomesh.toml
-#   2. Uncomment and edit the settings you want to override.
-#   3. Run any taxomesh CLI command — the CLI will pick up taxomesh.toml automatically.
+# To use it:
+#   1. Copy it to the directory where your application or the command runs:
+#        cp taxomesh.toml.example taxomesh.toml
+#   2. Edit the settings below.
 #
-# You can also point the CLI at a different config file per-invocation:
+# To read a file at another path, pass it to the service, TaxomeshService(config_path=...), or
+# to the command:
 #   taxomesh --config /path/to/taxomesh.toml category list
+# The command needs the cli extra: pip install "taxomesh[cli]".
+# `taxomesh --show-config` prints the configuration in effect.
 
 # ---------------------------------------------------------------------------
-# [repository] — storage backend settings
+# [taxomesh]: optional
 # ---------------------------------------------------------------------------
 
-# YAML backend (default — human-readable, diff-friendly, version-control friendly)
+# name: a name for this configuration, reported as svc.info.config_name.
+#   Default: none
+# [taxomesh]
+# name = "catalog"
+
+
+# ---------------------------------------------------------------------------
+# [repository]: the storage backend
+# ---------------------------------------------------------------------------
+
+# YAML backend, the default. A diff of the file is easy to read in version control.
 [repository]
 
-# type: the storage backend format taxomesh uses to persist your taxonomy.
-#   Accepted values : "yaml" (default), "json"
+# type: the storage backend.
+#   Accepted values : "yaml", "json", "django"
 #   Default         : "yaml"
 type = "yaml"
 
-# path: path to the storage file where taxomesh reads and writes your taxonomy.
-#       Relative paths are resolved from the directory where you run the CLI
-#       (usually your project root).
-#   Default: "data/taxomesh.yaml"
+# path: the file that taxomesh reads and writes ("yaml" and "json" only).
+#       A relative path is resolved from the working directory.
+#   Default: "data/taxomesh.yaml" for "yaml", "data/taxomesh.json" for "json"
 path = "data/taxomesh.yaml"
 
 
 # ---------------------------------------------------------------------------
-# JSON backend (alternative option)
+# JSON backend
 #
-# To switch to the JSON backend, comment out the [repository] block above and
-# uncomment the block below.
+# To use it, comment out the [repository] block above and uncomment this one.
 # ---------------------------------------------------------------------------
 
 # [repository]
 # type = "json"
 # path = "data/taxomesh.json"
+
+
+# ---------------------------------------------------------------------------
+# Django backend
+#
+# It needs the django extra and a configured Django project (docs/django-integration.md).
+# To use it, comment out the [repository] block above and uncomment this one.
+# ---------------------------------------------------------------------------
+
+# [repository]
+# type = "django"
+# using = "default"   # the Django database alias; "default" when it is left out

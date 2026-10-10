@@ -1,13 +1,10 @@
-"""Unit tests for SearchCandidate and SearchEngine._score_prenorm (039-search-perf).
-
-Written strictly before implementation (TDD).
-"""
+"""Unit tests for SearchCandidate and SearchEngine._score_prenorm."""
 
 from taxomesh.application.search import SearchCandidate, SearchEngine
 from taxomesh.domain.models import Item
 
 # ---------------------------------------------------------------------------
-# T006: SearchCandidate stores pre-normalized fields
+# SearchCandidate stores pre-normalized fields
 # ---------------------------------------------------------------------------
 
 
@@ -39,7 +36,7 @@ def test_search_candidate_empty_ext_stays_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T007: _score_prenorm returns same score as score_candidate
+# _score_prenorm returns same score as score_candidate
 # ---------------------------------------------------------------------------
 
 

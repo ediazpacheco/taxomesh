@@ -1,4 +1,4 @@
-"""Tests for category-parent link upsert (010-unique-parent-links, US1)."""
+"""Tests for category-parent link upsert."""
 
 from uuid import uuid4
 
@@ -11,7 +11,7 @@ from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshCyclicDep
 from .conftest import InMemoryRepository
 
 # ---------------------------------------------------------------------------
-# T002: InMemoryRepository — category-parent upsert
+# InMemoryRepository — category-parent upsert
 # ---------------------------------------------------------------------------
 
 
@@ -43,17 +43,17 @@ def test_inmemory_category_parent_upsert_same_sort_index_no_duplicate() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T005: Service-level add_category_parent() idempotency
+# Service-level categories.add_parent() idempotency
 # ---------------------------------------------------------------------------
 
 
-def test_add_category_parent_idempotent(service: TaxomeshService) -> None:
-    """Calling add_category_parent() twice with the same pair creates only one link."""
-    cat_a = service.create_category(name="Child")
-    cat_b = service.create_category(name="Parent")
+def test_categories_add_parent_idempotent(service: TaxomeshService) -> None:
+    """Calling categories.add_parent() twice with the same pair creates only one link."""
+    cat_a = service.categories.create(name="Child")
+    cat_b = service.categories.create(name="Parent")
 
-    service.add_category_parent(cat_a.category_id, cat_b.category_id, sort_index=0)
-    service.add_category_parent(cat_a.category_id, cat_b.category_id, sort_index=7)
+    service.categories.add_parent(cat_a.category_id, cat_b.category_id, sort_index=0)
+    service.categories.add_parent(cat_a.category_id, cat_b.category_id, sort_index=7)
 
     # Filter to explicit links only (exclude auto-created root links)
     all_links = service._repo.list_category_parent_links()
@@ -67,20 +67,20 @@ def test_add_category_parent_idempotent(service: TaxomeshService) -> None:
 
 
 # ---------------------------------------------------------------------------
-# T006: Distinct pairs unaffected by upsert
+# Distinct pairs unaffected by upsert
 # ---------------------------------------------------------------------------
 
 
 def test_upsert_does_not_affect_distinct_pairs(service: TaxomeshService) -> None:
     """Upserting (C, P1) does not affect (C, P2)."""
-    child = service.create_category(name="Child")
-    parent1 = service.create_category(name="Parent1")
-    parent2 = service.create_category(name="Parent2")
+    child = service.categories.create(name="Child")
+    parent1 = service.categories.create(name="Parent1")
+    parent2 = service.categories.create(name="Parent2")
 
-    service.add_category_parent(child.category_id, parent1.category_id, sort_index=1)
-    service.add_category_parent(child.category_id, parent2.category_id, sort_index=2)
+    service.categories.add_parent(child.category_id, parent1.category_id, sort_index=1)
+    service.categories.add_parent(child.category_id, parent2.category_id, sort_index=2)
     # Upsert (child, parent1) with new sort_index
-    service.add_category_parent(child.category_id, parent1.category_id, sort_index=99)
+    service.categories.add_parent(child.category_id, parent1.category_id, sort_index=99)
 
     all_links = service._repo.list_category_parent_links()
     link_p1 = next(
@@ -98,15 +98,15 @@ def test_upsert_does_not_affect_distinct_pairs(service: TaxomeshService) -> None
 
 
 # ---------------------------------------------------------------------------
-# T006: Service-level remove_category_parent()
+# Service-level categories.remove_parent()
 # ---------------------------------------------------------------------------
 
 
-def test_remove_category_parent_valid(service: TaxomeshService) -> None:
+def test_categories_remove_parent_valid(service: TaxomeshService) -> None:
     """Removing an existing link removes it from list_category_parent_links()."""
-    cat_a = service.create_category(name="Child")
-    cat_b = service.create_category(name="Parent")
-    service.add_category_parent(cat_a.category_id, cat_b.category_id, sort_index=0)
+    cat_a = service.categories.create(name="Child")
+    cat_b = service.categories.create(name="Parent")
+    service.categories.add_parent(cat_a.category_id, cat_b.category_id, sort_index=0)
 
     # Confirm the explicit link exists before removal
     explicit_before = [
@@ -116,7 +116,7 @@ def test_remove_category_parent_valid(service: TaxomeshService) -> None:
     ]
     assert len(explicit_before) == 1
 
-    service.remove_category_parent(cat_a.category_id, cat_b.category_id)
+    service.categories.remove_parent(cat_a.category_id, cat_b.category_id)
 
     explicit_after = [
         lnk
@@ -126,27 +126,27 @@ def test_remove_category_parent_valid(service: TaxomeshService) -> None:
     assert len(explicit_after) == 0
 
 
-def test_remove_category_parent_noop_if_not_linked(service: TaxomeshService) -> None:
+def test_categories_remove_parent_noop_if_not_linked(service: TaxomeshService) -> None:
     """Removing a non-existent link raises no error."""
-    cat_a = service.create_category(name="A")
-    cat_b = service.create_category(name="B")
+    cat_a = service.categories.create(name="A")
+    cat_b = service.categories.create(name="B")
     # No link exists — must not raise
-    service.remove_category_parent(cat_a.category_id, cat_b.category_id)
+    service.categories.remove_parent(cat_a.category_id, cat_b.category_id)
 
 
-def test_remove_category_parent_raises_if_category_not_found(service: TaxomeshService) -> None:
+def test_categories_remove_parent_raises_if_category_not_found(service: TaxomeshService) -> None:
     """Removing with an unknown category_id raises TaxomeshCategoryNotFoundError."""
     with pytest.raises(TaxomeshCategoryNotFoundError):
-        service.remove_category_parent(uuid4(), uuid4())
+        service.categories.remove_parent(uuid4(), uuid4())
 
 
 # ---------------------------------------------------------------------------
-# Self-reference guard in add_category_parent()
+# Self-reference guard in categories.add_parent()
 # ---------------------------------------------------------------------------
 
 
-def test_add_category_parent_self_reference_raises_cyclic_error(service: TaxomeshService) -> None:
-    """add_category_parent(A, A) raises TaxomeshCyclicDependencyError with a clear message."""
-    cat = service.create_category(name="SelfRef")
+def test_categories_add_parent_self_reference_raises_cyclic_error(service: TaxomeshService) -> None:
+    """categories.add_parent(A, A) raises TaxomeshCyclicDependencyError with a clear message."""
+    cat = service.categories.create(name="SelfRef")
     with pytest.raises(TaxomeshCyclicDependencyError, match="cannot be its own parent"):
-        service.add_category_parent(cat.category_id, cat.category_id)
+        service.categories.add_parent(cat.category_id, cat.category_id)

@@ -1,14 +1,14 @@
-"""Shared TypedDicts for the Django admin graph views.
+"""The ``TypedDict`` types of the admin's graph views.
 
-These types are defined here (not in admin.py) to avoid circular imports
-between admin.py and graph_sort.py — both files need GraphEntry.
+They are here, and not in ``admin.py``, because ``admin.py`` and ``graph_sort.py`` both need
+``GraphEntry``, and each one importing the other would be a circular import.
 """
 
 from typing import TypedDict
 
 
 class GraphEntry(TypedDict):
-    """A single flattened entry for template rendering."""
+    """One entry of the graph page, as the template renders it: a category or an item."""
 
     depth: int
     kind: str
@@ -25,7 +25,7 @@ class GraphEntry(TypedDict):
 
 
 class RelationEntry(TypedDict):
-    """A single outgoing item relation for template rendering."""
+    """One outgoing relation of an item, as the template renders it."""
 
     relation_type: str
     target_name: str

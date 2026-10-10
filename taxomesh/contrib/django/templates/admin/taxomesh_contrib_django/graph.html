@@ -87,7 +87,7 @@
 {% if error %}
   <p class="errornote">{{ error }}</p>
 {% elif not has_entries %}
-  <p>No categories found. Add one to get started.</p>
+  <p>No categories found. Add one on the Categories page.</p>
 {% else %}
   <div id="taxomesh-dnd-error" class="taxomesh-dnd-error"></div>
   <form method="get" style="margin-bottom: 0.75rem; display: inline-flex; align-items: center; gap: 0.5rem;">
@@ -214,7 +214,7 @@
   initRelToggles();
 }());
 
-// ---- Item drag-and-drop reorder + reparent (US1 + US3) ----
+// ---- Item drag-and-drop reorder + reparent ----
 (function () {
   "use strict";
 
@@ -291,12 +291,12 @@
     }).then(function (result) {
       if (!result.ok) {
         revertReparent(el, oldParentUuid, origNextSibling);
-        errorEl.textContent = "Reparent failed: " + (result.data.error || "Server error");
+        errorEl.textContent = "Move failed: " + (result.data.error || "Server error");
         errorEl.style.display = "";
       }
     }).catch(function (err) {
       revertReparent(el, oldParentUuid, origNextSibling);
-      errorEl.textContent = "Reparent failed: " + (err.message || "Network error");
+      errorEl.textContent = "Move failed: " + (err.message || "Network error");
       errorEl.style.display = "";
     }).finally(function () {
       inFlight = false;
@@ -624,7 +624,7 @@
         insertSubtreeBefore(subtree, origNextNode);
         if (subtree && subtree[0]) subtree[0].dataset.parentUuid = oldParentUuid;
         var msg = result.data.error || "Server error";
-        errorEl.textContent = (msg.indexOf("ycle") !== -1 ? "Cycle detected: " : "Move failed: ") + msg;
+        errorEl.textContent = (msg.indexOf("ycle") !== -1 ? "" : "Move failed: ") + msg;
         errorEl.style.display = "";
       }
     }).catch(function (err) {

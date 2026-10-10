@@ -1,4 +1,4 @@
-"""Tests for DjangoRepository.assignable_categories_qs() (spec 013)."""
+"""Tests for DjangoRepository.assignable_categories_qs()."""
 
 from uuid import uuid4
 
@@ -7,8 +7,8 @@ import pytest
 django = pytest.importorskip("django", reason="Django is not installed")
 
 from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: E402
-from taxomesh.application.service import ROOT_CATEGORY_NAME  # noqa: E402
 from taxomesh.contrib.django.models import CategoryModel  # noqa: E402
+from taxomesh.domain.constants import ROOT_CATEGORY_NAME  # noqa: E402
 
 pytestmark = pytest.mark.django_db
 
