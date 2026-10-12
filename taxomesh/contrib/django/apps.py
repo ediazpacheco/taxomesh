@@ -1,10 +1,10 @@
-"""AppConfig for the taxomesh Django contrib app."""
+"""The ``AppConfig`` of the taxomesh Django app."""
 
 from django.apps import AppConfig
 
 
 class TaxomeshContribDjangoConfig(AppConfig):
-    """Django application configuration for the taxomesh contrib package."""
+    """The Django configuration of the ``taxomesh.contrib.django`` app."""
 
     name = "taxomesh.contrib.django"
     label = "taxomesh_contrib_django"

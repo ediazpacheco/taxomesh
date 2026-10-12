@@ -1,6 +1,6 @@
 """Domain models for taxomesh.
 
-Re-exports all public model classes for backward-compatible imports:
+Re-exports every public model class, so a caller imports them from one place:
 ``from taxomesh.domain.models import Item, Category, ...``
 """
 

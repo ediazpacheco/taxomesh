@@ -21,12 +21,12 @@
     {% endif %}
 
     {% if entry.kind == "category" %}
-      <span class="taxomesh-drag-handle" title="Drag to reorder">⠿</span>
+      <span class="taxomesh-drag-handle" title="Drag to reorder or move">⠿</span>
       <span class="taxomesh-label">
         <a href="{% url 'admin:taxomesh_contrib_django_categorymodel_change' entry.uuid %}">{{ entry.name }}</a>
       </span>
     {% else %}
-      <span class="taxomesh-drag-handle" title="Drag to reorder">⠿</span>
+      <span class="taxomesh-drag-handle" title="Drag to reorder or move">⠿</span>
       {% with entry_rels=item_relations|get_item:entry.uuid %}
         {% if entry_rels %}
           <button class="taxomesh-toggle taxomesh-rel-toggle" data-item-uuid="{{ entry.uuid }}">[+]</button>

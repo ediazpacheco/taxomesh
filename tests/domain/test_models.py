@@ -18,62 +18,64 @@ class TestModelBase:
     def test_populate_by_name_is_true(self) -> None:
         assert ModelBase.model_config["populate_by_name"] is True
 
-    def test_validate_assignment_is_true(self) -> None:
-        assert ModelBase.model_config["validate_assignment"] is True
+    def test_frozen_is_true(self) -> None:
+        assert ModelBase.model_config["frozen"] is True
 
-    def test_mutation_triggers_revalidation(self) -> None:
+    def test_assignment_is_refused(self) -> None:
         tag = Tag(tag_id=uuid4(), name="valid")
-        with pytest.raises(ValidationError):
-            tag.name = "x" * 26  # exceeds max_length=25
+        with pytest.raises(ValidationError, match="frozen"):
+            tag.name = "renamed"
+        assert tag.name == "valid"
 
 
 class TestItem:
     def test_construction(self) -> None:
-        item = Item(external_id=42)  # type: ignore[arg-type]
+        item = Item.model_validate({"name": "Item", "external_id": 42})
         assert item.external_id == "42"
 
     def test_item_id_auto_generated(self) -> None:
-        item = Item(external_id="1")
+        item = Item(name="Item", external_id="1")
         assert isinstance(item.item_id, UUID)
 
     def test_item_id_unique_per_instance(self) -> None:
-        a = Item(external_id="1")
-        b = Item(external_id="1")
+        a = Item(name="Item", external_id="1")
+        b = Item(name="Item", external_id="1")
         assert a.item_id != b.item_id
 
     def test_external_id_accepts_uuid(self) -> None:
         uid = uuid4()
-        item = Item(external_id=uid)  # type: ignore[arg-type]
+        item = Item.model_validate({"name": "Item", "external_id": uid})
         assert item.external_id == str(uid)
 
     def test_external_id_accepts_str(self) -> None:
-        item = Item(external_id="abc")
+        item = Item(name="Item", external_id="abc")
         assert item.external_id == "abc"
 
     def test_external_id_accepts_int(self) -> None:
-        item = Item(external_id=99)  # type: ignore[arg-type]
+        item = Item.model_validate({"name": "Item", "external_id": 99})
         assert item.external_id == "99"
 
     def test_external_id_str_at_max_length_is_valid(self) -> None:
-        item = Item(external_id="a" * 256)
+        item = Item(name="Item", external_id="a" * 256)
         assert len(str(item.external_id)) == 256  # noqa: PLR2004
 
     def test_external_id_str_exceeding_max_length_raises(self) -> None:
         with pytest.raises(ValidationError):
-            Item(external_id="x" * 257)
+            Item(name="Item", external_id="x" * 257)
 
     def test_enabled_defaults_true(self) -> None:
-        item = Item(external_id="1")
+        item = Item(name="Item", external_id="1")
         assert item.enabled is True
 
     def test_metadata_defaults_empty_dict(self) -> None:
-        item = Item(external_id="1")
+        item = Item(name="Item", external_id="1")
         assert item.metadata == {}
 
     def test_metadata_instances_are_independent(self) -> None:
-        a = Item(external_id="1")
-        b = Item(external_id="2")
-        a.metadata["key"] = "value"
+        a = Item(name="Item", external_id="1")
+        b = Item(name="Item", external_id="2")
+        with pytest.raises(TypeError):
+            a.metadata["key"] = "value"
         assert b.metadata == {}
 
     def test_external_id_defaults_none(self) -> None:
@@ -87,17 +89,17 @@ class TestItem:
     def test_str_no_slug_no_external_id(self) -> None:
         uid = uuid4()
         item = Item(item_id=uid, name="Product")
-        assert str(item) == f"🏷️ Product (id: {uid})"
+        assert str(item) == f"Product (id: {uid})"
 
     def test_str_with_slug(self) -> None:
         uid = uuid4()
         item = Item(item_id=uid, name="Product", slug="p1")
-        assert str(item) == f"🏷️ Product (slug: p1 - id: {uid})"
+        assert str(item) == f"Product (slug: p1, id: {uid})"
 
     def test_str_with_external_id(self) -> None:
         uid = uuid4()
         item = Item(item_id=uid, name="Product", external_id="EXT-1")
-        assert str(item) == f"🏷️ Product (id: {uid} - ext_id: EXT-1)"
+        assert str(item) == f"Product (id: {uid}, external_id: EXT-1)"
 
 
 class TestCategory:
@@ -151,8 +153,8 @@ class TestCategory:
         assert cat.enabled is False
         assert cat.external_id == "genre-rock"
 
-    def test_backward_compat_missing_enabled_and_external_id(self) -> None:
-        data = {"category_id": str(uuid4()), "name": "Legacy"}
+    def test_missing_enabled_and_external_id_take_their_defaults(self) -> None:
+        data = {"category_id": str(uuid4()), "name": "Plain"}
         cat = Category.model_validate(data)
         assert cat.enabled is True
         assert cat.external_id is None
@@ -169,37 +171,25 @@ class TestCategory:
         assert restored.enabled is False
         assert restored.external_id == "genre-rock"
 
-    def test_is_root_true_for_root_name(self) -> None:
-        """Category.is_root is True when name equals the reserved root constant."""
-        from taxomesh.domain.constants import ROOT_CATEGORY_NAME  # noqa: PLC0415
-
-        cat = Category(category_id=uuid4(), name=ROOT_CATEGORY_NAME)
-        assert cat.is_root is True
-
-    def test_is_root_false_for_regular_name(self) -> None:
-        """Category.is_root is False for any non-root name."""
-        cat = Category(category_id=uuid4(), name="Electronics")
-        assert cat.is_root is False
-
     def test_str_no_slug_no_external_id(self) -> None:
         uid = uuid4()
         cat = Category(category_id=uid, name="Rock")
-        assert str(cat) == f"📂 Rock (id: {uid})"
+        assert str(cat) == f"Rock (id: {uid})"
 
     def test_str_with_slug(self) -> None:
         uid = uuid4()
         cat = Category(category_id=uid, name="Rock", slug="rock")
-        assert str(cat) == f"📂 Rock (slug: rock - id: {uid})"
+        assert str(cat) == f"Rock (slug: rock, id: {uid})"
 
     def test_str_with_slug_and_external_id(self) -> None:
         uid = uuid4()
         cat = Category(category_id=uid, name="Rock", slug="rock", external_id="genre-rock")
-        assert str(cat) == f"📂 Rock (slug: rock - id: {uid} - ext_id: genre-rock)"
+        assert str(cat) == f"Rock (slug: rock, id: {uid}, external_id: genre-rock)"
 
     def test_str_with_external_id_only(self) -> None:
         uid = uuid4()
         cat = Category(category_id=uid, name="Rock", external_id="genre-rock")
-        assert str(cat) == f"📂 Rock (id: {uid} - ext_id: genre-rock)"
+        assert str(cat) == f"Rock (id: {uid}, external_id: genre-rock)"
 
 
 class TestTag:
@@ -218,6 +208,10 @@ class TestTag:
     def test_metadata_defaults_empty_dict(self) -> None:
         tag = Tag(tag_id=uuid4(), name="live")
         assert tag.metadata == {}
+
+    def test_str_is_its_name_and_id(self) -> None:
+        uid = uuid4()
+        assert str(Tag(tag_id=uid, name="live")) == f"live (id: {uid})"
 
 
 class TestCategoryParentLink:

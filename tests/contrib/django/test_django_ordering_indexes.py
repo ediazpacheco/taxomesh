@@ -1,8 +1,8 @@
-"""Schema introspection tests for ordering indexes (035-django-ordering-indexes).
+"""Schema introspection tests for ordering indexes.
 
 Verifies that the four database indexes introduced by migration 0005 are present
 after `migrate` runs. Correctness of ordering behaviour is already covered by
-tests/contrib/django/test_django_repository_ordering.py (spec 034).
+tests/contrib/django/test_django_repository_ordering.py.
 """
 
 import importlib
@@ -30,7 +30,7 @@ def _all_index_names() -> list[tuple[str, str]]:
     for attr in dir(module):
         obj = getattr(module, attr)
         try:
-            meta = obj._meta  # type: ignore[union-attr]
+            meta = obj._meta
         except AttributeError:
             continue
         if not hasattr(meta, "indexes"):

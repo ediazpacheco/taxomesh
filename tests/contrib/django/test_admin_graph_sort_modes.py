@@ -1,29 +1,17 @@
-"""Tests for pluggable graph sort modes (053-graph-sort-modes)."""
+"""Tests for pluggable graph sort modes."""
 
 import pytest
 
 django = pytest.importorskip("django", reason="Django is not installed")
 
+from django.test import Client  # noqa: E402
+
 pytestmark = pytest.mark.django_db
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — T001: Regression: GraphEntry and RelationEntry importable from admin
+# GraphEntry and RelationEntry importable from graph_types
 # ---------------------------------------------------------------------------
-
-
-def test_graph_entry_importable_from_admin() -> None:
-    """GraphEntry must remain importable from taxomesh.contrib.django.admin after the move."""
-    from taxomesh.contrib.django.admin import GraphEntry  # noqa: PLC0415
-
-    assert GraphEntry is not None
-
-
-def test_relation_entry_importable_from_admin() -> None:
-    """RelationEntry must remain importable from taxomesh.contrib.django.admin after the move."""
-    from taxomesh.contrib.django.admin import RelationEntry  # noqa: PLC0415
-
-    assert RelationEntry is not None
 
 
 def test_graph_entry_importable_from_graph_types() -> None:
@@ -41,7 +29,7 @@ def test_relation_entry_importable_from_graph_types() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — T004–T006: Unit tests for built-in sort callables and registry
+# Unit tests for built-in sort callables and registry
 # ---------------------------------------------------------------------------
 
 
@@ -161,12 +149,12 @@ def test_default_sort_modes_registry() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — T007–T009: View integration tests
+# View integration tests
 # ---------------------------------------------------------------------------
 
 
 def _create_sorted_categories() -> tuple[str, str, str]:
-    """Create three root categories with known sort_index values. Return their names in asc order."""
+    """Create three top-level categories with known sort_index values. Return their names in asc order."""
     from taxomesh import TaxomeshService  # noqa: PLC0415
     from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
 
@@ -174,9 +162,9 @@ def _create_sorted_categories() -> tuple[str, str, str]:
     svc = TaxomeshService(repository=repo)
 
     # Create three categories
-    cat_low = svc.create_category(name="SortLow")
-    cat_mid = svc.create_category(name="SortMid")
-    cat_high = svc.create_category(name="SortHigh")
+    cat_low = svc.categories.create(name="SortLow")
+    cat_mid = svc.categories.create(name="SortMid")
+    cat_high = svc.categories.create(name="SortHigh")
 
     # Set explicit sort_index values via reorder (after placing under root)
     # Use list_category_parent_links to find root link and set sort_index
@@ -195,13 +183,13 @@ def _create_sorted_categories() -> tuple[str, str, str]:
     return "SortLow", "SortMid", "SortHigh"
 
 
-def test_graph_view_default_sort(admin_client: object) -> None:
+def test_graph_view_default_sort(admin_client: Client) -> None:
     """GET /graph/ with no sort_by param returns entries sorted by sort_index ascending."""
     from django.urls import reverse  # noqa: PLC0415
 
     _create_sorted_categories()
     url = reverse("admin:taxomesh_contrib_django_graph")
-    response = admin_client.get(url)  # type: ignore[attr-defined]
+    response = admin_client.get(url)
     content = response.content.decode()
 
     low_pos = content.find("SortLow")
@@ -211,13 +199,13 @@ def test_graph_view_default_sort(admin_client: object) -> None:
     assert low_pos < mid_pos < high_pos, "Default sort must be ascending by sort_index"
 
 
-def test_graph_view_sort_desc(admin_client: object) -> None:
+def test_graph_view_sort_desc(admin_client: Client) -> None:
     """GET /graph/?sort_by=sort_index_desc returns entries sorted descending."""
     from django.urls import reverse  # noqa: PLC0415
 
     _create_sorted_categories()
     url = reverse("admin:taxomesh_contrib_django_graph")
-    response = admin_client.get(url, {"sort_by": "sort_index_desc"})  # type: ignore[attr-defined]
+    response = admin_client.get(url, {"sort_by": "sort_index_desc"})
     content = response.content.decode()
 
     low_pos = content.find("SortLow")
@@ -227,7 +215,7 @@ def test_graph_view_sort_desc(admin_client: object) -> None:
     assert high_pos < mid_pos < low_pos, "sort_index_desc must sort highest sort_index first"
 
 
-def test_graph_children_sort_propagated(admin_client: object) -> None:
+def test_graph_children_sort_propagated(admin_client: Client) -> None:
     """GET /graph/children/?parent_uuid=...&sort_by=sort_index_desc applies descending sort."""
     from django.urls import reverse  # noqa: PLC0415
 
@@ -238,13 +226,13 @@ def test_graph_children_sort_propagated(admin_client: object) -> None:
     repo = DjangoRepository()
     svc = TaxomeshService(repository=repo)
 
-    parent = svc.create_category(name="ParentSortTest")
-    child_a = svc.create_category(name="ChildA")
-    child_b = svc.create_category(name="ChildB")
-    child_c = svc.create_category(name="ChildC")
-    svc.add_category_parent(child_a.category_id, parent.category_id)
-    svc.add_category_parent(child_b.category_id, parent.category_id)
-    svc.add_category_parent(child_c.category_id, parent.category_id)
+    parent = svc.categories.create(name="ParentSortTest")
+    child_a = svc.categories.create(name="ChildA")
+    child_b = svc.categories.create(name="ChildB")
+    child_c = svc.categories.create(name="ChildC")
+    svc.categories.add_parent(child_a.category_id, parent.category_id)
+    svc.categories.add_parent(child_b.category_id, parent.category_id)
+    svc.categories.add_parent(child_c.category_id, parent.category_id)
 
     # Assign deterministic sort_index values
     CategoryParentLinkModel.objects.filter(
@@ -258,7 +246,7 @@ def test_graph_children_sort_propagated(admin_client: object) -> None:
     ).update(sort_index=30)
 
     url = reverse("admin:taxomesh_contrib_django_graph_children")
-    response = admin_client.get(  # type: ignore[attr-defined]
+    response = admin_client.get(
         url,
         {"parent_uuid": str(parent.category_id), "depth": "1", "sort_by": "sort_index_desc"},
     )
@@ -272,11 +260,11 @@ def test_graph_children_sort_propagated(admin_client: object) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 — T016, T016b, T017, T018: _resolve_sort_fn tests
+# _resolve_sort_fn tests
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_sort_fn_known_key(admin_client: object) -> None:
+def test_resolve_sort_fn_known_key(admin_client: Client) -> None:
     """_resolve_sort_fn('sort_index_desc') returns the sort_index_desc callable."""
     from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
     from taxomesh.contrib.django.graph_sort import sort_index_desc  # noqa: PLC0415
@@ -286,7 +274,7 @@ def test_resolve_sort_fn_known_key(admin_client: object) -> None:
     assert result is sort_index_desc
 
 
-def test_consumer_sort_mode_appears_in_context(admin_client: object) -> None:
+def test_consumer_sort_mode_appears_in_context(admin_client: Client) -> None:
     """A subclass with a custom sort_modes entry produces sort_mode_options with the custom label."""
     from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: PLC0415
     from taxomesh.contrib.django.graph_sort import DEFAULT_SORT_MODES, SortMode  # noqa: PLC0415
@@ -332,17 +320,17 @@ def test_resolve_sort_fn_unknown_key_fallback() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 — T020: No regression — default order is sort_index_asc
+# No regression — default order is sort_index_asc
 # ---------------------------------------------------------------------------
 
 
-def test_no_regression_default_order(admin_client: object) -> None:
+def test_no_regression_default_order(admin_client: Client) -> None:
     """Without sort_by param, graph view order matches sort_index_asc (pre-feature contract)."""
     from django.urls import reverse  # noqa: PLC0415
 
     _create_sorted_categories()
     url = reverse("admin:taxomesh_contrib_django_graph")
-    response = admin_client.get(url)  # type: ignore[attr-defined]
+    response = admin_client.get(url)
     content = response.content.decode()
 
     low_pos = content.find("SortLow")

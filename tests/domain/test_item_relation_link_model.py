@@ -4,12 +4,13 @@ Covers: valid construction, self-relation rejection, empty/whitespace
 relation_type rejection, and case normalisation (relation_type is lowercased).
 """
 
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from taxomesh.domain.models.item_relation_link import ItemRelationLink
-from taxomesh.exceptions import TaxomeshRelationError
 
 SRC = uuid4()
 TGT = uuid4()
@@ -59,11 +60,16 @@ class TestRelationTypeCaseNormalisation:
 
 
 class TestSelfRelationRejection:
-    """source_item_id == target_item_id must raise TaxomeshRelationError."""
+    """source_item_id == target_item_id is refused.
+
+    The validator raises ``TaxomeshRelationError``; pydantic reports it as its own error, since
+    every taxomesh validation error is a ``ValueError``. The item collection's ``relate`` raises
+    the relation error itself.
+    """
 
     def test_self_relation_raises(self) -> None:
         same_id = uuid4()
-        with pytest.raises(TaxomeshRelationError, match="self"):
+        with pytest.raises(ValidationError, match="An item cannot be related to itself"):
             ItemRelationLink(source_item_id=same_id, target_item_id=same_id, relation_type="loop")
 
     def test_distinct_ids_do_not_raise(self) -> None:
@@ -71,18 +77,18 @@ class TestSelfRelationRejection:
 
 
 class TestRelationTypeValidation:
-    """Empty or whitespace-only relation_type must raise TaxomeshRelationError."""
+    """Empty or whitespace-only relation_type is refused, as a self-relation is."""
 
     def test_empty_string_raises(self) -> None:
-        with pytest.raises(TaxomeshRelationError, match="empty"):
+        with pytest.raises(ValidationError, match="empty"):
             ItemRelationLink(source_item_id=SRC, target_item_id=TGT, relation_type="")
 
     def test_whitespace_only_raises(self) -> None:
-        with pytest.raises(TaxomeshRelationError, match="empty"):
+        with pytest.raises(ValidationError, match="empty"):
             ItemRelationLink(source_item_id=SRC, target_item_id=TGT, relation_type="   ")
 
     def test_tab_only_raises(self) -> None:
-        with pytest.raises(TaxomeshRelationError, match="empty"):
+        with pytest.raises(ValidationError, match="empty"):
             ItemRelationLink(source_item_id=SRC, target_item_id=TGT, relation_type="\t")
 
 
@@ -105,5 +111,17 @@ class TestFieldTypes:
     def test_metadata_is_independent_per_instance(self) -> None:
         a = ItemRelationLink(source_item_id=SRC, target_item_id=TGT, relation_type="x")
         b = ItemRelationLink(source_item_id=SRC, target_item_id=TGT, relation_type="y")
-        a.metadata["k"] = "v"
+        with pytest.raises(TypeError):
+            a.metadata["k"] = "v"
         assert b.metadata == {}
+
+
+class TestARelationTypeIsText:
+    """A relation type that is not text is the wrong type: ``TypeError``, not a refused value."""
+
+    @pytest.mark.parametrize("value", [5, None, ["covers"]], ids=["int", "None", "list"])
+    def test_the_type_is_refused(self, value: object) -> None:
+        # Any: the annotation refuses the value, which an untyped caller can pass.
+        relation_type: Any = value
+        with pytest.raises(TypeError, match="relation_type"):
+            ItemRelationLink(source_item_id=SRC, target_item_id=TGT, relation_type=relation_type)

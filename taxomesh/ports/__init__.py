@@ -1,1 +1,1 @@
-"""taxomesh.ports — Storage interface definitions (Protocols)."""
+"""taxomesh.ports: the storage port, ``TaxomeshRepositoryBase``, a ``Protocol``."""

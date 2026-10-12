@@ -7,16 +7,22 @@ its hierarchy placement is validated here even though no service method raises
 it yet.
 """
 
+import pickle
+
 import pytest
 
 from taxomesh import (
     TaxomeshCategoryNotFoundError,
+    TaxomeshConfigError,
     TaxomeshCyclicDependencyError,
     TaxomeshDuplicateSlugError,
     TaxomeshError,
+    TaxomeshExternalIdConflictError,
     TaxomeshItemNotFoundError,
     TaxomeshNotFoundError,
+    TaxomeshRelationError,
     TaxomeshRepositoryError,
+    TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
     TaxomeshValidationError,
 )
@@ -123,7 +129,7 @@ def test_duplicate_slug_error_exported_from_package() -> None:
 
 
 # ------------------------------------------------------------------
-# TaxomeshExternalIdConflictError (spec 041)
+# TaxomeshExternalIdConflictError
 # ------------------------------------------------------------------
 
 
@@ -149,20 +155,20 @@ def test_external_id_conflict_error_catchable_as_validation_error() -> None:
     from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
 
     with pytest.raises(TaxomeshValidationError):
-        raise TaxomeshExternalIdConflictError("external_id 'abc-123' is already assigned to another item.")
+        raise TaxomeshExternalIdConflictError("external_id 'abc-123' is already assigned to another item")
 
 
 def test_external_id_conflict_error_catchable_as_taxomesh_error() -> None:
     from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
 
     with pytest.raises(TaxomeshError):
-        raise TaxomeshExternalIdConflictError("external_id 'abc-123' is already assigned to another item.")
+        raise TaxomeshExternalIdConflictError("external_id 'abc-123' is already assigned to another item")
 
 
 def test_external_id_conflict_error_message_contains_conflicting_value() -> None:
     from taxomesh import TaxomeshExternalIdConflictError  # noqa: PLC0415
 
-    exc = TaxomeshExternalIdConflictError("external_id 'dup-key-42' is already assigned to another item.")
+    exc = TaxomeshExternalIdConflictError("external_id 'dup-key-42' is already assigned to another item")
     assert "dup-key-42" in str(exc)
 
 
@@ -171,3 +177,69 @@ def test_external_id_conflict_error_exported_from_package() -> None:
     from taxomesh.exceptions import TaxomeshExternalIdConflictError as _err2  # noqa: PLC0415
 
     assert _err is _err2
+
+
+# ------------------------------------------------------------------
+# The stdlib bases
+# ------------------------------------------------------------------
+
+NOT_FOUND_ERRORS: list[type[TaxomeshNotFoundError]] = [
+    TaxomeshNotFoundError,
+    TaxomeshCategoryNotFoundError,
+    TaxomeshItemNotFoundError,
+    TaxomeshTagNotFoundError,
+]
+
+VALIDATION_ERRORS: list[type[TaxomeshValidationError]] = [
+    TaxomeshValidationError,
+    TaxomeshCyclicDependencyError,
+    TaxomeshRelationError,
+    TaxomeshDuplicateSlugError,
+    TaxomeshExternalIdConflictError,
+    TaxomeshRootCategoryError,
+]
+
+
+@pytest.mark.parametrize("error", NOT_FOUND_ERRORS, ids=lambda c: c.__name__)
+def test_every_not_found_error_is_a_key_error(error: type[TaxomeshNotFoundError]) -> None:
+    """A caller who knows only the stdlib catches a miss as it would from a ``dict``."""
+    with pytest.raises(KeyError):
+        raise error("Category not found: 42")
+
+
+@pytest.mark.parametrize("error", NOT_FOUND_ERRORS, ids=lambda c: c.__name__)
+def test_a_not_found_error_reads_as_its_message(error: type[TaxomeshNotFoundError]) -> None:
+    """``KeyError`` quotes its argument when printed; a not-found error prints its message as written."""
+    exc = error("Category not found: 42")
+    assert str(exc) == "Category not found: 42"
+    assert repr(exc) == f"{error.__name__}('Category not found: 42')"
+
+
+def test_a_not_found_error_with_no_message_reads_as_empty() -> None:
+    assert str(TaxomeshItemNotFoundError()) == ""
+
+
+def test_a_not_found_error_survives_pickling() -> None:
+    """The error crosses a process boundary, as a worker pool's result does, with its type and message."""
+    restored = pickle.loads(pickle.dumps(TaxomeshItemNotFoundError("Item not found: 7")))
+    assert type(restored) is TaxomeshItemNotFoundError
+    assert str(restored) == "Item not found: 7"
+
+
+@pytest.mark.parametrize("error", VALIDATION_ERRORS, ids=lambda c: c.__name__)
+def test_every_validation_error_is_a_value_error(error: type[TaxomeshValidationError]) -> None:
+    """A caller who knows only the stdlib catches a refused value as it would from ``int("x")``."""
+    with pytest.raises(ValueError):
+        raise error("refused")
+
+
+def test_the_reserved_name_error_is_a_validation_error() -> None:
+    """A category given the implicit root's name is refused input, as a duplicate slug is."""
+    assert issubclass(TaxomeshRootCategoryError, TaxomeshValidationError)
+
+
+@pytest.mark.parametrize("error", [TaxomeshRepositoryError, TaxomeshConfigError], ids=lambda c: c.__name__)
+def test_the_operator_errors_are_neither(error: type[TaxomeshError]) -> None:
+    """A storage or configuration failure is not the caller's miss and not the caller's bad input."""
+    assert not issubclass(error, KeyError)
+    assert not issubclass(error, ValueError)

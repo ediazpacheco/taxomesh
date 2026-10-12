@@ -1,1 +1,1 @@
-"""taxomesh.application — Application service layer (use-cases)."""
+"""taxomesh.application: the service, its three collections and the search."""

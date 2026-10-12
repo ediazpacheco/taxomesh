@@ -1,7 +1,7 @@
-"""Django admin tests for ItemRelationLink (US7)."""
+"""Django admin tests for ItemRelationLink."""
 
-from unittest.mock import MagicMock, patch
-from uuid import uuid4
+from unittest.mock import MagicMock, call, patch
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -10,8 +10,12 @@ django = pytest.importorskip("django", reason="Django is not installed")
 from django.contrib.admin.sites import AdminSite  # noqa: E402
 from django.http import HttpRequest  # noqa: E402
 
+from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: E402
+from taxomesh.application.service import TaxomeshService  # noqa: E402
 from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: E402
 from taxomesh.contrib.django.models import ItemModel, ItemRelationLinkModel  # noqa: E402
+from taxomesh.domain.models import ItemRelationLink  # noqa: E402
+from taxomesh.exceptions import TaxomeshRelationError  # noqa: E402
 
 pytestmark = pytest.mark.django_db
 
@@ -20,6 +24,19 @@ _PATCH_TARGET = "taxomesh.contrib.django.admin.TaxomeshService"
 
 def _make_mock_request() -> MagicMock:
     return MagicMock(spec=HttpRequest)
+
+
+def _relate_as_stored(
+    source: UUID, target: UUID, relation_type: str, *, sort_index: int = 0, metadata: dict[str, object] | None = None
+) -> ItemRelationLink:
+    """Stand in for ``items.relate`` in a mocked service: return the link it would store."""
+    return ItemRelationLink(
+        source_item_id=source,
+        target_item_id=target,
+        relation_type=relation_type,
+        sort_index=sort_index,
+        metadata=metadata if metadata is not None else {},
+    )
 
 
 class TestOutgoingRelationInline:
@@ -39,55 +56,13 @@ class TestOutgoingRelationInline:
         inline_classes = [type(inline) for inline in admin_obj.get_inline_instances(MagicMock())]
         assert IncomingRelationInline in inline_classes
 
-    def test_outgoing_inline_save_calls_service_relate_items(self) -> None:
-        from taxomesh.contrib.django.admin import OutgoingRelationInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = OutgoingRelationInline(ItemModel, site)
-        request = _make_mock_request()
-
-        src_id = uuid4()
-        tgt_id = uuid4()
-
-        obj = MagicMock(spec=ItemRelationLinkModel)
-        obj.source_item_id = src_id
-        obj.target_item_id = tgt_id
-        obj.relation_type = "covers"
-        obj.sort_index = 0
-        obj.metadata = {}
-
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            inline.save_model(request, obj, MagicMock(), False)
-            mock_svc.relate_items.assert_called_once_with(src_id, tgt_id, "covers", sort_index=0, metadata={})
-
-    def test_outgoing_inline_delete_calls_service_remove_relation(self) -> None:
-        from taxomesh.contrib.django.admin import OutgoingRelationInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = OutgoingRelationInline(ItemModel, site)
-        request = _make_mock_request()
-
-        src_id = uuid4()
-        tgt_id = uuid4()
-
-        obj = MagicMock(spec=ItemRelationLinkModel)
-        obj.source_item_id = src_id
-        obj.target_item_id = tgt_id
-        obj.relation_type = "covers"
-
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            inline.delete_model(request, obj)
-            mock_svc.remove_item_relation.assert_called_once_with(src_id, tgt_id, "covers")
-
 
 class TestSaveFormsetRelationEdit:
     """Regression tests: editing a relation inline must not duplicate the relation."""
 
-    def _make_formset(self, instances: list, deleted: list, fk_name: str) -> MagicMock:
+    def _make_formset(
+        self, instances: list[ItemRelationLinkModel], deleted: list[ItemRelationLinkModel], fk_name: str
+    ) -> MagicMock:
         fs = MagicMock()
         fs.model = ItemRelationLinkModel
         fs.fk.name = fk_name
@@ -96,7 +71,7 @@ class TestSaveFormsetRelationEdit:
         return fs
 
     def test_edit_relation_target_removes_old_and_creates_new(self) -> None:
-        """Changing target_item on an existing relation must remove old relation first."""
+        """Changing target_item on an existing relation stores the new relation and removes the old one."""
         item_a = ItemModel.objects.create(name="A")
         item_b = ItemModel.objects.create(name="B")
         item_c = ItemModel.objects.create(name="C")
@@ -114,16 +89,17 @@ class TestSaveFormsetRelationEdit:
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
+            mock_svc.items.relate.side_effect = _relate_as_stored
             MockSvc.return_value = mock_svc
             admin_obj.save_formset(MagicMock(), MagicMock(), formset, True)
 
-        mock_svc.remove_item_relation.assert_called_once_with(item_a.item_id, item_b.item_id, "covers")
-        mock_svc.relate_items.assert_called_once_with(
+        mock_svc.items.unrelate.assert_called_once_with(item_a.item_id, item_b.item_id, "covers")
+        mock_svc.items.relate.assert_called_once_with(
             item_a.item_id, item_c.item_id, "covers", sort_index=0, metadata={}
         )
 
     def test_edit_relation_type_removes_old_and_creates_new(self) -> None:
-        """Changing relation_type on an existing relation must remove old relation first."""
+        """Changing relation_type on an existing relation stores the new relation and removes the old one."""
         item_a = ItemModel.objects.create(name="A")
         item_b = ItemModel.objects.create(name="B")
 
@@ -140,16 +116,17 @@ class TestSaveFormsetRelationEdit:
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
+            mock_svc.items.relate.side_effect = _relate_as_stored
             MockSvc.return_value = mock_svc
             admin_obj.save_formset(MagicMock(), MagicMock(), formset, True)
 
-        mock_svc.remove_item_relation.assert_called_once_with(item_a.item_id, item_b.item_id, "covers")
-        mock_svc.relate_items.assert_called_once_with(
+        mock_svc.items.unrelate.assert_called_once_with(item_a.item_id, item_b.item_id, "covers")
+        mock_svc.items.relate.assert_called_once_with(
             item_a.item_id, item_b.item_id, "replaces", sort_index=0, metadata={}
         )
 
     def test_edit_non_key_fields_does_not_remove_old_relation(self) -> None:
-        """Changing only sort_index/metadata must NOT call remove_item_relation."""
+        """Changing only sort_index/metadata must NOT call items.unrelate."""
         item_a = ItemModel.objects.create(name="A")
         item_b = ItemModel.objects.create(name="B")
 
@@ -168,16 +145,17 @@ class TestSaveFormsetRelationEdit:
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
+            mock_svc.items.relate.side_effect = _relate_as_stored
             MockSvc.return_value = mock_svc
             admin_obj.save_formset(MagicMock(), MagicMock(), formset, True)
 
-        mock_svc.remove_item_relation.assert_not_called()
-        mock_svc.relate_items.assert_called_once_with(
+        mock_svc.items.unrelate.assert_not_called()
+        mock_svc.items.relate.assert_called_once_with(
             item_a.item_id, item_b.item_id, "covers", sort_index=5, metadata={}
         )
 
     def test_new_relation_does_not_call_remove(self) -> None:
-        """Adding a new relation (pk=None) must not call remove_item_relation."""
+        """Adding a new relation (pk=None) must not call items.unrelate."""
         item_a = ItemModel.objects.create(name="A")
         item_b = ItemModel.objects.create(name="B")
 
@@ -192,11 +170,12 @@ class TestSaveFormsetRelationEdit:
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
+            mock_svc.items.relate.side_effect = _relate_as_stored
             MockSvc.return_value = mock_svc
             admin_obj.save_formset(MagicMock(), MagicMock(), formset, True)
 
-        mock_svc.remove_item_relation.assert_not_called()
-        mock_svc.relate_items.assert_called_once()
+        mock_svc.items.unrelate.assert_not_called()
+        mock_svc.items.relate.assert_called_once()
 
     def test_incoming_inline_edit_removes_old_relation(self) -> None:
         """Same bug applies to the incoming (target) inline: editing source must remove old relation."""
@@ -218,13 +197,138 @@ class TestSaveFormsetRelationEdit:
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
+            mock_svc.items.relate.side_effect = _relate_as_stored
             MockSvc.return_value = mock_svc
             admin_obj.save_formset(MagicMock(), MagicMock(), formset, True)
 
-        mock_svc.remove_item_relation.assert_called_once_with(item_a.item_id, item_b.item_id, "covers")
-        mock_svc.relate_items.assert_called_once_with(
+        mock_svc.items.unrelate.assert_called_once_with(item_a.item_id, item_b.item_id, "covers")
+        mock_svc.items.relate.assert_called_once_with(
             item_c.item_id, item_b.item_id, "covers", sort_index=0, metadata={}
         )
+
+
+class TestSaveFormsetRelationOrder:
+    """Each row stores its new relation before it removes the old one, after the deleted rows go.
+
+    A refused ``relate`` then leaves the row's stored relation as it was, and a row edited onto the
+    key of a row deleted in the same submission keeps its relation.
+    """
+
+    @staticmethod
+    def _save(
+        instances: list[ItemRelationLinkModel],
+        deleted: list[ItemRelationLinkModel],
+        *,
+        refusal: Exception | None = None,
+    ) -> MagicMock:
+        """Save the outgoing inline through a mocked service, whose ``relate`` raises ``refusal``."""
+        formset = MagicMock()
+        formset.model = ItemRelationLinkModel
+        formset.fk.name = "source_item"
+        formset.save.return_value = instances
+        formset.deleted_objects = deleted
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            mock_svc.items.relate.side_effect = _relate_as_stored if refusal is None else refusal
+            MockSvc.return_value = mock_svc
+            ItemModelAdmin(ItemModel, AdminSite()).save_formset(MagicMock(), MagicMock(), formset, True)
+        return mock_svc
+
+    @staticmethod
+    def _retargeted(source: ItemModel, old: ItemModel, new: ItemModel) -> ItemRelationLinkModel:
+        """A stored ``covers`` relation from ``source`` to ``old``, edited to point at ``new``."""
+        stored = ItemRelationLinkModel.objects.create(source_item=source, target_item=old, relation_type="covers")
+        edited = ItemRelationLinkModel(source_item=source, target_item=new, relation_type="covers", metadata={})
+        edited.pk = stored.pk
+        return edited
+
+    def test_the_new_relation_is_stored_before_the_old_one_goes(self) -> None:
+        item_a, item_b, item_c = (ItemModel.objects.create(name=name) for name in "ABC")
+
+        mock_svc = self._save([self._retargeted(item_a, item_b, item_c)], [])
+
+        assert mock_svc.items.mock_calls == [
+            call.relate(item_a.item_id, item_c.item_id, "covers", sort_index=0, metadata={}),
+            call.unrelate(item_a.item_id, item_b.item_id, "covers"),
+        ]
+
+    def test_a_refused_edit_keeps_the_old_relation(self) -> None:
+        item_a, item_b, item_c = (ItemModel.objects.create(name=name) for name in "ABC")
+
+        mock_svc = self._save([self._retargeted(item_a, item_b, item_c)], [], refusal=TaxomeshRelationError("Refused"))
+
+        mock_svc.items.unrelate.assert_not_called()
+
+    def test_a_deleted_row_goes_before_a_row_edited_onto_its_key(self) -> None:
+        item_a, item_b, item_c = (ItemModel.objects.create(name=name) for name in "ABC")
+        deleted = ItemRelationLinkModel.objects.create(source_item=item_a, target_item=item_b, relation_type="covers")
+
+        mock_svc = self._save([self._retargeted(item_a, item_c, item_b)], [deleted])
+
+        assert mock_svc.items.mock_calls == [
+            call.unrelate(item_a.item_id, item_b.item_id, "covers"),
+            call.relate(item_a.item_id, item_b.item_id, "covers", sort_index=0, metadata={}),
+            call.unrelate(item_a.item_id, item_c.item_id, "covers"),
+        ]
+
+
+class TestSaveFormsetRelationKeepsItsKey:
+    """An edit the service stores under the relation's own key keeps that relation, with its edits.
+
+    ``relate`` stores a relation type stripped and lowercased, so a row edited to ``COVERS`` is the
+    stored ``covers`` relation edited, not a new one. The real service and ORM run; only the formset
+    is a stand-in.
+    """
+
+    @staticmethod
+    def _save(edited: ItemRelationLinkModel, fk_name: str) -> None:
+        """Save ``edited`` through the item admin's inline named by ``fk_name``."""
+        formset = MagicMock()
+        formset.model = ItemRelationLinkModel
+        formset.fk.name = fk_name
+        formset.save.return_value = [edited]
+        formset.deleted_objects = []
+        ItemModelAdmin(ItemModel, AdminSite()).save_formset(MagicMock(), MagicMock(), formset, True)
+
+    @staticmethod
+    def _edited(stored: ItemRelationLinkModel, *, target: UUID, relation_type: str) -> ItemRelationLinkModel:
+        """The stored row as the inline's form hands it back: same pk, the edited fields."""
+        edited = ItemRelationLinkModel(
+            source_item_id=stored.source_item_id,
+            target_item_id=target,
+            relation_type=relation_type,
+            sort_index=7,
+            metadata={"edited": True},
+        )
+        edited.pk = stored.pk
+        return edited
+
+    @pytest.mark.parametrize("fk_name", ["source_item", "target_item"])
+    @pytest.mark.parametrize("typed", ["COVERS", " covers "])
+    def test_an_edit_onto_the_same_key_keeps_the_relation(self, fk_name: str, typed: str) -> None:
+        svc = TaxomeshService(repository=DjangoRepository())
+        item_a, item_b = svc.items.create("A"), svc.items.create("B")
+        svc.items.relate(item_a, item_b, "covers")
+        stored = ItemRelationLinkModel.objects.get()
+
+        self._save(self._edited(stored, target=item_b.item_id, relation_type=typed), fk_name)
+
+        kept = svc.items.list_relations(item_a)
+        assert [(link.target_item_id, link.relation_type, link.sort_index) for link in kept] == [
+            (item_b.item_id, "covers", 7)
+        ]
+        assert kept[0].metadata == {"edited": True}
+
+    def test_a_retarget_still_removes_the_old_relation(self) -> None:
+        svc = TaxomeshService(repository=DjangoRepository())
+        item_a, item_b, item_c = (svc.items.create(name) for name in "ABC")
+        svc.items.relate(item_a, item_b, "covers")
+        stored = ItemRelationLinkModel.objects.get()
+
+        self._save(self._edited(stored, target=item_c.item_id, relation_type="covers"), "source_item")
+
+        kept = svc.items.list_relations(item_a)
+        assert [(link.target_item_id, link.relation_type) for link in kept] == [(item_c.item_id, "covers")]
 
 
 class TestItemRelationLinkSelfRelationValidation:

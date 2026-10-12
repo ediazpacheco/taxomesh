@@ -1,345 +1,170 @@
 # HTTP API Integration
 
-Use this when you already have a web application and want to expose taxonomy operations
-without re-implementing request models, service delegation, and error mapping in every
-endpoint.
-
-`taxomesh` ships **no HTTP server**. Instead, it provides four framework-agnostic
-modules in `taxomesh.contrib.api` that you wire into your existing application. The same
-building blocks work in FastAPI, Django, Flask, or any other Python web framework.
+`taxomesh` ships **no HTTP server**. `taxomesh.contrib.api` gives an application that already has
+one the request models, the calls into the service and the error mapping, so no endpoint
+re-implements them. The handlers do no authentication, no authorization and no rate limiting: your
+application does them. The modules depend on no web framework:
 
 ```python
-from taxomesh.contrib.api import schemas      # Pydantic request models (incl. search request schemas)
-from taxomesh.contrib.api import handlers     # Pure delegation functions → TaxomeshService
-from taxomesh.contrib.api import errors       # errors.to_tuple(exc) → (status_code, body)
+from taxomesh.contrib.api import schemas      # Pydantic request models, search included
+from taxomesh.contrib.api import handlers     # one function per collection member
+from taxomesh.contrib.api import errors       # errors.to_tuple(exc) -> (status_code, body)
 from taxomesh.contrib.api import serializers  # graph_to_dict, items_to_list, categories_to_list
 ```
 
-## FastAPI example
+## The handlers, without a framework
+
+Each handler is named `<namespace>_<member>` after the member it calls, and answers what that member
+answers: `handlers.categories_get_by_slug(service, slug)` is `service.categories.get_by_slug(slug)`.
+A lookup returns `None` on a miss, which your application turns into its 404. A subject or a filter
+that names an entity that is not stored raises the not-found error of that entity. A handler's
+arguments are typed as its member's are, so parse what arrives as text: a query string's
+`enabled="true"` is a `TypeError`, not a filter. The search schemas parse text:
+`SearchItemsRequest(query="blue", enabled="false", limit="5")` holds `False` and `5`. Over HTTP
+only, `query` is at most `MAX_SEARCH_QUERY_LENGTH` characters (`taxomesh.domain.constants`).
 
 ```python
-from taxomesh import TaxomeshService
-from taxomesh.contrib.api import errors, handlers, schemas
-from taxomesh.exceptions import TaxomeshError
-from fastapi import FastAPI, HTTPException
-
-app = FastAPI()
-service = TaxomeshService()  # auto-discovers taxomesh.toml
-
-@app.get("/categories")
-def list_categories():
-    return handlers.list_categories(service)
-
-@app.post("/categories", status_code=201)
-def create_category(body: schemas.CreateCategoryRequest):
-    try:
-        return handlers.create_category(service, body)
-    except TaxomeshError as e:
-        status, detail = errors.to_tuple(e)
-        raise HTTPException(status_code=status, detail=detail)
-
-@app.get("/categories/{category_id}")
-def get_category(category_id: str):
-    from uuid import UUID
-    try:
-        return handlers.get_category(service, UUID(category_id))
-    except TaxomeshError as e:
-        status, detail = errors.to_tuple(e)
-        raise HTTPException(status_code=status, detail=detail)
-
-@app.patch("/categories/{category_id}")
-def update_category(category_id: str, body: schemas.UpdateCategoryRequest):
-    from uuid import UUID
-    try:
-        return handlers.update_category(service, UUID(category_id), body)
-    except TaxomeshError as e:
-        status, detail = errors.to_tuple(e)
-        raise HTTPException(status_code=status, detail=detail)
-
-@app.delete("/categories/{category_id}", status_code=204)
-def delete_category(category_id: str):
-    from uuid import UUID
-    try:
-        handlers.delete_category(service, UUID(category_id))
-    except TaxomeshError as e:
-        status, detail = errors.to_tuple(e)
-        raise HTTPException(status_code=status, detail=detail)
-```
-
-The same pattern applies to items, tags, and relationships — one handler function per operation.
-
-For the graph endpoint, combine `handlers.get_graph` with `serializers.graph_to_dict` to produce
-a fully JSON-serializable response:
-
-```python
-from taxomesh.contrib.api import handlers, serializers
-
-@app.get("/graph")
-def get_graph():
-    return serializers.graph_to_dict(handlers.get_graph(service))
-```
-
-## Django example
-
-```python
-# myapp/views.py
-from uuid import UUID
-from django.http import JsonResponse
-from django.views import View
-
-from taxomesh import TaxomeshService
-from taxomesh.contrib.api import errors, handlers, schemas
+from taxomesh import TaxomeshService, TaxomeshVersionConflictError
 from taxomesh.exceptions import TaxomeshError
 
-service = TaxomeshService()  # initialise once (e.g. in AppConfig.ready)
+service = TaxomeshService()  # auto-discovers taxomesh.toml, else a YAML file in ./data/
 
+music = handlers.categories_create(service, body=schemas.CreateCategoryRequest(name="Music", external_id="cat-music"))
+jazz = handlers.categories_create(service, body=schemas.CreateCategoryRequest(name="Jazz"))
+handlers.categories_add_parent(service, jazz.category_id, body=schemas.AddCategoryParentRequest(parent_id=music.category_id))
+item = handlers.items_create(service, body=schemas.CreateItemRequest(name="Kind of Blue", slug="kind-of-blue"))
+handlers.items_place_in(service, item.item_id, body=schemas.PlaceItemRequest(category_id=jazz.category_id))
+live = handlers.tags_create(service, body=schemas.CreateTagRequest(name="live"))
+handlers.items_tag(service, item.item_id, tag_id=live.tag_id)
 
-class CategoryListView(View):
-    def get(self, request):
-        return JsonResponse(
-            [c.model_dump(mode="json") for c in handlers.list_categories(service)],
-            safe=False,
-        )
+# Listings take the member's filters, spelled with _id as HTTP names an entity.
+assert {c.name for c in handlers.categories_list(service)} == {"Music", "Jazz"}
+assert [c.name for c in handlers.categories_roots(service)] == ["Music"]
+assert [i.name for i in handlers.items_list(service, category_id=music.category_id, recursive=True)] == ["Kind of Blue"]
+assert [t.name for t in handlers.tags_list(service, item_id=item.item_id)] == ["live"]
 
-    def post(self, request):
-        body = schemas.CreateCategoryRequest.model_validate_json(request.body)
-        try:
-            result = handlers.create_category(service, body)
-            return JsonResponse(result.model_dump(mode="json"), status=201)
-        except TaxomeshError as e:
-            status, detail = errors.to_tuple(e)
-            return JsonResponse(detail, status=status)
+# A lookup answers None on a miss.
+assert handlers.categories_get_by_external_id(service, "cat-music") == music
+assert handlers.items_get_by_slug(service, "no-such-slug") is None
 
+# An omitted update field is left as it is stored.
+renamed = handlers.categories_update(service, jazz.category_id, body=schemas.UpdateCategoryRequest(name="Modal Jazz"))
+assert renamed.enabled and renamed.name == "Modal Jazz"
 
-class CategoryDetailView(View):
-    def get(self, request, category_id: str):
-        try:
-            result = handlers.get_category(service, UUID(category_id))
-            return JsonResponse(result.model_dump(mode="json"))
-        except TaxomeshError as e:
-            status, detail = errors.to_tuple(e)
-            return JsonResponse(detail, status=status)
+# Search takes the member's parameters; serializers turn rows and graphs into JSON-ready values.
+found = handlers.items_search(service, params=schemas.SearchItemsRequest(query="blue"))
+assert serializers.items_to_list(found)[0]["name"] == "Kind of Blue"
+assert [root["category"]["name"] for root in serializers.graph_to_dict(handlers.graph(service))["roots"]] == ["Music"]
 
-    def patch(self, request, category_id: str):
-        body = schemas.UpdateCategoryRequest.model_validate_json(request.body)
-        try:
-            result = handlers.update_category(service, UUID(category_id), body)
-            return JsonResponse(result.model_dump(mode="json"))
-        except TaxomeshError as e:
-            status, detail = errors.to_tuple(e)
-            return JsonResponse(detail, status=status)
-
-    def delete(self, request, category_id: str):
-        try:
-            handlers.delete_category(service, UUID(category_id))
-            return JsonResponse({}, status=204)
-        except TaxomeshError as e:
-            status, detail = errors.to_tuple(e)
-            return JsonResponse(detail, status=status)
+# A refused write maps to a status: a cycle is a validation error, 422.
+try:
+    handlers.categories_add_parent(service, music.category_id, body=schemas.AddCategoryParentRequest(parent_id=jazz.category_id))
+except TaxomeshError as exc:
+    assert errors.to_tuple(exc)[0] == 422
+else:
+    raise AssertionError("a cycle is refused")
+assert errors.to_tuple(TaxomeshVersionConflictError("stale"))[0] == 409
 ```
 
-For the graph endpoint, use `serializers.graph_to_dict` — handlers return a `TaxomeshGraph` dataclass
-which is not directly JSON-serializable:
-
-```python
-from django.http import JsonResponse
-from taxomesh.contrib.api import handlers, serializers
-
-def graph_view(request):
-    return JsonResponse(serializers.graph_to_dict(handlers.get_graph(service)))
-```
-
-## Search endpoints
-
-Use `schemas.SearchItemsRequest` and `schemas.SearchCategoriesRequest` together with
-`handlers.search_items` / `handlers.search_categories` and the `serializers.items_to_list` /
-`serializers.categories_to_list` helpers to add ranked, fuzzy-tolerant search to any endpoint.
-
-### FastAPI example
-
-```python
-from taxomesh.contrib.api import handlers, schemas, serializers
-
-@app.get("/search/items")
-def search_items(q: str, limit: int = 20, fuzzy: bool = True):
-    params = schemas.SearchItemsRequest(q=q, limit=limit, fuzzy=fuzzy)
-    items = handlers.search_items(service, params)
-    return {"results": serializers.items_to_list(items)}
-
-@app.get("/search/categories")
-def search_categories(q: str, limit: int = 20, fuzzy: bool = True):
-    params = schemas.SearchCategoriesRequest(q=q, limit=limit, fuzzy=fuzzy)
-    categories = handlers.search_categories(service, params)
-    return {"results": serializers.categories_to_list(categories)}
-```
-
-### Django example
-
-```python
-from django.http import JsonResponse
-from taxomesh.contrib.api import handlers, schemas, serializers
-
-def search_items_view(request):
-    params = schemas.SearchItemsRequest(
-        q=request.GET.get("q", ""),
-        limit=int(request.GET.get("limit", 20)),
-        fuzzy=request.GET.get("fuzzy", "true").lower() != "false",
-    )
-    items = handlers.search_items(service, params)
-    return JsonResponse({"results": serializers.items_to_list(items)})
-```
-
-### SearchItemsRequest fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `q` | `str` | required | Search query (max 500 chars) |
-| `limit` | `int` | `20` | Maximum results returned |
-| `category_id` | `UUID \| None` | `None` | Restrict results to items in this category |
-| `recursive` | `bool` | `False` | Include items in descendant categories |
-| `enabled` | `bool` | `True` | Exclude disabled items |
-| `fuzzy` | `bool` | `True` | Enable typo-tolerant fuzzy matching |
-
-### SearchCategoriesRequest fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `q` | `str` | required | Search query (max 500 chars) |
-| `limit` | `int` | `20` | Maximum results returned |
-| `parent_id` | `UUID \| None` | `None` | Restrict to direct children of this parent |
-| `enabled` | `bool` | `True` | Exclude disabled categories |
-| `fuzzy` | `bool` | `True` | Enable typo-tolerant fuzzy matching |
-
-### Serializers
-
-`items_to_list(items)` and `categories_to_list(categories)` convert domain model lists to
-plain JSON-serializable dicts (via `model_dump(mode="json")`). They are separate from the
-handlers so you can apply additional processing (filtering, renaming) before serializing.
-
-```python
-from taxomesh.contrib.api.serializers import categories_to_list, items_to_list
-
-items_to_list([item])        # [{"item_id": "...", "name": "...", ...}]
-categories_to_list([cat])    # [{"category_id": "...", "name": "...", ...}]
-items_to_list([])            # []
-```
-
----
-
-## Error mapping
-
-`errors.to_tuple(exc)` maps any `TaxomeshError` to `(status_code, {"detail": "..."})`:
-
-| Exception | HTTP status | `detail` |
-|-----------|-------------|----------|
-| `TaxomeshDuplicateSlugError` | 409 Conflict | the exception message |
-| `TaxomeshExternalIdConflictError` | 409 Conflict | the exception message |
-| `TaxomeshNotFoundError` (+ subclasses) | 404 Not Found | the exception message |
-| `TaxomeshValidationError` (+ subclasses) | 422 Unprocessable Entity | the exception message |
-| `TaxomeshRepositoryError` | 500 Internal Server Error | generic — see below |
-| `TaxomeshError` (base fallback) | 500 Internal Server Error | generic — see below |
-
-### 500 bodies are generic
-
-Client errors (404/409/422) carry the exception's own message. It is written by taxomesh
-from your caller's own input, so it is safe to show and it is what lets the caller fix
-the request.
-
-Server errors do not. `TaxomeshRepositoryError` wraps the backend's message verbatim —
-ORM constraint, table and column names, or the absolute path of a JSON/YAML data file —
-so returning it would hand your storage layout to the client. Both 500 branches return a
-fixed string instead:
-
-```python notest
-from taxomesh.contrib.api.errors import GENERIC_SERVER_ERROR_DETAIL
-
-status, body = errors.to_tuple(exc)
-# (500, {"detail": "An internal error occurred."})
-assert body["detail"] == GENERIC_SERVER_ERROR_DETAIL
-```
-
-Compare against `GENERIC_SERVER_ERROR_DETAIL` rather than the literal, or better, branch
-on the status code — that was always the contract.
-
-The detail is not discarded, it is logged. Every 500 emits one `ERROR` record on the
-`taxomesh` logger with the original exception and its traceback attached, so attach a
-handler to see it:
-
-```python notest
-import logging
-
-logging.getLogger("taxomesh").addHandler(logging.StreamHandler())
-logging.getLogger("taxomesh").setLevel(logging.ERROR)
-```
-
-An application that configures no logging stays silent — taxomesh registers a
-`NullHandler` at import.
-
-### On Django, this logger is the only copy of the traceback
-
-Worth stating plainly, because the obvious alternative does not work. When a
-taxomesh error reaches a Django view and your middleware turns it into a 500
-response, Django's own `log_response` emits a record on the `django.request`
-logger for that response. If you route `django.request` to `mail_admins`, that
-email arrives with **`Traceback: None`** and no exception type: by the time
-`log_response` runs, `sys.exc_info()` has already been cleared, so there is no
-exception left for it to format.
-
-So after this release the failure mode is two half-records — an alert with no
-traceback on `django.request`, and the real traceback on the `taxomesh` logger
-going wherever you pointed it. If you pointed it nowhere, Python's
-`logging.lastResort` writes it to stderr unformatted, with no timestamp and no
-context.
-
-Route the `taxomesh` logger somewhere you actually read, and if that destination
-is email, rate-limit it — a database outage emits one record per request:
-
-```python notest
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "filters": {
-        "taxomesh_rate_limit": {
-            "()": "myapp.logging.RateLimitFilter",  # your own; one per interval
-            "rate_seconds": 3600,
-        },
-    },
-    "handlers": {
-        "taxomesh_mail": {
-            "class": "django.utils.log.AdminEmailHandler",
-            "level": "ERROR",
-            "filters": ["taxomesh_rate_limit"],
-            "include_html": False,
-        },
-    },
-    "loggers": {
-        "taxomesh": {"handlers": ["taxomesh_mail"], "level": "ERROR", "propagate": False},
-    },
-}
-```
-
-`AdminEmailHandler` formats `exc_info`, so this email names the actual fault —
-the one the `django.request` email cannot.
+An update request is partial: the handler forwards only the fields that the caller set, and the
+JSON Schema publishes no default for a stored field. The schema refuses a `null` on a field that
+cannot be `None`, and `"external_id": null` clears the external id.
 
 ## Available handlers
 
-| Group | Handlers |
+| Namespace | Handlers |
 |-------|---------|
-| Categories | `list_categories`, `get_category`, `get_category_by_slug`, `create_category`, `update_category`, `delete_category` |
-| Items | `list_items`, `get_item`, `get_item_by_slug`, `get_item_by_external_id`, `create_item`, `update_item`, `delete_item` |
-| Tags | `list_tags`, `create_tag`, `update_tag`, `delete_tag` |
-| Relationships | `add_category_parent`, `remove_category_parent`, `place_item_in_category`, `remove_item_from_category`, `assign_tag`, `remove_tag_from_item` |
-| Graph | `get_graph` |
-| Search | `search_items`, `search_categories` |
+| Categories | `categories_list`, `categories_roots`, `categories_get`, `categories_get_by_slug`, `categories_get_by_external_id`, `categories_create`, `categories_update`, `categories_delete`, `categories_add_parent`, `categories_remove_parent`, `categories_search` |
+| Items | `items_list`, `items_get`, `items_get_by_slug`, `items_get_by_external_id`, `items_create`, `items_update`, `items_delete`, `items_place_in`, `items_remove_from`, `items_tag`, `items_untag`, `items_search` |
+| Tags | `tags_list`, `tags_get`, `tags_create`, `tags_update`, `tags_delete` |
+| Graph | `graph`, which calls `service.graph()` |
 
-## Installation note
+No handler calls the batch lookups (`get_many`, `get_many_by_external_id`, `get_many_related`),
+`move`, `reorder` or the relation members (`relate`, `unrelate`, `list_relations`,
+`list_related`), and `graph` takes `enabled` only, not `root` or `include_items`.
+`serializers.graph_to_dict` starts at `graph.roots`, the top-level categories, so a category that no
+top-level category reaches is not in the document, though the graph holds it and `walk()` yields it.
+A category with several parents is written once for each path to it, and past
+`serializers.MAX_EMITTED_NODES` nodes, `graph_to_dict` raises `TaxomeshGraphTooLargeError`.
 
-`taxomesh` ships `pydantic>=2.0` as a direct runtime dependency.
-No FastAPI installation is required to use `taxomesh.contrib.api`.
+## FastAPI example
 
-```bash
-pip install taxomesh           # pydantic included; no fastapi required
-pip install "taxomesh[django]" # + Django ORM adapter
+```python notest
+from uuid import UUID
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+
+from taxomesh import TaxomeshService
+from taxomesh.contrib.api import errors, handlers, schemas, serializers
+from taxomesh.exceptions import TaxomeshError
+
+app = FastAPI()
+service = TaxomeshService()
+
+
+@app.exception_handler(TaxomeshError)
+def taxomesh_error(request, exc):
+    status, body = errors.to_tuple(exc)
+    return JSONResponse(body, status_code=status)
+
+
+@app.post("/categories", status_code=201)
+def create_category(body: schemas.CreateCategoryRequest):
+    return handlers.categories_create(service, body=body)
+
+
+@app.get("/categories/{category_id}")
+def get_category(category_id: UUID):
+    category = handlers.categories_get(service, category_id)
+    if category is None:
+        raise HTTPException(status_code=404, detail=f"Category not found: {category_id}")
+    return category
+
+
+@app.patch("/categories/{category_id}")
+def update_category(category_id: UUID, body: schemas.UpdateCategoryRequest):
+    return handlers.categories_update(service, category_id, body=body)
+
+
+@app.delete("/categories/{category_id}", status_code=204)
+def delete_category(category_id: UUID):
+    handlers.categories_delete(service, category_id)
+
+
+@app.get("/search/items")
+def search_items(q: str, limit: int = 20):
+    return serializers.items_to_list(handlers.items_search(service, params=schemas.SearchItemsRequest(query=q, limit=limit)))
+
+
+@app.get("/graph")
+def get_graph():
+    return serializers.graph_to_dict(handlers.graph(service))
 ```
+
+A Django view makes the same calls. It returns `JsonResponse(row.model_dump(mode="json"))` for a
+row, and the serializers' output for a listing, a search or the graph: `graph_to_dict` returns a
+dict, `items_to_list` and `categories_to_list` a list, which needs `JsonResponse(..., safe=False)`.
+A request schema refuses bad input with `pydantic.ValidationError`. Neither that error nor a
+`TypeError` is a `TaxomeshError`, so `errors.to_tuple` does not map them. FastAPI answers 422
+itself when the schema is a parameter of the endpoint. Where your code builds the schema, as
+`search_items` does, and in a Django view, catch the error.
+
+## Error mapping
+
+| Exception | HTTP status | `detail` |
+|-----------|-------------|----------|
+| `TaxomeshDuplicateSlugError`, `TaxomeshExternalIdConflictError`, `TaxomeshVersionConflictError` | 409 | the exception's message |
+| `TaxomeshNotFoundError` and its subclasses | 404 | the exception's message |
+| `TaxomeshValidationError` and its subclasses | 422 | the exception's message |
+| any other `TaxomeshError`, `TaxomeshRepositoryError` and `TaxomeshGraphTooLargeError` included | 500 | `errors.GENERIC_SERVER_ERROR_DETAIL` |
+
+A client error's message is written by taxomesh from the caller's own input, so it is safe to show.
+A server error's is not: `TaxomeshRepositoryError` carries the backend's message verbatim, table
+names and file paths included. So a 500's body is a fixed string. The original exception and its
+traceback go to one `ERROR` log record on the `taxomesh.contrib.api.errors` logger. The log record
+propagates to `taxomesh`, which has only a `NullHandler`: attach a handler, as
+[Errors](python-api.md#errors) shows. On Django, the `django.request` log record of the same 500
+carries no traceback, and [Logging](django-integration.md#logging) mails the taxomesh log record.
 
 ← [Back to README](../README.md)
