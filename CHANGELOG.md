@@ -9,7 +9,7 @@ The alpha series before 0.2.0, `0.1.0a1` to `0.1.0a50`, is described on the
 The full entries of that series are in
 [`CHANGELOG.md` at the tag `v0.1.0a50`](https://github.com/ediazpacheco/taxomesh/blob/v0.1.0a50/CHANGELOG.md).
 
-## [0.2.0] — Unreleased
+## [0.2.0] — 2026-10-12
 
 0.2.0 gives taxomesh a Python stdlib-style interface: every operation is a member of
 `svc.categories`, `svc.items` or `svc.tags`, or is `svc.graph()`; rows are frozen values; and the
