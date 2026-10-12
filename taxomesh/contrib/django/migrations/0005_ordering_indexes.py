@@ -2,7 +2,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    """Add ordering indexes to support ORDER BY clauses introduced in spec 034."""
+    """Add the indexes the listings' ORDER BY clauses use: names, and links by sort index."""
 
     dependencies = [
         ("taxomesh_contrib_django", "0004_external_id_indexes"),

@@ -10,10 +10,10 @@ class Migration(migrations.Migration):
       (the unique_together index leads with source_item_id and cannot serve this;
       the foreign-key index on target_item_id alone serves the filter but not the
       ORDER BY)
-    - Batch incoming queries (list_item_relation_links_for_targets) with optional
-      relation_type__in filter
+    - Batch incoming queries (list_item_relation_links_batch, direction="incoming") with
+      optional relation_type__in filter
     - Full ORDER BY (target_item_id, relation_type, sort_index, source_item_id) used
-      by the batch method — index scan replaces filesort
+      by that read — index scan replaces filesort
     """
 
     dependencies = [

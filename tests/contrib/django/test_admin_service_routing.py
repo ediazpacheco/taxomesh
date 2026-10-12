@@ -7,27 +7,41 @@ assert the correct service method was called with the right arguments.
 No test in this module calls ``super()`` methods or writes directly to the ORM.
 """
 
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 django = pytest.importorskip("django", reason="Django is not installed")
 
+from django.contrib.admin import ModelAdmin  # noqa: E402
 from django.contrib.admin.sites import AdminSite  # noqa: E402
 from django.http import HttpRequest  # noqa: E402
 
-from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: E402
+from taxomesh.contrib.django.admin import (  # noqa: E402
+    CategoryModelAdmin,
+    CategoryParentLinkForm,
+    ItemCategoryAssignmentMixin,
+)
 from taxomesh.contrib.django.models import (  # noqa: E402
     CategoryModel,
-    CategoryParentLinkModel,
     ItemModel,
-    ItemParentLinkModel,
-    ItemTagLinkModel,
     TagModel,
 )
 
 pytestmark = pytest.mark.django_db
+
+# Django cannot subscript ``ModelAdmin`` at run time; the type checker reads it with its model.
+if TYPE_CHECKING:
+    _ItemAdminBase = ModelAdmin[ItemModel]
+else:
+    _ItemAdminBase = ModelAdmin
+
+
+class _ConsumerItemAdmin(ItemCategoryAssignmentMixin, _ItemAdminBase):
+    """An item admin as a consumer writes it with the mixin."""
+
 
 _PATCH_TARGET = "taxomesh.contrib.django.admin.TaxomeshService"
 
@@ -42,8 +56,14 @@ def _make_mock_request() -> MagicMock:
     return MagicMock(spec=HttpRequest)
 
 
+# Any: a list of mocks is not the QuerySet the annotation names.
+def _rows(*rows: MagicMock) -> Any:
+    """Return mock rows where ``delete_queryset`` takes a queryset, of which it only iterates the rows."""
+    return list(rows)
+
+
 # ---------------------------------------------------------------------------
-# T010 — CategoryParentLinkInline tests
+# CategoryParentLinkInline tests
 # ---------------------------------------------------------------------------
 
 
@@ -59,78 +79,9 @@ class TestCategoryParentLinkInline:
         inline_classes = [type(inline) for inline in admin_obj.get_inline_instances(MagicMock())]
         assert CategoryParentLinkInline in inline_classes
 
-    def test_add_parent_link_via_inline_calls_service(self) -> None:
-        """Inline save_model calls service.add_category_parent with correct IDs."""
-        from taxomesh.contrib.django.admin import CategoryParentLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = CategoryParentLinkInline(CategoryModel, site)
-        request = _make_mock_request()
-
-        obj = MagicMock(spec=CategoryParentLinkModel)
-        obj.category_id = uuid4()
-        obj.parent_category_id = uuid4()
-        obj.sort_index = 0
-
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            inline.save_model(request, obj, MagicMock(), False)
-            mock_svc.add_category_parent.assert_called_once_with(
-                category_id=obj.category_id,
-                parent_id=obj.parent_category_id,
-                sort_index=obj.sort_index,
-            )
-
-    def test_cycle_detection_raises_validation_error(self) -> None:
-        """When service raises TaxomeshCyclicDependencyError in save_model, message_user is called."""
-        from taxomesh.contrib.django.admin import CategoryParentLinkInline  # noqa: PLC0415
-        from taxomesh.exceptions import TaxomeshCyclicDependencyError  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = CategoryParentLinkInline(CategoryModel, site)
-        request = _make_mock_request()
-
-        obj = MagicMock(spec=CategoryParentLinkModel)
-        obj.category_id = uuid4()
-        obj.parent_category_id = uuid4()
-        obj.sort_index = 0
-
-        # Verify: cycle detection calls message_user on the inline; no data written
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            mock_svc.add_category_parent.side_effect = TaxomeshCyclicDependencyError("cycle!")
-            with patch.object(inline, "message_user", create=True) as mock_msg:
-                inline.save_model(request, obj, MagicMock(), False)
-                mock_msg.assert_called_once()
-                # Assert service was NOT called a second time (no data written beyond the error)
-                mock_svc.add_category_parent.assert_called_once()
-
-    def test_delete_parent_link_via_inline_calls_service(self) -> None:
-        """Inline delete_model calls service.remove_category_parent."""
-        from taxomesh.contrib.django.admin import CategoryParentLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = CategoryParentLinkInline(CategoryModel, site)
-        request = _make_mock_request()
-
-        obj = MagicMock(spec=CategoryParentLinkModel)
-        obj.category_id = uuid4()
-        obj.parent_category_id = uuid4()
-
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            inline.delete_model(request, obj)
-            mock_svc.remove_category_parent.assert_called_once_with(
-                category_id=obj.category_id,
-                parent_id=obj.parent_category_id,
-            )
-
 
 # ---------------------------------------------------------------------------
-# T015 — CategoryModelAdmin service routing
+# CategoryModelAdmin service routing
 # ---------------------------------------------------------------------------
 
 
@@ -138,7 +89,7 @@ class TestCategoryModelAdminServiceRouting:
     """Tests for CategoryModelAdmin CRUD routing through TaxomeshService."""
 
     def test_save_model_create_calls_service(self) -> None:
-        """save_model with change=False calls service.create_category."""
+        """save_model with change=False calls service.categories.create."""
         site = AdminSite()
         admin_obj = CategoryModelAdmin(CategoryModel, site)
         request = _make_mock_request()
@@ -154,10 +105,10 @@ class TestCategoryModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), False)
-            mock_svc.create_category.assert_called_once()
+            mock_svc.categories.create.assert_called_once()
 
     def test_save_model_update_calls_service(self) -> None:
-        """save_model with change=True calls service.update_category."""
+        """save_model with change=True calls service.categories.update."""
         site = AdminSite()
         admin_obj = CategoryModelAdmin(CategoryModel, site)
         request = _make_mock_request()
@@ -173,10 +124,10 @@ class TestCategoryModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), True)
-            mock_svc.update_category.assert_called_once()
+            mock_svc.categories.update.assert_called_once()
 
     def test_delete_model_calls_service(self) -> None:
-        """delete_model calls service.delete_category(category_id)."""
+        """delete_model calls service.categories.delete(category_id)."""
         site = AdminSite()
         admin_obj = CategoryModelAdmin(CategoryModel, site)
         request = _make_mock_request()
@@ -188,10 +139,10 @@ class TestCategoryModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.delete_model(request, mock_obj)
-            mock_svc.delete_category.assert_called_once_with(mock_obj.category_id)
+            mock_svc.categories.delete.assert_called_once_with(mock_obj.category_id)
 
     def test_delete_queryset_calls_service_per_object(self) -> None:
-        """delete_queryset calls service.delete_category once per object."""
+        """delete_queryset calls service.categories.delete once per object."""
         site = AdminSite()
         admin_obj = CategoryModelAdmin(CategoryModel, site)
         request = _make_mock_request()
@@ -204,8 +155,8 @@ class TestCategoryModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            admin_obj.delete_queryset(request, [obj1, obj2])
-            assert mock_svc.delete_category.call_count == 2
+            admin_obj.delete_queryset(request, _rows(obj1, obj2))
+            assert mock_svc.categories.delete.call_count == 2
 
     def test_validation_error_in_save_model_surfaced_via_message(self) -> None:
         """TaxomeshValidationError in save_model surfaces via message_user(ERROR), no ORM write."""
@@ -224,7 +175,7 @@ class TestCategoryModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.create_category.side_effect = TaxomeshValidationError("bad name")
+            mock_svc.categories.create.side_effect = TaxomeshValidationError("bad name")
             with patch.object(admin_obj, "message_user") as mock_msg:
                 admin_obj.save_model(request, mock_obj, MagicMock(), False)
                 mock_msg.assert_called_once()
@@ -243,7 +194,7 @@ class TestCategoryModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.delete_category.side_effect = TaxomeshError("cannot delete")
+            mock_svc.categories.delete.side_effect = TaxomeshError("cannot delete")
             with patch.object(admin_obj, "message_user") as mock_msg:
                 admin_obj.delete_model(request, mock_obj)
                 mock_msg.assert_called_once()
@@ -265,7 +216,7 @@ class TestCategoryModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.create_category.return_value = mock_domain_cat
+            mock_svc.categories.create.return_value = mock_domain_cat
             admin_obj.save_model(request, obj, MagicMock(), False)
 
         assert obj.category_id == created_category_id
@@ -273,7 +224,7 @@ class TestCategoryModelAdminServiceRouting:
 
 
 # ---------------------------------------------------------------------------
-# T020 — ItemModelAdmin service routing
+# ItemModelAdmin service routing
 # ---------------------------------------------------------------------------
 
 
@@ -281,7 +232,7 @@ class TestItemModelAdminServiceRouting:
     """Tests for ItemModelAdmin CRUD routing through TaxomeshService."""
 
     def test_save_model_create_calls_service(self) -> None:
-        """save_model with change=False calls service.create_item."""
+        """save_model with change=False calls service.items.create."""
         from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -297,10 +248,10 @@ class TestItemModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), False)
-            mock_svc.create_item.assert_called_once()
+            mock_svc.items.create.assert_called_once()
 
     def test_save_model_update_calls_service(self) -> None:
-        """save_model with change=True calls service.update_item."""
+        """save_model with change=True calls service.items.update."""
         from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -315,10 +266,10 @@ class TestItemModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), True)
-            mock_svc.update_item.assert_called_once()
+            mock_svc.items.update.assert_called_once()
 
     def test_delete_model_calls_service(self) -> None:
-        """delete_model calls service.delete_item(item_id)."""
+        """delete_model calls service.items.delete(item_id)."""
         from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -332,10 +283,10 @@ class TestItemModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.delete_model(request, mock_obj)
-            mock_svc.delete_item.assert_called_once_with(mock_obj.item_id)
+            mock_svc.items.delete.assert_called_once_with(mock_obj.item_id)
 
     def test_delete_queryset_calls_service_per_object(self) -> None:
-        """delete_queryset calls service.delete_item once per object."""
+        """delete_queryset calls service.items.delete once per object."""
         from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -350,8 +301,8 @@ class TestItemModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            admin_obj.delete_queryset(request, [obj1, obj2])
-            assert mock_svc.delete_item.call_count == 2
+            admin_obj.delete_queryset(request, _rows(obj1, obj2))
+            assert mock_svc.items.delete.call_count == 2
 
     def test_error_in_save_model_surfaced_via_message(self) -> None:
         """TaxomeshError in save_model surfaces via message_user(ERROR)."""
@@ -369,7 +320,7 @@ class TestItemModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.create_item.side_effect = TaxomeshValidationError("bad external_id")
+            mock_svc.items.create.side_effect = TaxomeshValidationError("bad external_id")
             with patch.object(admin_obj, "message_user") as mock_msg:
                 admin_obj.save_model(request, mock_obj, MagicMock(), False)
                 mock_msg.assert_called_once()
@@ -392,7 +343,7 @@ class TestItemModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.create_item.return_value = mock_domain_item
+            mock_svc.items.create.return_value = mock_domain_item
             admin_obj.save_model(request, obj, MagicMock(), False)
 
         assert obj.item_id == created_item_id
@@ -400,7 +351,7 @@ class TestItemModelAdminServiceRouting:
 
 
 # ---------------------------------------------------------------------------
-# T021 — TagModelAdmin service routing
+# TagModelAdmin service routing
 # ---------------------------------------------------------------------------
 
 
@@ -408,7 +359,7 @@ class TestTagModelAdminServiceRouting:
     """Tests for TagModelAdmin CRUD routing through TaxomeshService."""
 
     def test_save_model_create_calls_service(self) -> None:
-        """save_model with change=False calls service.create_tag."""
+        """save_model with change=False calls service.tags.create."""
         from taxomesh.contrib.django.admin import TagModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -422,10 +373,10 @@ class TestTagModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), False)
-            mock_svc.create_tag.assert_called_once()
+            mock_svc.tags.create.assert_called_once()
 
     def test_save_model_update_calls_service(self) -> None:
-        """save_model with change=True calls service.update_tag."""
+        """save_model with change=True calls service.tags.update."""
         from taxomesh.contrib.django.admin import TagModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -440,10 +391,10 @@ class TestTagModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), True)
-            mock_svc.update_tag.assert_called_once()
+            mock_svc.tags.update.assert_called_once()
 
     def test_delete_model_calls_service(self) -> None:
-        """delete_model calls service.delete_tag(tag_id)."""
+        """delete_model calls service.tags.delete(tag_id)."""
         from taxomesh.contrib.django.admin import TagModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -457,10 +408,10 @@ class TestTagModelAdminServiceRouting:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.delete_model(request, mock_obj)
-            mock_svc.delete_tag.assert_called_once_with(mock_obj.tag_id)
+            mock_svc.tags.delete.assert_called_once_with(mock_obj.tag_id)
 
     def test_delete_queryset_calls_service_per_object(self) -> None:
-        """delete_queryset calls service.delete_tag once per object."""
+        """delete_queryset calls service.tags.delete once per object."""
         from taxomesh.contrib.django.admin import TagModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -475,8 +426,8 @@ class TestTagModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            admin_obj.delete_queryset(request, [obj1, obj2])
-            assert mock_svc.delete_tag.call_count == 2
+            admin_obj.delete_queryset(request, _rows(obj1, obj2))
+            assert mock_svc.tags.delete.call_count == 2
 
     def test_error_in_delete_model_surfaced_via_message(self) -> None:
         """TaxomeshError in delete_model surfaces via message_user(ERROR)."""
@@ -493,114 +444,34 @@ class TestTagModelAdminServiceRouting:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.delete_tag.side_effect = TaxomeshError("cannot delete")
+            mock_svc.tags.delete.side_effect = TaxomeshError("cannot delete")
             with patch.object(admin_obj, "message_user") as mock_msg:
                 admin_obj.delete_model(request, mock_obj)
                 mock_msg.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# T022 — ItemParentLinkInline tests
+# ItemParentLinkInline tests
 # ---------------------------------------------------------------------------
 
 
-class TestItemParentLinkInline:
-    """Tests for ItemParentLinkInline service routing."""
-
-    def test_save_model_calls_place_item_in_category(self) -> None:
-        """Inline save_model calls service.place_item_in_category with correct args."""
-        from taxomesh.contrib.django.admin import ItemParentLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = ItemParentLinkInline(ItemModel, site)
-        request = _make_mock_request()
-
-        obj = MagicMock(spec=ItemParentLinkModel)
-        obj.item_id = uuid4()
-        obj.category_id = uuid4()
-        obj.sort_index = 1
-
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            inline.save_model(request, obj, MagicMock(), False)
-            mock_svc.place_item_in_category.assert_called_once_with(obj.item_id, obj.category_id, obj.sort_index)
-
-    def test_delete_model_calls_remove_item_from_category(self) -> None:
-        """Inline delete_model calls service.remove_item_from_category."""
-        from taxomesh.contrib.django.admin import ItemParentLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = ItemParentLinkInline(ItemModel, site)
-        request = _make_mock_request()
-
-        obj = MagicMock(spec=ItemParentLinkModel)
-        obj.item_id = uuid4()
-        obj.category_id = uuid4()
-
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            inline.delete_model(request, obj)
-            mock_svc.remove_item_from_category.assert_called_once_with(obj.item_id, obj.category_id)
-
-
 # ---------------------------------------------------------------------------
-# T023 — ItemTagLinkInline tests
+# ItemTagLinkInline tests
 # ---------------------------------------------------------------------------
 
 
-class TestItemTagLinkInline:
-    """Tests for ItemTagLinkInline service routing."""
-
-    def test_save_model_calls_assign_tag(self) -> None:
-        """Inline save_model calls service.assign_tag with correct args."""
-        from taxomesh.contrib.django.admin import ItemTagLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = ItemTagLinkInline(ItemModel, site)
-        request = _make_mock_request()
-
-        obj = MagicMock(spec=ItemTagLinkModel)
-        obj.tag_id = uuid4()
-        obj.item_id = uuid4()
-
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            inline.save_model(request, obj, MagicMock(), False)
-            mock_svc.assign_tag.assert_called_once_with(obj.tag_id, obj.item_id)
-
-    def test_delete_model_calls_remove_tag(self) -> None:
-        """Inline delete_model calls service.remove_tag."""
-        from taxomesh.contrib.django.admin import ItemTagLinkInline  # noqa: PLC0415
-
-        site = AdminSite()
-        inline = ItemTagLinkInline(ItemModel, site)
-        request = _make_mock_request()
-
-        obj = MagicMock(spec=ItemTagLinkModel)
-        obj.tag_id = uuid4()
-        obj.item_id = uuid4()
-
-        with patch(_PATCH_TARGET) as MockSvc:
-            mock_svc = MagicMock()
-            MockSvc.return_value = mock_svc
-            inline.delete_model(request, obj)
-            mock_svc.remove_tag.assert_called_once_with(obj.tag_id, obj.item_id)
-
-
 # ---------------------------------------------------------------------------
-# T024 — CategoryParentLinkForm.clean() cycle and self-reference validation
+# CategoryParentLinkForm.clean() cycle and self-reference validation
 # ---------------------------------------------------------------------------
 
 _PATCH_REPO = "taxomesh.contrib.django.admin.DjangoRepository"
 
 
-def _make_form_cleaned_data(category_id: object, parent_category_id: object) -> tuple[object, dict[str, object]]:
+# Any: a form's cleaned_data, which django-stubs types as dict[str, Any].
+def _make_form_cleaned_data(
+    category_id: UUID, parent_category_id: UUID
+) -> tuple[CategoryParentLinkForm, dict[str, Any]]:
     """Return (form, cleaned_data) with mock CategoryModel FKs pre-set."""
-    from taxomesh.contrib.django.admin import CategoryParentLinkForm  # noqa: PLC0415
-
     form = CategoryParentLinkForm.__new__(CategoryParentLinkForm)
 
     cat = MagicMock(spec=CategoryModel)
@@ -670,7 +541,7 @@ class TestCategoryParentLinkForm:
 
 
 # ---------------------------------------------------------------------------
-# T025 — ItemCategoryAssignmentMixin tests
+# ItemCategoryAssignmentMixin tests
 # ---------------------------------------------------------------------------
 
 
@@ -678,7 +549,7 @@ class TestGetItemCategoryIdsHelper:
     """Tests for the _get_item_category_ids module-level helper."""
 
     def test_returns_empty_list_when_no_item_found(self) -> None:
-        """Returns [] when get_item_by_external_id returns None."""
+        """Returns [] when items.get_by_external_id returns None."""
         from taxomesh.contrib.django.admin import _get_item_category_ids  # noqa: PLC0415
 
         obj = MagicMock()
@@ -687,7 +558,7 @@ class TestGetItemCategoryIdsHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_item_by_external_id.return_value = None
+            mock_svc.items.get_by_external_id.return_value = None
 
             result = _get_item_category_ids(obj, "pk")
 
@@ -718,7 +589,7 @@ class TestGetItemCategoryIdsHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_item_by_external_id.return_value = mock_item
+            mock_svc.items.get_by_external_id.return_value = mock_item
             mock_svc.repository.list_item_parent_links.return_value = [link_own, link_other]
 
             result = _get_item_category_ids(obj, "pk")
@@ -741,12 +612,12 @@ class TestReconcileCategoriesHelper:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             _reconcile_categories(obj, form, "pk")
-            mock_svc.get_item_by_external_id.assert_not_called()
-            mock_svc.place_item_in_category.assert_not_called()
-            mock_svc.remove_item_from_category.assert_not_called()
+            mock_svc.items.get_by_external_id.assert_not_called()
+            mock_svc.items.place_in.assert_not_called()
+            mock_svc.items.remove_from.assert_not_called()
 
     def test_no_op_when_item_not_found(self) -> None:
-        """Returns without calling place/remove when get_item_by_external_id returns None."""
+        """Returns without calling place/remove when items.get_by_external_id returns None."""
         from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
 
         obj = MagicMock()
@@ -757,13 +628,13 @@ class TestReconcileCategoriesHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_item_by_external_id.return_value = None
+            mock_svc.items.get_by_external_id.return_value = None
             _reconcile_categories(obj, form, "pk")
-            mock_svc.place_item_in_category.assert_not_called()
-            mock_svc.remove_item_from_category.assert_not_called()
+            mock_svc.items.place_in.assert_not_called()
+            mock_svc.items.remove_from.assert_not_called()
 
     def test_places_newly_selected_categories(self) -> None:
-        """Calls place_item_in_category for categories in selected but not in current."""
+        """Calls items.place_in for categories in selected but not in current."""
         from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
 
         obj = MagicMock()
@@ -783,14 +654,14 @@ class TestReconcileCategoriesHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_item_by_external_id.return_value = mock_item
+            mock_svc.items.get_by_external_id.return_value = mock_item
             mock_svc.repository.list_item_parent_links.return_value = []
             _reconcile_categories(obj, form, "pk")
-            mock_svc.place_item_in_category.assert_called_once_with(item_id, cat_id_new)
-            mock_svc.remove_item_from_category.assert_not_called()
+            mock_svc.items.place_in.assert_called_once_with(item_id, cat_id_new)
+            mock_svc.items.remove_from.assert_not_called()
 
     def test_removes_deselected_categories(self) -> None:
-        """Calls remove_item_from_category for categories in current but not in selected."""
+        """Calls items.remove_from for categories in current but not in selected."""
         from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
 
         obj = MagicMock()
@@ -811,11 +682,11 @@ class TestReconcileCategoriesHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_item_by_external_id.return_value = mock_item
+            mock_svc.items.get_by_external_id.return_value = mock_item
             mock_svc.repository.list_item_parent_links.return_value = [link]
             _reconcile_categories(obj, form, "pk")
-            mock_svc.remove_item_from_category.assert_called_once_with(item_id, cat_id_old)
-            mock_svc.place_item_in_category.assert_not_called()
+            mock_svc.items.remove_from.assert_called_once_with(item_id, cat_id_old)
+            mock_svc.items.place_in.assert_not_called()
 
     def test_places_and_removes_correctly_for_mixed_diff(self) -> None:
         """Correctly adds new and removes old categories in a single call."""
@@ -851,29 +722,20 @@ class TestReconcileCategoriesHelper:
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_item_by_external_id.return_value = mock_item
+            mock_svc.items.get_by_external_id.return_value = mock_item
             mock_svc.repository.list_item_parent_links.return_value = [link_keep, link_remove]
             _reconcile_categories(obj, form, "pk")
-            mock_svc.place_item_in_category.assert_called_once_with(item_id, cat_id_add)
-            mock_svc.remove_item_from_category.assert_called_once_with(item_id, cat_id_remove)
+            mock_svc.items.place_in.assert_called_once_with(item_id, cat_id_add)
+            mock_svc.items.remove_from.assert_called_once_with(item_id, cat_id_remove)
 
 
 class TestItemCategoryAssignmentMixin:
     """Tests for ItemCategoryAssignmentMixin.get_form and save_model."""
 
-    def _make_concrete_admin(self) -> object:
+    def _make_concrete_admin(self) -> _ConsumerItemAdmin:
         """Return a ModelAdmin that uses ItemCategoryAssignmentMixin backed by ItemModel."""
-        from django.contrib.admin import ModelAdmin  # noqa: PLC0415
-
-        from taxomesh.contrib.django.admin import (  # noqa: PLC0415
-            ItemCategoryAssignmentMixin,
-        )
-
-        class ConcreteAdmin(ItemCategoryAssignmentMixin, ModelAdmin):  # type: ignore[type-arg]
-            pass
-
         site = AdminSite()
-        return ConcreteAdmin(ItemModel, site)
+        return _ConsumerItemAdmin(ItemModel, site)
 
     def test_get_form_injects_categories_field(self) -> None:
         """get_form returns a form class that contains a 'categories' field."""
@@ -882,7 +744,7 @@ class TestItemCategoryAssignmentMixin:
 
         with patch(_PATCH_REPO) as MockRepo:
             MockRepo.return_value.assignable_categories_qs.return_value = CategoryModel.objects.none()
-            form_class = admin_obj.get_form(request, obj=None)  # type: ignore[union-attr]
+            form_class = admin_obj.get_form(request, obj=None)
 
         assert "categories" in form_class.base_fields
 
@@ -893,7 +755,7 @@ class TestItemCategoryAssignmentMixin:
 
         with patch(_PATCH_REPO) as MockRepo:
             MockRepo.return_value.assignable_categories_qs.return_value = CategoryModel.objects.none()
-            form_class = admin_obj.get_form(request, obj=None)  # type: ignore[union-attr]
+            form_class = admin_obj.get_form(request, obj=None)
 
         assert form_class.base_fields["categories"].required is False
 
@@ -913,9 +775,9 @@ class TestItemCategoryAssignmentMixin:
         with patch(_PATCH_TARGET) as MockSvc, patch.object(_ModelAdmin, "save_model"):
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.get_item_by_external_id.return_value = None
-            admin_obj.save_model(request, obj, form, False)  # type: ignore[union-attr]
-            mock_svc.get_item_by_external_id.assert_called_once()
+            mock_svc.items.get_by_external_id.return_value = None
+            admin_obj.save_model(request, obj, form, False)
+            mock_svc.items.get_by_external_id.assert_called_once()
 
     def test_taxomesh_external_id_attr_default_is_pk(self) -> None:
         """Default taxomesh_external_id_attr is 'pk'."""
@@ -925,7 +787,7 @@ class TestItemCategoryAssignmentMixin:
 
 
 # ---------------------------------------------------------------------------
-# T038 — Slug field in admin list_display and save_model routing
+# Slug field in admin list_display and save_model routing
 # ---------------------------------------------------------------------------
 
 
@@ -939,7 +801,7 @@ class TestCategoryAdminSlug:
         assert "slug" in admin_obj.list_display
 
     def test_save_model_create_passes_slug_to_service(self) -> None:
-        """save_model create calls service.create_category with slug=obj.slug."""
+        """save_model create calls service.categories.create with slug=obj.slug."""
         site = AdminSite()
         admin_obj = CategoryModelAdmin(CategoryModel, site)
         request = _make_mock_request()
@@ -956,11 +818,11 @@ class TestCategoryAdminSlug:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), False)
-            _call_kwargs = mock_svc.create_category.call_args.kwargs
+            _call_kwargs = mock_svc.categories.create.call_args.kwargs
             assert _call_kwargs.get("slug") == "test-cat"
 
     def test_save_model_update_passes_slug_to_service(self) -> None:
-        """save_model update calls service.update_category with slug=obj.slug."""
+        """save_model update calls service.categories.update with slug=obj.slug."""
         from taxomesh.contrib.django.admin import CategoryModelAdmin as _CatAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -979,7 +841,7 @@ class TestCategoryAdminSlug:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), True)
-            _call_kwargs = mock_svc.update_category.call_args.kwargs
+            _call_kwargs = mock_svc.categories.update.call_args.kwargs
             assert _call_kwargs.get("slug") == "updated-cat"
 
 
@@ -995,7 +857,7 @@ class TestItemAdminSlug:
         assert "slug" in admin_obj.list_display
 
     def test_save_model_create_passes_slug_to_service(self) -> None:
-        """save_model create calls service.create_item with slug=obj.slug."""
+        """save_model create calls service.items.create with slug=obj.slug."""
         from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -1012,11 +874,11 @@ class TestItemAdminSlug:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), False)
-            _call_kwargs = mock_svc.create_item.call_args.kwargs
+            _call_kwargs = mock_svc.items.create.call_args.kwargs
             assert _call_kwargs.get("slug") == "my-item"
 
     def test_save_model_update_passes_slug_to_service(self) -> None:
-        """save_model update calls service.update_item with slug=obj.slug."""
+        """save_model update calls service.items.update with slug=obj.slug."""
         from taxomesh.contrib.django.admin import ItemModelAdmin  # noqa: PLC0415
 
         site = AdminSite()
@@ -1033,5 +895,5 @@ class TestItemAdminSlug:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
             admin_obj.save_model(request, mock_obj, MagicMock(), True)
-            _call_kwargs = mock_svc.update_item.call_args.kwargs
+            _call_kwargs = mock_svc.items.update.call_args.kwargs
             assert _call_kwargs.get("slug") == "updated-slug"

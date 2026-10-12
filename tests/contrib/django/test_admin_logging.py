@@ -6,6 +6,8 @@ import pytest
 
 django = pytest.importorskip("django", reason="Django is not installed")
 
+from pytest_django.fixtures import SettingsWrapper  # noqa: E402
+
 ADMIN_LOGGER = "taxomesh.contrib.django.admin"
 
 
@@ -23,20 +25,15 @@ def test_missing_setting_key_emits_warning(caplog: pytest.LogCaptureFixture) -> 
     assert "TAXOMESH_NONEXISTENT_SETTING_XYZ" in msg
 
 
-def test_url_resolution_failure_emits_warning(caplog: pytest.LogCaptureFixture) -> None:
+def test_url_resolution_failure_emits_warning(caplog: pytest.LogCaptureFixture, settings: SettingsWrapper) -> None:
     """URL resolution failure emits a WARNING containing external_id, setting name and exception."""
-    from django.conf import settings as django_settings  # noqa: PLC0415
-
     from taxomesh.contrib.django.admin import _resolve_linked_url  # noqa: PLC0415
 
     setting_name = "TAXOMESH_LINKED_MODEL"
     # Point to a non-existent model label so get_model() raises LookupError
-    django_settings.TAXOMESH_LINKED_MODEL = "nonexistent_app.NonexistentModel"
-    try:
-        with caplog.at_level(logging.WARNING, logger=ADMIN_LOGGER):
-            result = _resolve_linked_url("ext-456", setting_name)
-    finally:
-        del django_settings.TAXOMESH_LINKED_MODEL
+    settings.TAXOMESH_LINKED_MODEL = "nonexistent_app.NonexistentModel"
+    with caplog.at_level(logging.WARNING, logger=ADMIN_LOGGER):
+        result = _resolve_linked_url("ext-456", setting_name)
 
     assert result is None
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]

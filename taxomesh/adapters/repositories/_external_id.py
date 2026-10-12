@@ -1,8 +1,8 @@
-"""Shared external_id helpers for file-backed repositories.
+"""The external-id helpers of the file repositories.
 
-Used by JsonRepository and YAMLRepository to enforce the 1:1 constraint
-in-process and to perform bulk lookups. DjangoRepository uses a database
-UNIQUE constraint instead.
+``JsonRepository`` and ``YamlRepository`` use them to keep each external id unique within its kind
+and to look up many external ids in one pass. ``DjangoRepository`` has a database ``UNIQUE``
+constraint instead.
 """
 
 from collections.abc import Collection, Mapping
@@ -27,24 +27,25 @@ def check_external_id_unique(
     collection: Mapping[UUID, _HasExternalId],
     entity_name: str,
 ) -> None:
-    """Raise TaxomeshExternalIdConflictError if external_id is already held by a different record.
+    """Raise ``TaxomeshExternalIdConflictError`` if another row of the same kind has the external id.
 
     Args:
-        entity_id: Primary key of the entity being saved (excluded from the scan).
-        external_id: The external_id to check. No-op when None.
-        collection: All existing records keyed by their primary key UUID.
-        entity_name: Human-readable entity type ("item" or "category") used in the error message.
+        entity_id: The identifier of the row being saved. The check skips the stored row with
+            this identifier.
+        external_id: The external id to check. ``None`` checks nothing.
+        collection: Every stored row of the kind, by identifier.
+        entity_name: The kind, ``"item"`` or ``"category"``, for the error message.
 
     Raises:
-        TaxomeshExternalIdConflictError: If another record (different primary key) already
-            holds the same non-None external_id.
+        TaxomeshExternalIdConflictError: If ``external_id`` is not ``None`` and a row with another
+            identifier already has it.
     """
     if external_id is None:
         return
     for existing_id, existing in collection.items():
         if existing_id != entity_id and existing.external_id == external_id:
             raise TaxomeshExternalIdConflictError(
-                f"external_id {external_id!r} is already assigned to another {entity_name}."
+                f"External id {external_id!r} is already used by another {entity_name}"
             )
 
 
@@ -53,17 +54,17 @@ def bulk_lookup_by_external_id[T: _HasExternalIdAndEnabled](
     external_ids: Collection[str],
     enabled: bool | None,
 ) -> dict[str, T]:
-    """Return entities from *collection* whose external_id is in *external_ids*.
+    """Return the rows of ``collection`` whose external id is in ``external_ids``.
 
     Args:
-        collection: All existing records keyed by primary key UUID.
-        external_ids: A collection of external ID strings to look up.
-            Pre-normalised: no blank strings, no duplicates expected.
-        enabled: ``True`` returns only enabled entities; ``False`` only
-            disabled; ``None`` returns all matching entities.
+        collection: Every stored row of the kind, by identifier.
+        external_ids: The external ids to look up, in stored form, with no duplicates.
+        enabled: ``True`` returns only the enabled rows, ``False`` only the disabled ones, and
+            ``None`` every matching row.
 
     Returns:
-        A dict mapping each found external_id to its entity.
+        A dict from the external id of each matching row to the row. An external id that no row
+        has is left out.
     """
     target = set(external_ids)
     result: dict[str, T] = {}

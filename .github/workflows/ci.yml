@@ -6,17 +6,20 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   static:
     name: Static checks (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: uv sync --extra dev --extra django
+        run: uv sync --all-extras
       - name: Lint (ruff check)
         run: uv run ruff check .
       - name: Format check (ruff format)
@@ -32,12 +35,12 @@ jobs:
       matrix:
         python-version: ["3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --extra dev --extra django
+        run: uv sync --all-extras
       - name: Tests + coverage
         run: uv run pytest
 
@@ -49,8 +52,8 @@ jobs:
       matrix:
         python-version: ["3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheel
@@ -59,7 +62,7 @@ jobs:
         run: uv venv --python ${{ matrix.python-version }} /tmp/consumer
       - name: Install built wheel (core)
         run: uv pip install --python /tmp/consumer dist/*.whl
-      - name: Smoke-test core import, service op, and CLI
+      - name: Smoke-test the core import, one service call, and the CLI without its extra
         run: |
           cd "$(mktemp -d)"
           /tmp/consumer/bin/python - <<'PY'
@@ -68,15 +71,24 @@ jobs:
           import taxomesh
           from taxomesh import TaxomeshService
 
-          # PEP 561: without this marker a consumer's mypy ignores every annotation we ship.
+          # PEP 561: without this marker, a consumer's mypy ignores every annotation in the package.
           marker = Path(taxomesh.__file__).parent / "py.typed"
           assert marker.is_file(), "py.typed missing from the installed package"
 
-          svc = TaxomeshService()  # defaults to a YAML file backend in the cwd
-          category = svc.create_category(name="Smoke")
-          assert svc.get_category(category.category_id).name == "Smoke"
+          svc = TaxomeshService()  # no taxomesh.toml: a YAML file under data/ in the working directory
+          category = svc.categories.create(name="Smoke")
+          assert svc.categories[category.category_id].name == "Smoke"
           print("core wheel OK — taxomesh", version("taxomesh"))
           PY
+          # The core install carries no typer or rich, so the command names the extra it needs.
+          if /tmp/consumer/bin/taxomesh --help 2> cli-missing.txt; then
+            echo "taxomesh --help ran without the cli extra"
+            exit 1
+          fi
+          grep -F "taxomesh[cli]" cli-missing.txt
+      - name: Install and verify the CLI extra from the wheel
+        run: |
+          uv pip install --python /tmp/consumer "$(ls dist/*.whl)[cli]"
           /tmp/consumer/bin/taxomesh --help
       - name: Install and verify the Django extra from the wheel
         run: |
@@ -84,8 +96,8 @@ jobs:
           /tmp/consumer/bin/python - <<'PY'
           import django
 
-          # Matches the declared floor in pyproject.toml (django>=6.0). Pinning the exact
-          # minor here broke CI the day Django 6.1.1 shipped, on a release we support.
+          # The floor that pyproject.toml declares (django>=6.0). An exact minor version here
+          # would fail CI at each new minor release of Django that the floor allows.
           assert django.VERSION >= (6, 0), django.VERSION
           import taxomesh  # noqa: F401  core still imports alongside the Django extra
           print("django extra OK — Django", django.get_version())

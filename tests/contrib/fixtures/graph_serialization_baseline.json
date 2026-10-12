@@ -1,0 +1,140 @@
+{
+  "roots": [
+    {
+      "category": {
+        "category_id": "00000000-0000-0000-0000-000000000001",
+        "created_at": "1970-01-01T00:00:00Z",
+        "description": "",
+        "enabled": true,
+        "external_id": null,
+        "metadata": {},
+        "name": "Alpha",
+        "slug": "alpha",
+        "updated_at": "1970-01-01T00:00:00Z",
+        "version": 0
+      },
+      "children": [
+        {
+          "category": {
+            "category_id": "00000000-0000-0000-0000-000000000003",
+            "created_at": "1970-01-01T00:00:00Z",
+            "description": "",
+            "enabled": true,
+            "external_id": null,
+            "metadata": {},
+            "name": "Shared",
+            "slug": "shared",
+            "updated_at": "1970-01-01T00:00:00Z",
+            "version": 0
+          },
+          "children": [
+            {
+              "category": {
+                "category_id": "00000000-0000-0000-0000-000000000004",
+                "created_at": "1970-01-01T00:00:00Z",
+                "description": "",
+                "enabled": true,
+                "external_id": null,
+                "metadata": {},
+                "name": "Leaf",
+                "slug": "leaf",
+                "updated_at": "1970-01-01T00:00:00Z",
+                "version": 0
+              },
+              "children": [],
+              "items": []
+            }
+          ],
+          "items": [
+            {
+              "created_at": "1970-01-01T00:00:00Z",
+              "enabled": true,
+              "external_id": null,
+              "item_id": "00000000-0000-0000-0000-000000000011",
+              "metadata": {},
+              "name": "Second",
+              "slug": "second",
+              "updated_at": "1970-01-01T00:00:00Z",
+              "version": 0
+            }
+          ]
+        }
+      ],
+      "items": [
+        {
+          "created_at": "1970-01-01T00:00:00Z",
+          "enabled": true,
+          "external_id": null,
+          "item_id": "00000000-0000-0000-0000-000000000010",
+          "metadata": {},
+          "name": "First",
+          "slug": "first",
+          "updated_at": "1970-01-01T00:00:00Z",
+          "version": 0
+        }
+      ]
+    },
+    {
+      "category": {
+        "category_id": "00000000-0000-0000-0000-000000000002",
+        "created_at": "1970-01-01T00:00:00Z",
+        "description": "",
+        "enabled": true,
+        "external_id": null,
+        "metadata": {},
+        "name": "Beta",
+        "slug": "beta",
+        "updated_at": "1970-01-01T00:00:00Z",
+        "version": 0
+      },
+      "children": [
+        {
+          "category": {
+            "category_id": "00000000-0000-0000-0000-000000000003",
+            "created_at": "1970-01-01T00:00:00Z",
+            "description": "",
+            "enabled": true,
+            "external_id": null,
+            "metadata": {},
+            "name": "Shared",
+            "slug": "shared",
+            "updated_at": "1970-01-01T00:00:00Z",
+            "version": 0
+          },
+          "children": [
+            {
+              "category": {
+                "category_id": "00000000-0000-0000-0000-000000000004",
+                "created_at": "1970-01-01T00:00:00Z",
+                "description": "",
+                "enabled": true,
+                "external_id": null,
+                "metadata": {},
+                "name": "Leaf",
+                "slug": "leaf",
+                "updated_at": "1970-01-01T00:00:00Z",
+                "version": 0
+              },
+              "children": [],
+              "items": []
+            }
+          ],
+          "items": [
+            {
+              "created_at": "1970-01-01T00:00:00Z",
+              "enabled": true,
+              "external_id": null,
+              "item_id": "00000000-0000-0000-0000-000000000011",
+              "metadata": {},
+              "name": "Second",
+              "slug": "second",
+              "updated_at": "1970-01-01T00:00:00Z",
+              "version": 0
+            }
+          ]
+        }
+      ],
+      "items": []
+    }
+  ]
+}

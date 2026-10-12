@@ -1,4 +1,4 @@
-"""Tests for CLI Django error handling (T004)."""
+"""Tests for CLI Django error handling."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class TestDjangoRepoWrapsImproperlyConfigured:
         # Create a fake module whose attribute access raises ImproperlyConfigured
         class _FakeModule(types.ModuleType):
             def __getattr__(self, name: str) -> object:
-                from django.core.exceptions import (  # type: ignore[import-untyped]  # noqa: PLC0415
+                from django.core.exceptions import (  # noqa: PLC0415
                     ImproperlyConfigured,
                 )
 
@@ -57,11 +57,10 @@ class TestCliExitsWithFriendlyMessageWhenDjangoNotConfigured:
         toml_file.write_text('[repository]\ntype = "django"\n', encoding="utf-8")
 
         with patch(
-            "taxomesh.adapters.repositories.django_repository.DjangoRepository.__init__",
+            "taxomesh._config.DjangoRepository",
             side_effect=TaxomeshRepositoryError(
-                "Django settings are not configured. "
-                "Set the DJANGO_SETTINGS_MODULE environment variable before running "
-                "taxomesh with type = 'django'."
+                "Django settings are not configured: set the DJANGO_SETTINGS_MODULE environment variable "
+                "before running taxomesh with type = 'django'"
             ),
         ):
             result = runner.invoke(app, ["--config", str(toml_file), "category", "list"])
@@ -69,3 +68,5 @@ class TestCliExitsWithFriendlyMessageWhenDjangoNotConfigured:
         assert result.exit_code == 1
         output = (result.stdout or "") + (result.stderr if result.stderr else "")
         assert "DJANGO_SETTINGS_MODULE" in output
+        # The message alone, as every taxomesh error is printed: no prefix of the command's own.
+        assert output.splitlines()[0].startswith("Django settings are not configured")

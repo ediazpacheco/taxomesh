@@ -1,4 +1,4 @@
-"""Built-in graph sort callables and sort mode registry helpers."""
+"""The sort modes that the admin's graph page offers: their functions and their list."""
 
 from __future__ import annotations
 
@@ -14,12 +14,12 @@ DEFAULT_SORT_MODE: Final[str] = "sort_index_asc"
 
 
 def sort_index_asc(entries: list[GraphEntry]) -> list[GraphEntry]:
-    """Return entries sorted by sort_index ascending."""
+    """Return the entries in ascending order of ``sort_index``."""
     return sorted(entries, key=lambda e: e["sort_index"])
 
 
 def sort_index_desc(entries: list[GraphEntry]) -> list[GraphEntry]:
-    """Return entries sorted by sort_index descending."""
+    """Return the entries in descending order of ``sort_index``."""
     return sorted(entries, key=lambda e: e["sort_index"], reverse=True)
 
 
