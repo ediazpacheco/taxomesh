@@ -84,8 +84,9 @@ class TaxomeshService:
         """Build the service over one repository, and store the implicit root if it is absent.
 
         Building a service reads every stored category once, to find the implicit root by its
-        reserved name. When no root is stored, the service stores one. So build one service and
-        share it, rather than one for each request.
+        reserved name. When no root is stored, the service reads them again inside one
+        ``atomic()`` block and stores one there, so two services built at the same moment store
+        one root. So build one service and share it, rather than one for each request.
 
         Args:
             repository: The repository to use. When it is given, the service reads no config file
@@ -175,16 +176,31 @@ class TaxomeshService:
     def _ensure_root(self) -> UUID:
         """Make sure that the implicit root is stored, and return its identifier.
 
-        Reads every stored category to find the implicit root by its reserved name, and stores one
-        when none is found. ``__init__`` calls it once. It is the one read of the repository that
-        building a service makes, because the port has no lookup by name.
+        Reads every stored category to find the implicit root by its reserved name. ``__init__``
+        calls it once, and on a store that holds the root it is the one read of the repository that
+        building a service makes, because the port has no lookup by name. When the root is absent,
+        the method reads again inside one ``atomic()`` block and stores the root only if it is still
+        absent: a service that another thread or worker builds at the same moment waits for the
+        block, and then finds the root that this one stored. On Django, migration ``0012`` stores the
+        root, so the block opens only on a store that the migration has not reached.
         """
-        for cat in self._repo.list_categories(enabled=None):
-            if cat.name == ROOT_CATEGORY_NAME:
-                return cat.category_id
-        root = Category(category_id=uuid4(), name=ROOT_CATEGORY_NAME)
-        self._repo.save_category(root)
-        return root.category_id
+        root_id = self._find_root()
+        if root_id is not None:
+            return root_id
+        with self._repo.atomic():
+            root_id = self._find_root()
+            if root_id is not None:
+                return root_id
+            root = Category(category_id=uuid4(), name=ROOT_CATEGORY_NAME)
+            self._repo.save_category(root)
+            return root.category_id
+
+    def _find_root(self) -> UUID | None:
+        """Return the identifier of the stored implicit root, or ``None`` when none is stored."""
+        return next(
+            (cat.category_id for cat in self._repo.list_categories(enabled=None) if cat.name == ROOT_CATEGORY_NAME),
+            None,
+        )
 
     @memoize
     def _load_graph_rows(self, *, enabled: bool | None, include_items: bool) -> _GraphRows:

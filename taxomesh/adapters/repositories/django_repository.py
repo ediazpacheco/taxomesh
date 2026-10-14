@@ -13,8 +13,10 @@ Usage::
     svc = TaxomeshService(repository=DjangoRepository())
 """
 
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager
+from itertools import batched, product
+from operator import attrgetter
 from typing import TYPE_CHECKING, Final, Literal
 from uuid import UUID
 
@@ -198,30 +200,42 @@ class DjangoRepository:
         MySQL, and the write lock of the database on SQLite, where ``select_for_update()`` takes no
         lock. So a block that another thread or another worker opens on the same database waits at
         its first statement until this block ends, and then reads what this block stored. On SQLite,
-        a block that waits longer than the connection's timeout, 5 seconds by default, raises. The
-        service stores the implicit root when it is built, so the row is there.
+        a block that waits longer than the connection's timeout, 5 seconds by default, raises.
+        Migration ``0012`` stores the implicit root, and the service stores it when it is built if
+        it is absent, so the row is there.
 
         When a collection runs one member inside the block and the body raises, the whole
         transaction rolls back, and no write of the block is committed.
 
         Django's ``atomic()`` blocks nest. The outermost block opens the database transaction, and
-        the ``transaction.atomic`` block that each write of this repository opens, such as
-        ``save_category`` or ``save_item_parent_link``, is a **savepoint** inside it. An exception
-        that leaves the block rolls back every savepoint and the transaction, so the data is as it
-        was before the block. A block inside a transaction that the caller opened takes the lock
-        too, and holds it until the caller's transaction ends.
+        the ``transaction.atomic`` block that a write of this repository opens, such as
+        ``save_category``, is a **savepoint** inside it. An exception that leaves the block rolls
+        back every savepoint and the transaction, so the data is as it was before the block. A
+        block inside a transaction that the caller opened takes the lock too, and holds it until
+        the caller's transaction ends.
 
         Raises:
-            TaxomeshRepositoryError: If the database fails while the block takes the lock.
+            TaxomeshRepositoryError: If the database fails while the block opens its transaction,
+                takes the lock or commits. An exception that the body raises, a database error of
+                the caller's own query included, leaves the block as it is.
         """
-        from django.db import transaction  # noqa: PLC0415
+        from django.db import DatabaseError, transaction  # noqa: PLC0415
 
-        with transaction.atomic(using=self._using):
-            with _storage_errors():
+        body_raised = False
+        try:
+            with transaction.atomic(using=self._using):
                 self._CategoryModel.objects.using(self._using).filter(name=ROOT_CATEGORY_NAME).update(
                     name=ROOT_CATEGORY_NAME
                 )
-            yield
+                try:
+                    yield
+                except BaseException:
+                    body_raised = True
+                    raise
+        except DatabaseError as exc:
+            if body_raised:
+                raise
+            raise TaxomeshRepositoryError(str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -289,6 +303,41 @@ class DjangoRepository:
             sort_index=row.sort_index,
             metadata=row.metadata,
         )
+
+    def _batches(
+        self, lists: Mapping[str, Collection[object] | None], *, fixed: int = 0, uses: int = 1
+    ) -> list[dict[str, list[object]]]:
+        """Cut the values that one read filters by into the parts of its queries, so no query passes the limit.
+
+        A database accepts a limited number of parameters in one query: ``max_query_params`` on the
+        connection's features, by default 32,766 on SQLite, and ``None``, no limit, on PostgreSQL.
+        When the values fit, or the engine sets no limit, the read is one query, as it would be
+        without this method. Past the limit, each list is cut, in its order, into parts of at most
+        ``(limit - fixed) // (uses * number of lists)`` values, and one query reads each combination
+        of parts: a row that matches every list matches one combination.
+
+        Args:
+            lists: Each list of values, by the key the caller reads it under: a lookup such as
+                ``item_id__in`` goes to ``filter()`` as it is. ``None`` is no filter, and its key is
+                left out.
+            fixed: The number of the query's other parameters.
+            uses: How many times the query passes each list: 2 for ``source OR target``.
+
+        Returns:
+            The values of each query, by key: one mapping when one query reads them all, and none
+            when a list is empty past the limit, since no row matches an empty list.
+        """
+        from django.db import connections  # noqa: PLC0415
+
+        given = {key: list(values) for key, values in lists.items() if values is not None}
+        limit = connections[self._using].features.max_query_params
+        if not given or limit is None or fixed + uses * sum(len(values) for values in given.values()) <= limit:
+            return [given]
+        size = max(1, (limit - fixed) // (uses * len(given)))
+        return [
+            {key: list(part) for key, part in zip(given, parts, strict=True)}
+            for parts in product(*(batched(values, size, strict=False) for values in given.values()))
+        ]
 
     # ------------------------------------------------------------------
     # Config
@@ -560,9 +609,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        from django.db import transaction  # noqa: PLC0415
-
-        with _storage_errors(), transaction.atomic(using=self._using):
+        with _storage_errors():
             self._TagModel.objects.using(self._using).update_or_create(
                 tag_id=tag.tag_id,
                 defaults={
@@ -599,8 +646,8 @@ class DjangoRepository:
     def map_tags_by_id(self, tag_ids: Collection[UUID]) -> Mapping[UUID, Tag]:
         """Return the tags whose ``tag_id`` is in ``tag_ids``.
 
-        One query, ``tag_id__in``, does the lookup: the repository does not read every tag and
-        filter them in Python.
+        A ``tag_id__in`` query does the lookup, one for each part of ``tag_ids`` that the database
+        accepts in one query: the repository does not read every tag and filter them in Python.
 
         Args:
             tag_ids: The identifiers of the tags to look up.
@@ -613,8 +660,12 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            qs = self._TagModel.objects.using(self._using).filter(tag_id__in=tag_ids)
-            return {row.tag_id: self._row_to_tag(row) for row in qs}
+            qs = self._TagModel.objects.using(self._using)
+            return {
+                row.tag_id: self._row_to_tag(row)
+                for lookups in self._batches({"tag_id__in": tag_ids})
+                for row in qs.filter(**lookups)
+            }
 
     def delete_tag(self, tag_id: UUID) -> bool:
         """Delete a tag and every link that names it, in one transaction.
@@ -651,9 +702,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        from django.db import transaction  # noqa: PLC0415
-
-        with _storage_errors(), transaction.atomic(using=self._using):
+        with _storage_errors():
             self._ItemTagLinkModel.objects.using(self._using).get_or_create(
                 tag_id=tag_id,
                 item_id=item_id,
@@ -703,13 +752,12 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            qs = self._ItemTagLinkModel.objects.using(self._using)
-            if item_ids is not None:
-                qs = qs.filter(item_id__in=item_ids)
-            if tag_ids is not None:
-                qs = qs.filter(tag_id__in=tag_ids)
-            rows = qs.order_by("item_id", "tag_id").values_list("item_id", "tag_id")
-            return [ItemTagLink(item_id=item_id, tag_id=tag_id) for item_id, tag_id in rows]
+            qs = self._ItemTagLinkModel.objects.using(self._using).order_by("item_id", "tag_id")
+            batches = self._batches({"item_id__in": item_ids, "tag_id__in": tag_ids})
+            rows = [row for lookups in batches for row in qs.filter(**lookups).values_list("item_id", "tag_id")]
+        if len(batches) > 1:
+            rows.sort()
+        return [ItemTagLink(item_id=item_id, tag_id=tag_id) for item_id, tag_id in rows]
 
     # ------------------------------------------------------------------
     # Category parent links
@@ -727,9 +775,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        from django.db import transaction  # noqa: PLC0415
-
-        with _storage_errors(), transaction.atomic(using=self._using):
+        with _storage_errors():
             self._CategoryParentLinkModel.objects.using(self._using).update_or_create(
                 category_id=link.category_id,
                 parent_category_id=link.parent_category_id,
@@ -745,8 +791,8 @@ class DjangoRepository:
         """Return the stored parent links, filtered by either end when a filter is given.
 
         Both filters are part of the database query, as ``category_id__in`` and
-        ``parent_category_id__in``: the repository does not read every link and filter them in
-        Python.
+        ``parent_category_id__in``, in as many queries as the database's limit on parameters needs:
+        the repository does not read every link and filter them in Python.
 
         Args:
             category_ids: When given, only the links whose ``category_id`` is in it. An empty
@@ -763,16 +809,14 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
+        order = ("parent_category_id", "sort_index", "category_id")
         with _storage_errors():
-            qs = self._CategoryParentLinkModel.objects.using(self._using)
-            if category_ids is not None:
-                qs = qs.filter(category_id__in=category_ids)
-            if parent_category_ids is not None:
-                qs = qs.filter(parent_category_id__in=parent_category_ids)
-            return [
-                self._row_to_category_parent_link(row)
-                for row in qs.order_by("parent_category_id", "sort_index", "category_id")
-            ]
+            qs = self._CategoryParentLinkModel.objects.using(self._using).order_by(*order)
+            batches = self._batches({"category_id__in": category_ids, "parent_category_id__in": parent_category_ids})
+            links = [self._row_to_category_parent_link(row) for lookups in batches for row in qs.filter(**lookups)]
+        if len(batches) > 1:
+            links.sort(key=attrgetter(*order))
+        return links
 
     # ------------------------------------------------------------------
     # Item parent links
@@ -790,9 +834,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        from django.db import transaction  # noqa: PLC0415
-
-        with _storage_errors(), transaction.atomic(using=self._using):
+        with _storage_errors():
             self._ItemParentLinkModel.objects.using(self._using).update_or_create(
                 item_id=link.item_id,
                 category_id=link.category_id,
@@ -822,13 +864,14 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
+        order = ("category_id", "sort_index", "item_id")
         with _storage_errors():
-            qs = self._ItemParentLinkModel.objects.using(self._using)
-            if item_ids is not None:
-                qs = qs.filter(item_id__in=item_ids)
-            if category_ids is not None:
-                qs = qs.filter(category_id__in=category_ids)
-            return [self._row_to_item_parent_link(row) for row in qs.order_by("category_id", "sort_index", "item_id")]
+            qs = self._ItemParentLinkModel.objects.using(self._using).order_by(*order)
+            batches = self._batches({"item_id__in": item_ids, "category_id__in": category_ids})
+            links = [self._row_to_item_parent_link(row) for lookups in batches for row in qs.filter(**lookups)]
+        if len(batches) > 1:
+            links.sort(key=attrgetter(*order))
+        return links
 
     # ------------------------------------------------------------------
     # Link deletion
@@ -921,8 +964,8 @@ class DjangoRepository:
     ) -> Mapping[UUID, "Item"]:
         """Return the items whose ``item_id`` is in ``item_ids``.
 
-        One query, ``item_id__in``, does the lookup: the repository does not read every item and
-        filter them in Python.
+        An ``item_id__in`` query does the lookup, one for each part of ``item_ids`` that the database
+        accepts in one query: the repository does not read every item and filter them in Python.
 
         Args:
             item_ids: The identifiers of the items to look up, with no duplicates.
@@ -937,10 +980,14 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            qs = self._ItemModel.objects.using(self._using).filter(item_id__in=item_ids)
+            qs = self._ItemModel.objects.using(self._using)
             if enabled is not None:
                 qs = qs.filter(enabled=enabled)
-            return {row.item_id: self._row_to_item(row) for row in qs}
+            return {
+                row.item_id: self._row_to_item(row)
+                for lookups in self._batches({"item_id__in": item_ids}, fixed=int(enabled is not None))
+                for row in qs.filter(**lookups)
+            }
 
     def map_categories_by_id(
         self,
@@ -950,9 +997,9 @@ class DjangoRepository:
     ) -> Mapping[UUID, "Category"]:
         """Return the categories whose ``category_id`` is in ``category_ids``.
 
-        One query, ``category_id__in``, does the lookup: the repository does not read every
-        category and filter them in Python, and does not split the identifiers into several
-        queries.
+        A ``category_id__in`` query does the lookup, one for each part of ``category_ids`` that the
+        database accepts in one query: the repository does not read every category and filter them
+        in Python.
 
         Args:
             category_ids: The identifiers of the categories to look up, with no duplicates.
@@ -967,10 +1014,14 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            qs = self._CategoryModel.objects.using(self._using).filter(category_id__in=category_ids)
+            qs = self._CategoryModel.objects.using(self._using)
             if enabled is not None:
                 qs = qs.filter(enabled=enabled)
-            return {row.category_id: self._row_to_category(row) for row in qs}
+            return {
+                row.category_id: self._row_to_category(row)
+                for lookups in self._batches({"category_id__in": category_ids}, fixed=int(enabled is not None))
+                for row in qs.filter(**lookups)
+            }
 
     def map_items_by_external_id(
         self,
@@ -993,10 +1044,15 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            qs = self._ItemModel.objects.using(self._using).filter(external_id__in=external_ids)
+            qs = self._ItemModel.objects.using(self._using)
             if enabled is not None:
                 qs = qs.filter(enabled=enabled)
-            return {row.external_id: self._row_to_item(row) for row in qs if row.external_id is not None}
+            return {
+                row.external_id: self._row_to_item(row)
+                for lookups in self._batches({"external_id__in": external_ids}, fixed=int(enabled is not None))
+                for row in qs.filter(**lookups)
+                if row.external_id is not None
+            }
 
     def map_categories_by_external_id(
         self,
@@ -1022,10 +1078,15 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            qs = self._CategoryModel.objects.using(self._using).filter(external_id__in=external_ids)
+            qs = self._CategoryModel.objects.using(self._using)
             if enabled is not None:
                 qs = qs.filter(enabled=enabled)
-            return {row.external_id: self._row_to_category(row) for row in qs if row.external_id is not None}
+            return {
+                row.external_id: self._row_to_category(row)
+                for lookups in self._batches({"external_id__in": external_ids}, fixed=int(enabled is not None))
+                for row in qs.filter(**lookups)
+                if row.external_id is not None
+            }
 
     def find_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with this slug, or ``None``.
@@ -1069,9 +1130,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        from django.db import transaction  # noqa: PLC0415
-
-        with _storage_errors(), transaction.atomic(using=self._using):
+        with _storage_errors():
             self._ItemRelationLinkModel.objects.using(self._using).update_or_create(
                 source_item_id=link.source_item_id,
                 target_item_id=link.target_item_id,
@@ -1127,7 +1186,8 @@ class DjangoRepository:
         """Return the relations of many items in one ORM query, by direction.
 
         ``"both"`` is one ``source OR target`` query, ``Q(...) | Q(...)``, and not two, so every
-        direction reads the relations in one query.
+        direction reads the relations in one query, or in one for each part of ``item_ids`` that
+        the database accepts in one query. The relation types are not cut: a caller passes a few.
         """
         from django.db.models import Q  # noqa: PLC0415
 
@@ -1135,23 +1195,35 @@ class DjangoRepository:
         id_list = list(item_ids)
         if not id_list:
             return []
+        types = list(relation_types or ())
+        queries: dict[str, tuple[tuple[str, ...], Callable[[list[object]], Q]]] = {
+            "outgoing": (
+                ("source_item_id", "relation_type", "sort_index", "target_item_id"),
+                lambda ids: Q(source_item_id__in=ids),
+            ),
+            "incoming": (
+                ("target_item_id", "relation_type", "sort_index", "source_item_id"),
+                lambda ids: Q(target_item_id__in=ids),
+            ),
+            "both": (
+                ("sort_index", "source_item_id", "target_item_id"),
+                lambda ids: Q(source_item_id__in=ids) | Q(target_item_id__in=ids),
+            ),
+        }
+        order, matching = queries[direction]
         with _storage_errors():
-            qs = self._ItemRelationLinkModel.objects.using(self._using)
-            if direction == "outgoing":
-                qs = qs.filter(source_item_id__in=id_list).order_by(
-                    "source_item_id", "relation_type", "sort_index", "target_item_id"
-                )
-            elif direction == "incoming":
-                qs = qs.filter(target_item_id__in=id_list).order_by(
-                    "target_item_id", "relation_type", "sort_index", "source_item_id"
-                )
-            else:
-                qs = qs.filter(Q(source_item_id__in=id_list) | Q(target_item_id__in=id_list)).order_by(
-                    "sort_index", "source_item_id", "target_item_id"
-                )
-            if relation_types:
-                qs = qs.filter(relation_type__in=list(relation_types))
-            return [self._row_to_item_relation_link(row) for row in qs]
+            qs = self._ItemRelationLinkModel.objects.using(self._using).order_by(*order)
+            if types:
+                qs = qs.filter(relation_type__in=types)
+            batches = self._batches({"ids": id_list}, fixed=len(types), uses=2 if direction == "both" else 1)
+            links = [
+                self._row_to_item_relation_link(row) for part in batches for row in qs.filter(matching(part["ids"]))
+            ]
+        if len(batches) > 1:
+            # The parts are read apart, and "both" reads a relation between two parts in each of them.
+            unique = {(link.source_item_id, link.target_item_id, link.relation_type): link for link in links}
+            links = sorted(unique.values(), key=attrgetter(*order))
+        return links
 
     def delete_item_relation_link(
         self,

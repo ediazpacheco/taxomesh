@@ -84,12 +84,13 @@ class TestServiceReadMethodsCaching:
     def test_categories_list_cached(self) -> None:
         repo = _mock_repo()
         svc = _make_service(repo)
+        repo.list_categories.reset_mock()
         svc.categories.list()
         svc.categories.list()
-        # One read from _ensure_root at construction, one from the first list(); the second
-        # adds none. Asserted through list() rather than roots(), which reaches
+        # The construction's reads are left out: one from the first list(), and the second adds
+        # none. Asserted through list() rather than roots(), which reaches
         # list_category_parent_links and so could never move this count either way.
-        assert repo.list_categories.call_count == 2
+        assert repo.list_categories.call_count == 1
 
     def test_items_subscript_cached(self) -> None:
         repo = _mock_repo()
@@ -819,7 +820,9 @@ class TestConstruction:
 
     The root is found by its reserved name, and the port has no lookup by name, so the read is the
     price of the one top level. It is paid once per service, which is why a service is built once
-    and shared rather than built per request.
+    and shared rather than built per request. On a store that holds no root, the build reads once
+    more, inside the block in which it stores the root, so that two builds at the same moment store
+    one root.
     """
 
     def test_building_a_service_reads_the_categories_once(self, repository: TaxomeshRepositoryBase) -> None:
@@ -827,7 +830,7 @@ class TestConstruction:
 
         first = TaxomeshService(repository=counter)
 
-        assert counter.calls == ["list_categories"]
+        assert counter.calls == ["list_categories", "list_categories"]
         for name in ("Music", "Jazz"):
             first.categories.create(name)
         counter.reset()

@@ -16,6 +16,7 @@ from taxomesh.adapters.repositories._version import row_to_store
 from taxomesh.adapters.repositories.json_repository import JsonRepository
 from taxomesh.adapters.repositories.yaml_repository import YamlRepository
 from taxomesh.application.service import TaxomeshService
+from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 from taxomesh.domain.info import RepositoryInfo
 from taxomesh.domain.models import (
     Category,
@@ -465,7 +466,12 @@ def _build_repository(request: pytest.FixtureRequest, tmp_path: Path) -> Taxomes
     # django
     pytest.importorskip("django", reason="django not installed")
     from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+    from taxomesh.contrib.django.models import CategoryModel  # noqa: PLC0415
 
+    # Migration 0012 stores the implicit root in the test database, and a test that flushes the
+    # database removes it, so whether it is there depends on the tests that ran before. Deleted here,
+    # the store is empty, as a new file is.
+    CategoryModel.objects.filter(name=ROOT_CATEGORY_NAME).delete()
     return DjangoRepository()
 
 

@@ -28,6 +28,7 @@ BEFORE_EXTERNAL_IDS = "0007_taxomeshdebugproxy"
 EXTERNAL_IDS = "0008_unique_external_id"
 BEFORE_ROOT_INVARIANT = "0010_item_relation_link_target_type_idx"
 ROOT_INVARIANT = "0011_root_invariant"
+IMPLICIT_ROOT = "0012_implicit_root"
 
 
 def _configure(directory: Path) -> None:
@@ -81,6 +82,14 @@ def _links(alias: str) -> list[str]:
     return sorted(held)
 
 
+def _seed_without_a_root(alias: str) -> None:
+    """Two categories and no root: a database that no service has opened."""
+    categories = _models(alias, ROOT_INVARIANT).get_model(APP, "CategoryModel").objects.using(alias)
+    categories.filter(name=ROOT_CATEGORY_NAME).delete()
+    for name in ("Jazz", "Tango"):
+        categories.create(category_id=uuid4(), name=name)
+
+
 def _external_ids(alias: str) -> dict[str, list[str | None]]:
     """The external id each item and each category holds."""
     models = _models(alias, BEFORE_EXTERNAL_IDS)
@@ -119,6 +128,21 @@ def root_invariant() -> dict[str, object]:
     }
 
 
+def implicit_root() -> dict[str, object]:
+    """Both databases at the root invariant, with no root; ``other`` migrated to the implicit root."""
+    for alias in ALIASES:
+        _migrate(alias, ROOT_INVARIANT)
+        _seed_without_a_root(alias)
+    _migrate("other", IMPLICIT_ROOT)
+    return {
+        alias: {
+            "links": _links(alias),
+            "recorded": (APP, IMPLICIT_ROOT) in MigrationRecorder(connections[alias]).applied_migrations(),
+        }
+        for alias in ALIASES
+    }
+
+
 def empty_external_ids() -> dict[str, object]:
     """Both databases before the external-id migration, each with ``''``; ``other`` migrated."""
     for alias in ALIASES:
@@ -145,6 +169,7 @@ def only_other() -> dict[str, object]:
 
 CASES: dict[str, Callable[[], dict[str, object]]] = {
     "root-invariant": root_invariant,
+    "implicit-root": implicit_root,
     "empty-external-ids": empty_external_ids,
     "null-external-ids": null_external_ids,
     "only-other": only_other,

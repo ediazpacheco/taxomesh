@@ -9,36 +9,21 @@ runs in ``_concurrent_writes.py``, in a process of its own, on a SQLite file, si
 database cannot make a writer wait.
 """
 
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path
-
 import pytest
 
 from tests.service._concurrent_writes import SCHEDULES, Outcome, Schedule
 
 pytest.importorskip("django", reason="Django is not installed")
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from tests.contrib.django._process import run_helper  # noqa: E402
+
 HELPER = "tests.contrib.django._concurrent_writes"
 
 
 @pytest.fixture(scope="module")
 def outcomes(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Outcome]:
     """Race every schedule once, in one process of its own, and return each outcome by name."""
-    env = {key: value for key, value in os.environ.items() if key != "DJANGO_SETTINGS_MODULE"}
-    result = subprocess.run(
-        [sys.executable, "-m", HELPER, str(tmp_path_factory.mktemp("concurrent_writes"))],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    held: dict[str, Outcome] = json.loads(result.stdout)
+    held: dict[str, Outcome] = run_helper(HELPER, str(tmp_path_factory.mktemp("concurrent_writes")))
     return held
 
 

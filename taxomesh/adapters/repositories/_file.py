@@ -65,20 +65,23 @@ def _reading[S: FileRepositoryBase, **P, R](method: Callable[Concatenate[S, P], 
 def _writing[S: FileRepositoryBase, **P, R](method: Callable[Concatenate[S, P], R]) -> Callable[Concatenate[S, P], R]:
     """Run a write whole while holding the store's lock, so its checks and its write are one step.
 
-    The write is refused before it starts when another writer changed the file. When it fails,
-    memory gets back a copy of what it held before, which is what the file still holds, so a later
-    write does not write the failed change to disk.
+    The write is refused before it starts when another writer changed the file. When it fails before
+    its new file is in place, memory gets back a copy of what it held before, which is what the file
+    still holds, so a later write does not write the failed change to disk. Once the new file is in
+    place, which changes the stamp, memory keeps the write: the file holds it, and an interrupt that
+    lands before the method returns loses nothing.
     """
 
     @functools.wraps(method)
     def locked(self: S, /, *args: P.args, **kwargs: P.kwargs) -> R:
         with self._lock:
             self._require_unchanged()
-            before = self._contents()
+            before, stamp = self._contents(), self._stamp
             try:
                 return method(self, *args, **kwargs)
             except BaseException:
-                self._put(before)
+                if self._stamp == stamp:
+                    self._put(before)
                 raise
 
     return locked
