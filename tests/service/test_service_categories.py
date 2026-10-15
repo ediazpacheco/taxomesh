@@ -123,7 +123,7 @@ def test_categories_add_parent_missing_category_raises(service: TaxomeshService)
 
 
 # ---------------------------------------------------------------------------
-# T-06: categories.update, categories.list / categories.roots filtered
+# categories.update, and categories.list filtered by parent
 # ---------------------------------------------------------------------------
 
 

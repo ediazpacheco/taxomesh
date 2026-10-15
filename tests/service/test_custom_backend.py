@@ -38,7 +38,7 @@ def test_service_delegates_tag_writes_to_custom_backend() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T-06: custom backend delegation for tags.delete, items.place_in
+# tags.delete and items.place_in call the custom backend
 # ---------------------------------------------------------------------------
 
 

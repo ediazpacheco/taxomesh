@@ -84,7 +84,7 @@ def test_build_unrecognised_repo_type_exits(tmp_path: Path, monkeypatch: pytest.
 
 
 # ---------------------------------------------------------------------------
-# T-11: CLI command tests — category
+# The category commands
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +266,7 @@ def test_category_list_parent_not_found() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T-11: CLI command tests — item
+# The item commands
 # ---------------------------------------------------------------------------
 
 
@@ -528,7 +528,7 @@ def test_item_list_category_not_found() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T-11: CLI command tests — tag
+# The tag commands
 # ---------------------------------------------------------------------------
 
 
