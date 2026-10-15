@@ -145,7 +145,8 @@ A row carries data and no behaviour. What you do with it is a member of its coll
 
 A link joins two entities, and the member named beside it stores it. `sort_index` is a position,
 lower first: among a parent's children or a category's items, as `reorder` and `move` set it, and
-among an item's relations.
+among an item's relations. A new link given no position goes after the last, and so does a new
+category at the top level.
 
 | Link | Fields | Stored by |
 |---|---|---|
@@ -230,7 +231,7 @@ assert [n.category.name for n in svc.graph().roots] == ["Music"]
 | `list(*, parent=None, item=None, enabled=True)` | `Sequence[Category]` | Every category; or a parent's children; or an item's categories |
 | `roots(*, enabled=True)` | `Sequence[Category]` | The top level |
 | `search(query, *, limit=20, parent=None, enabled=True, fuzzy=True)` | `Sequence[Category]` | Ranked matches: see [Search](#search) |
-| `add_parent(category, parent, *, sort_index=0)` | `CategoryParentLink` | Adds a parent, keeping the others |
+| `add_parent(category, parent, *, sort_index=None)` | `CategoryParentLink` | Adds a parent, keeping the others |
 | `remove_parent(category, parent)` | `None` | Removes one parent |
 | `move(category, *, from_parent, to_parent, before=None)` | `None` | Moves it from one parent to another |
 | `reorder(parent, categories)` | `None` | Orders a parent's children, or the top level |
@@ -372,12 +373,12 @@ else:
 | `get_many_by_external_id(external_ids, /, *, enabled=None)` | `Mapping[str, Item]` | The same, keyed by stored external id |
 | `list(*, category=None, recursive=False, tag=None, enabled=True)` | `Sequence[Item]` | Every item; or a category's; or a tag's; or both |
 | `search(query, *, limit=20, category=None, recursive=False, enabled=True, fuzzy=True)` | `Sequence[Item]` | Ranked matches: see [Search](#search) |
-| `place_in(item, category, *, sort_index=0)` | `ItemParentLink` | Places it in a category, or sets the sort index of that placement |
+| `place_in(item, category, *, sort_index=None)` | `ItemParentLink` | Places it in a category, or sets the sort index of that placement |
 | `remove_from(item, category)` | `None` | Removes one placement |
 | `move(item, *, from_category, to_category, before=None)` | `ItemParentLink` | Moves one placement |
 | `reorder(category, items)` | `None` | Orders the items placed in a category |
 | `tag(item, tag)` · `untag(item, tag)` | `ItemTagLink` · `None` | Tags an item, or removes a tag from it |
-| `relate(source, target, relation_type, *, sort_index=0, metadata=None)` | `ItemRelationLink` | Stores a directed, typed relation, or updates that one |
+| `relate(source, target, relation_type, *, sort_index=None, metadata=None)` | `ItemRelationLink` | Stores a directed, typed relation, or updates that one |
 | `unrelate(source, target, relation_type)` | `None` | Removes one relation |
 | `list_relations(item, *, relation_types=None, direction="outgoing")` | `Sequence[ItemRelationLink]` | The item's relation links |
 | `list_related(item, *, relation_types=None, direction="outgoing", enabled=True)` | `Sequence[Item]` | The items at the other end, in link order |
@@ -410,10 +411,12 @@ assert [i.name for i in recursive] == ["Kind of Blue", "Giant Steps", "Birth of 
 
 ## Placement, order and tags
 
-An item may be placed in any number of categories. `place_in` again sets the sort index of that
-placement rather than adding a second one; `remove_from`, `untag` and `unrelate` are no-ops when
-there is nothing to remove, and `tag` when the tag is already there. `reorder` works as it does for
-categories, and refuses an item not placed in that category.
+An item may be placed in any number of categories. `place_in` again sets the sort index it is
+given, or keeps the stored one, and adds no second placement; `remove_from`, `untag` and `unrelate`
+are no-ops when there is nothing to remove, and `tag` when the tag is already there. `reorder` works
+as it does for categories, and refuses an item not placed in that category. With no position,
+`place_in` reads the category's placements to find the last, so its cost grows with the category:
+a load of many items into one category passes their positions.
 
 ```python
 svc.items.place_in(kob, blues, sort_index=9)

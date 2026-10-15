@@ -139,13 +139,14 @@ class TestRelationWriteInvalidation:
         svc.items.list_relations(src_id)
         assert repo.list_item_relation_links.call_count == 1
 
-        # Write — must invalidate
+        # Write — must invalidate. It reads the source's relations itself, to find its position.
         repo.list_item_relation_links.return_value = [link]
         svc.items.relate(src_id, tgt_id, "covers")
+        written = repo.list_item_relation_links.call_count
 
         # Next read must hit repo again (cache was cleared)
         result = svc.items.list_relations(src_id)
-        assert repo.list_item_relation_links.call_count == 2
+        assert repo.list_item_relation_links.call_count == written + 1
         assert len(result) == 1
 
     def test_unrelate_invalidates_cache(self) -> None:

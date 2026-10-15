@@ -27,7 +27,7 @@ svc.graph(*, root: CategoryRef | None = None, enabled: bool | None = True, inclu
 svc.info: property -> TaxomeshInfo
 svc.repository: property -> TaxomeshRepositoryBase
 ## svc.categories: CategoryCollection
-svc.categories.add_parent(category: CategoryRef, parent: CategoryRef, *, sort_index: int = 0) -> CategoryParentLink
+svc.categories.add_parent(category: CategoryRef, parent: CategoryRef, *, sort_index: int | None = None) -> CategoryParentLink
 svc.categories.create(name: str, *, description: str = '', slug: str = '', external_id: ExternalId = None, metadata: dict[str, Any] | None = None) -> Category
 svc.categories.delete(key: CategoryRef, /) -> None
 svc.categories.get(key: CategoryRef, default: D | None = None, /) -> Category | D | None
@@ -55,8 +55,8 @@ svc.items.list(*, category: CategoryRef | None = None, recursive: bool = False, 
 svc.items.list_related(item: ItemRef, *, relation_types: str | Collection[str] | None = None, direction: Direction | Literal['outgoing', 'incoming', 'both'] = 'outgoing', enabled: bool | None = True) -> Sequence[Item]
 svc.items.list_relations(item: ItemRef, *, relation_types: str | Collection[str] | None = None, direction: Direction | Literal['outgoing', 'incoming', 'both'] = 'outgoing') -> Sequence[ItemRelationLink]
 svc.items.move(item: ItemRef, *, from_category: CategoryRef, to_category: CategoryRef, before: ItemRef | None = None) -> ItemParentLink
-svc.items.place_in(item: ItemRef, category: CategoryRef, *, sort_index: int = 0) -> ItemParentLink
-svc.items.relate(source: ItemRef, target: ItemRef, relation_type: str, *, sort_index: int = 0, metadata: dict[str, Any] | None = None) -> ItemRelationLink
+svc.items.place_in(item: ItemRef, category: CategoryRef, *, sort_index: int | None = None) -> ItemParentLink
+svc.items.relate(source: ItemRef, target: ItemRef, relation_type: str, *, sort_index: int | None = None, metadata: dict[str, Any] | None = None) -> ItemRelationLink
 svc.items.remove_from(item: ItemRef, category: CategoryRef) -> None
 svc.items.reorder(category: CategoryRef, items: Sequence[ItemRef]) -> None
 svc.items.search(query: str, *, limit: int = 20, category: CategoryRef | None = None, recursive: bool = False, enabled: bool | None = True, fuzzy: bool = True) -> Sequence[Item]

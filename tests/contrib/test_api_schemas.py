@@ -269,11 +269,11 @@ class TestAddCategoryParentRequest:
     """Tests for AddCategoryParentRequest schema."""
 
     def test_valid(self) -> None:
-        """parent_id and sort_index are accepted."""
+        """parent_id is accepted, and with no sort_index the child goes last: the field is None."""
         uid = UUID("12345678-1234-5678-1234-567812345678")
         req = AddCategoryParentRequest(parent_id=uid)
         assert req.parent_id == uid
-        assert req.sort_index == 0
+        assert req.sort_index is None
 
     def test_custom_sort_index(self) -> None:
         """sort_index can be set explicitly."""
@@ -286,11 +286,11 @@ class TestPlaceItemRequest:
     """Tests for PlaceItemRequest schema."""
 
     def test_valid(self) -> None:
-        """category_id and sort_index are accepted."""
+        """category_id is accepted, and with no sort_index the item goes last: the field is None."""
         uid = UUID("12345678-1234-5678-1234-567812345678")
         req = PlaceItemRequest(category_id=uid)
         assert req.category_id == uid
-        assert req.sort_index == 0
+        assert req.sort_index is None
 
 
 class TestSearchItemsRequest:

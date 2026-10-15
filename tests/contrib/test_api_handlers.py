@@ -643,6 +643,17 @@ class TestCategoriesAddParent:
         assert result.parent_category_id == parent.category_id
         assert result.sort_index == 1
 
+    def test_a_request_with_no_position_adds_the_child_last(self, service: TaxomeshService) -> None:
+        parent = service.categories.create(name="Parent")
+        service.categories.add_parent(service.categories.create(name="First"), parent, sort_index=7)
+        child = service.categories.create(name="Next")
+
+        result = handlers.categories_add_parent(
+            service, child.category_id, body=AddCategoryParentRequest(parent_id=parent.category_id)
+        )
+
+        assert result.sort_index == 8
+
 
 class TestCategoriesRemoveParent:
     """Tests for handlers.categories_remove_parent."""
@@ -668,6 +679,16 @@ class TestItemsPlaceIn:
         assert isinstance(result, ItemParentLink)
         assert result.category_id == cat.category_id
         assert result.sort_index == 2
+
+    def test_a_request_with_no_position_places_the_item_last(self, service: TaxomeshService) -> None:
+        cat = service.categories.create(name="Shelf")
+        service.items.place_in(service.items.create(name="First"), cat, sort_index=4)
+
+        result = handlers.items_place_in(
+            service, service.items.create(name="Next").item_id, body=PlaceItemRequest(category_id=cat.category_id)
+        )
+
+        assert result.sort_index == 5
 
 
 class TestItemsRemoveFrom:

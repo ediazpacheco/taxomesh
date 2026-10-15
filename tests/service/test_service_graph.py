@@ -217,12 +217,18 @@ def test_graph_no_tag_data_in_graph() -> None:
 def test_graph_roots_break_a_sort_index_tie_by_category_id() -> None:
     """Roots sharing a sort index are ordered by category id.
 
-    ``create`` writes ``sort_index=0`` for every root link, so on an ordinary taxonomy *every*
-    root sort key ties. The iteration order of a set would resolve the tie by an arbitrary
-    function of the stored identifiers, agreeing with id order no more than chance.
+    ``create`` puts each new category after the last, but a top level that a migration or a file
+    load brought to the root invariant holds every added link at 0, so its sort keys tie. The
+    iteration order of a set would resolve the tie by an arbitrary function of the stored
+    identifiers, agreeing with id order no more than chance.
     """
-    svc = TaxomeshService(repository=InMemoryRepository())
+    repository = InMemoryRepository()
+    svc = TaxomeshService(repository=repository)
     created = [svc.categories.create(name) for name in ("Alpha", "Beta", "Gamma", "Delta")]
+    for category in created:
+        repository.save_category_parent_link(
+            CategoryParentLink(category_id=category.category_id, parent_category_id=svc._root_id, sort_index=0)
+        )
 
     graph = svc.graph()
 

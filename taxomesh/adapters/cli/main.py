@@ -234,7 +234,9 @@ def category_add_parent(
     ctx: typer.Context,
     category_id: UUID = typer.Argument(..., help="Category UUID"),
     parent_id: UUID = typer.Option(..., "--parent-id", help="Parent category UUID to add"),
-    sort_index: int = typer.Option(0, "--sort-index", help="Sort index within the parent"),
+    sort_index: int | None = typer.Option(
+        None, "--sort-index", help="Sort index within the parent; without it, after the last child"
+    ),
 ) -> None:
     """Add a parent to a category; a category with a parent leaves the top level."""
     svc = _service(ctx)
@@ -374,7 +376,9 @@ def item_place_in(
     ctx: typer.Context,
     item_id: UUID = typer.Argument(..., help="Item UUID"),
     category_id: UUID = typer.Option(..., "--category-id", help="Category UUID"),
-    sort_index: int = typer.Option(0, "--sort-index", help="Sort index within the category"),
+    sort_index: int | None = typer.Option(
+        None, "--sort-index", help="Sort index within the category; without it, after the last item"
+    ),
 ) -> None:
     """Place an item in a category (idempotent)."""
     svc = _service(ctx)
@@ -454,7 +458,11 @@ def item_relate(
     source_item_id: UUID = typer.Argument(..., help="Source item UUID"),
     target_item_id: UUID = typer.Argument(..., help="Target item UUID"),
     relation_type: str = typer.Argument(..., help="Relation type, such as related_to"),
-    sort_index: int = typer.Option(0, "--sort-index", help="Sort index among the relations of the source item"),
+    sort_index: int | None = typer.Option(
+        None,
+        "--sort-index",
+        help="Sort index among the relations of the source item; without it, after the last relation",
+    ),
     metadata: list[str] | None = typer.Option(None, "--metadata", help="KEY=VALUE pairs (repeatable)"),
 ) -> None:
     """Create or update a directed relation between two items."""

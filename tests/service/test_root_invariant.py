@@ -105,7 +105,7 @@ class TestAddParent:
 
 
 class TestRemoveParent:
-    def test_the_last_parent_gives_the_root_link_back_as_create_makes_it(self, service: TaxomeshService) -> None:
+    def test_the_last_parent_gives_the_root_link_back_after_the_last_category(self, service: TaxomeshService) -> None:
         music = service.categories.create("Music")
         jazz = service.categories.create("Jazz")
         service.categories.add_parent(jazz.category_id, music.category_id, sort_index=4)
@@ -114,9 +114,9 @@ class TestRemoveParent:
 
         link = _root_link(service, jazz)
         assert link is not None
-        assert link.sort_index == 0
+        assert link.sort_index == 1
         assert _parents(service, jazz) == {service._root_id}
-        assert set(_names(service.categories.roots())) == {"Music", "Jazz"}
+        assert _names(service.categories.roots()) == ["Music", "Jazz"]
         _assert_invariant(service)
 
     def test_a_parent_that_is_not_the_last_gives_nothing_back(self, service: TaxomeshService) -> None:
@@ -151,11 +151,9 @@ class TestDelete:
 
         service.categories.delete(music.category_id)
 
-        for child in (jazz, blues):
-            link = _root_link(service, child)
-            assert link is not None
-            assert link.sort_index == 0
-        assert set(_names(service.categories.roots())) == {"Jazz", "Blues"}
+        links = [_root_link(service, child) for child in (jazz, blues)]
+        assert [None if link is None else link.sort_index for link in links] == [0, 1]
+        assert _names(service.categories.roots()) == ["Jazz", "Blues"]
         _assert_invariant(service)
 
     def test_a_child_that_keeps_another_parent_gains_nothing(self, service: TaxomeshService) -> None:
@@ -408,9 +406,15 @@ class TestRootsAgree:
 
 
 class TestAddedReads:
-    """What the invariant costs: one read on ``remove_parent``, one or two on ``delete``, none on ``move``."""
+    """What the invariant costs: two reads on ``remove_parent``, up to three on ``delete``, none on ``move``.
 
-    def test_removing_the_last_parent_reads_the_remaining_links_once(self, counting_service: CountedService) -> None:
+    A category that goes back to the top level goes after its last category, which takes one read of
+    the top level's links.
+    """
+
+    def test_removing_the_last_parent_reads_the_remaining_links_and_the_top_level(
+        self, counting_service: CountedService
+    ) -> None:
         svc = counting_service.service
         music = svc.categories.create("Music")
         jazz = svc.categories.create("Jazz")
@@ -419,8 +423,8 @@ class TestAddedReads:
 
         svc.categories.remove_parent(jazz.category_id, music.category_id)
 
-        assert counting_service.reads.count_of("list_category_parent_links") == 1
-        assert counting_service.reads.total == 3
+        assert counting_service.reads.count_of("list_category_parent_links") == 2
+        assert counting_service.reads.total == 4
 
     def test_removing_an_absent_link_reads_no_links(self, counting_service: CountedService) -> None:
         svc = counting_service.service
@@ -444,7 +448,7 @@ class TestAddedReads:
 
         assert counting_service.reads.total == 1
 
-    def test_deleting_a_category_with_children_reads_their_links_once_more(
+    def test_deleting_a_category_with_children_reads_their_links_and_the_top_level(
         self, counting_service: CountedService
     ) -> None:
         svc = counting_service.service
@@ -456,7 +460,7 @@ class TestAddedReads:
 
         svc.categories.delete(music.category_id)
 
-        assert counting_service.reads.total == 2
+        assert counting_service.reads.total == 3
 
     def test_a_move_reads_its_rows_and_the_links_once(self, counting_service: CountedService) -> None:
         svc = counting_service.service

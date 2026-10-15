@@ -124,17 +124,17 @@ class UpdateTagRequest(BaseModel):
 
 
 class AddCategoryParentRequest(BaseModel):
-    """Request body for adding a parent to a category."""
+    """Request body for adding a parent to a category. With no ``sort_index``, the child goes last."""
 
     parent_id: UUID
-    sort_index: int = 0
+    sort_index: int | None = None
 
 
 class PlaceItemRequest(BaseModel):
-    """Request body for placing an item in a category."""
+    """Request body for placing an item in a category. With no ``sort_index``, the item goes last."""
 
     category_id: UUID
-    sort_index: int = 0
+    sort_index: int | None = None
 
 
 class SearchItemsRequest(BaseModel):

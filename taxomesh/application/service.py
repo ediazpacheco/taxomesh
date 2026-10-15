@@ -358,11 +358,11 @@ class TaxomeshService:
             children=children_by_id,
             parents=parents_by_id,
             items=sorted_items_by_cat,
-            # The identifier breaks a tie. On ordinary data every top-level category is a tie:
-            # ``create`` writes ``sort_index=0`` on each link to the implicit root. With the
-            # identifier, the order does not depend on the order in which the repository lists the
-            # links: it is the port's ``(parent, sort_index, category_id)`` order, which
-            # ``categories.roots()`` also gives.
+            # The identifier breaks a tie: ``create`` puts each new category after the last, but a
+            # position given by hand, or a top level that a migration or a file load normalised at
+            # 0, can tie. With the identifier, the order does not depend on the order in which the
+            # repository lists the links: it is the port's ``(parent, sort_index, category_id)``
+            # order, which ``categories.roots()`` also gives.
             roots=sorted(root_sort, key=lambda cid: (root_sort[cid], str(cid))),
         )
 

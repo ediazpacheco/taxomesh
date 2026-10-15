@@ -346,7 +346,9 @@ absence of logic in a handler, or the imports of `contrib/api`.
 - **Cycles are refused in the domain.** `domain/dag.py` checks every new parent link before it is
   written, and no adapter repeats the check.
 - **A parent link carries its own order.** A parent link is `(category_id, parent_category_id,
-  sort_index)`, so a category under several parents has a position under each one.
+  sort_index)`, so a category under several parents has a position under each one. A new link
+  given no position goes after the last link of its parent, as `list.append` does, so a store lists
+  links in the order they were made. `tests/service/test_default_order.py` asserts it.
 - **No process in the product.** `taxomesh/` and `tests/` contain no task, specification,
   requirement or review-finding identifier, no account of how the code changed, and no citation of
   a planning document. The code states what is true now, and `CHANGELOG.md` holds the history.

@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from numbers import Integral
-from typing import TYPE_CHECKING, ClassVar, overload
+from typing import TYPE_CHECKING, ClassVar, Protocol, overload
 from uuid import UUID
 
 from pydantic import BaseModel, ValidationError
@@ -250,6 +250,36 @@ def _given(fields: Mapping[str, object], /) -> dict[str, object]:
     if refused:
         raise TypeError("; ".join(f"{name} cannot be None: UNSET keeps the stored value" for name in refused))
     return {name: value for name, value in fields.items() if value is not UNSET}
+
+
+class _Positioned(Protocol):
+    """A link that holds a position among its siblings."""
+
+    @property
+    def sort_index(self) -> int: ...
+
+
+def _position_among[L: _Positioned](siblings: Iterable[L], /, *, stored: Callable[[L], bool] | None = None) -> int:
+    """Return where a link goes among its siblings when no position is given.
+
+    A stored link, the sibling that ``stored`` picks, keeps its position. A new link goes after the
+    last: the largest position plus one, or 0 when there is no sibling. The largest, and not the
+    number of siblings: with a gap, or a position given by hand, the number can fall before the last.
+
+    Args:
+        siblings: The stored links of the same parent, category or source item, read inside the
+            block of the write that adds the link.
+        stored: Picks the link itself among the siblings, when it may be stored already.
+
+    Returns:
+        The position of the stored link, or the position after the last sibling.
+    """
+    last = -1
+    for sibling in siblings:
+        if stored is not None and stored(sibling):
+            return sibling.sort_index
+        last = max(last, sibling.sort_index)
+    return last + 1
 
 
 def _changed[R: BaseModel](row: R, changes: Mapping[str, object], /) -> R:

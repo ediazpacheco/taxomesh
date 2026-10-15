@@ -14,6 +14,7 @@ from taxomesh.application.collections.base import (
     _changed,
     _given,
     _normalise_external_ids,
+    _position_among,
     _require_collection,
     _require_enabled,
     _require_limit,
@@ -697,16 +698,21 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             stored = self._service.repository.save_item(row, expected_version=expected_version)
         return stored
 
-    def place_in(self, item: ItemRef, category: CategoryRef, *, sort_index: int = 0) -> ItemParentLink:
+    def place_in(self, item: ItemRef, category: CategoryRef, *, sort_index: int | None = None) -> ItemParentLink:
         """Place an item in a category. An item can be placed in several categories.
 
-        Idempotent: to place an item in a category that it is already placed in updates its sort
-        index.
+        Idempotent: to place an item in a category that it is already placed in stores no second
+        placement, and a given ``sort_index`` updates the position of that one.
+
+        With no ``sort_index``, the method reads the category's placements to find the last one,
+        so its cost grows with the number of items in the category: a load of many items into one
+        category passes their positions.
 
         Args:
             item: The item to place, or its identifier.
             category: The category to place it in, or its identifier.
-            sort_index: The position among the items of that category.
+            sort_index: The position among the items of that category. ``None`` (the default)
+                puts a new placement after the last item, and leaves a stored one where it is.
 
         Returns:
             The stored ``ItemParentLink``.
@@ -723,10 +729,18 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         item_id = item_id_of(item)
         category_id = category_id_of(category)
         with _as_validation_error():
-            link = ItemParentLink(item_id=item_id, category_id=category_id, sort_index=sort_index)
+            link = ItemParentLink(
+                item_id=item_id, category_id=category_id, sort_index=0 if sort_index is None else sort_index
+            )
         with self._atomic():
             self._require_stored(item_id)
             self._service.categories._require_stored(category_id)
+            if sort_index is None:
+                position = _position_among(
+                    self._service.repository.list_item_parent_links(category_ids=[category_id]),
+                    stored=lambda lnk: lnk.item_id == item_id,
+                )
+                link = link.model_copy(update={"sort_index": position})
             self._service.repository.save_item_parent_link(link)
         return link
 
@@ -903,14 +917,14 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         target: ItemRef,
         relation_type: str,
         *,
-        sort_index: int = 0,
+        sort_index: int | None = None,
         # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
         metadata: dict[str, Any] | None = None,
     ) -> ItemRelationLink:
         """Relate one item to another, in one direction.
 
-        To relate the same source, target and relation type again updates the sort index and the
-        metadata of that relation, and does not add a second one.
+        To relate the same source, target and relation type again updates the metadata of that
+        relation, and a given ``sort_index`` its position; it does not add a second one.
 
         Args:
             source: The item that the relation goes from, or its identifier.
@@ -918,7 +932,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             relation_type: The caller's own name for the kind of relation, such as
                 ``"related_to"``. taxomesh stores it stripped and lowercased, and gives it no
                 meaning.
-            sort_index: The position among the relations of that source.
+            sort_index: The position among the relations of that source, of every type. ``None``
+                (the default) puts a new relation after the last one, and leaves a stored one where
+                it is.
             metadata: Optional data of your own, stored with the relation.
 
         Returns:
@@ -942,12 +958,19 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
                 source_item_id=source_item_id,
                 target_item_id=target_item_id,
                 relation_type=relation_type,
-                sort_index=sort_index,
+                sort_index=0 if sort_index is None else sort_index,
                 metadata=metadata if metadata is not None else {},
             )
         with self._atomic():
             self._require_stored(source_item_id)
             self._require_stored(target_item_id)
+            if sort_index is None:
+                kind = link.relation_type
+                position = _position_among(
+                    self._service.repository.list_item_relation_links(source_item_id),
+                    stored=lambda lnk: lnk.target_item_id == target_item_id and lnk.relation_type == kind,
+                )
+                link = link.model_copy(update={"sort_index": position})
             self._service.repository.save_item_relation_link(link)
         return link
 
