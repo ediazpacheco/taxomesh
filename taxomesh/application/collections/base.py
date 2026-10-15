@@ -57,7 +57,7 @@ def _as_validation_error() -> Iterator[None]:
     public member lets pydantic's own error out. An argument of the wrong type, such as
     a name that is not text, raises ``TypeError``, as ``int(None)`` does; a value of the right type
     that the model refuses, such as a name over its maximum length or a sort index reading
-    ``"sarasa"``, raises ``TaxomeshValidationError``, as ``int("sarasa")`` raises ``ValueError``.
+    ``"ten"``, raises ``TaxomeshValidationError``, as ``int("ten")`` raises ``ValueError``.
     pydantic's lax coercion decides what the right type is, so ``"5"`` is a sort index of 5. A
     check the model makes itself with one of this library's validation errors, as a relation's
     checks do, reaches the caller as that error: pydantic reports it as its own, since every

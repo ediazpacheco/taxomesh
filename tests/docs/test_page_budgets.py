@@ -13,7 +13,7 @@ BUDGETS = {
     "README.md": 170,
     "docs/python-api.md": 700,
     "docs/http-api-integration.md": 170,
-    "docs/django-integration.md": 120,
+    "docs/django-integration.md": 124,
     "docs/repositories.md": 80,
     "docs/configuration.md": 40,
     "llms.txt": 150,

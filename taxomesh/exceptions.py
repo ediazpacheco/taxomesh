@@ -98,6 +98,7 @@ class TaxomeshVersionConflictError(TaxomeshError):
     """Raised when an update expects the stored row at a version that it is no longer at.
 
     It is a ``TaxomeshError`` and not a validation error: the request was valid, and the stored row
-    changed, or was deleted, after the caller read it. To continue, read the row again and update
-    it with its new version.
+    changed after the caller read it. To continue, read the row again and update it with its new
+    version. Through the service, a row deleted in between raises its not-found error instead;
+    through the port, a save that expects a version of a row that is not stored raises this one.
     """

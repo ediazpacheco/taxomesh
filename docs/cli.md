@@ -11,11 +11,15 @@ pip install "taxomesh[cli]"
 
 Without the extra, `taxomesh` exits with status 1 and a message naming it.
 
+To try the commands on sample data, copy [`examples/taxomesh_example.yaml`](../examples/taxomesh_example.yaml),
+a small taxonomy, and name the copy as the `path` of a `taxomesh.toml`.
+
 The command builds its service as `TaxomeshService()` does: from the `taxomesh.toml` in the
 working directory, or the one `--config` names, and otherwise from a YAML file under `data/` (see
 [Configuration](configuration.md)). With `type = "django"`, the command sets Django up itself, from
 the settings module that `DJANGO_SETTINGS_MODULE` names. Without that variable, or with a module
-that cannot be imported, it says what to fix and exits with status 1.
+that cannot be imported, it says what to fix and exits with status 1. A console script does not put
+the working directory on the import path, so a settings module in it needs `PYTHONPATH=.`.
 
 Each command is the name of the Python member it calls, with `_` written `-`, under its entity's
 group: `taxomesh item place-in` calls `svc.items.place_in`. A command calls one member, and an

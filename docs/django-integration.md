@@ -23,13 +23,14 @@ python manage.py migrate
 ## The admin
 
 After migrating, the Django admin manages categories, items and tags (`CategoryModel`, `ItemModel`
-and `TagModel`), with autocomplete foreign keys and a JSON editor for `metadata`. The editor loads
-Ace from the jsDelivr CDN: a Content Security Policy must allow that host, and an admin without
-access to it shows no editor. The admin also adds:
+and `TagModel`), with autocomplete foreign keys and a JSON editor for `metadata`, which loads Ace
+from the jsDelivr CDN: without access to it, as under a strict Content Security Policy, the admin
+shows no editor. The admin also adds:
 
-- **A graph view** of the whole taxonomy, reached from the admin index: drag and drop reorders the
-  categories and items under a parent and moves them to another, and children load as a branch is
-  opened. To add a sort mode, subclass `CategoryModelAdmin` and extend its `sort_modes`, a list of
+- **A graph view** of the whole taxonomy, reached from the admin index, open to every staff user:
+  drag and drop reorders the categories and items under a parent and moves them to another, for a
+  user with the permission to change that kind, and children load as a branch is opened. To add a
+  sort mode, subclass `CategoryModelAdmin` and extend its `sort_modes`, a list of
   `(key, label, function)`. The function takes a list of `GraphEntry`
   (`taxomesh.contrib.django.graph_types`) and returns it in the order to show. taxomesh registers
   `CategoryModelAdmin`, which serves the graph view, so call `admin.site.unregister(CategoryModel)`,
@@ -95,17 +96,20 @@ taxomesh does not make your model's `save` and its own write atomic together: yo
 decides that. Each taxomesh operation that writes runs in one transaction on the repository's
 database alias, and the transaction first locks the implicit root's row, so two such operations in
 two workers run one after the other. Inside a transaction that you open, the lock is held until
-yours ends, and taxomesh writes in other workers wait.
+yours ends, and taxomesh writes in other workers wait. On SQLite, give the database `"OPTIONS":
+{"transaction_mode": "IMMEDIATE"}`: in Django's default mode, a taxomesh write inside your
+transaction that has read already fails at once while another worker writes.
 
 `get_taxomesh_service_with_django(using="default")` builds a `TaxomeshService` over
 `DjangoRepository` on that alias. Building a service reads every category once, to find the implicit
-root, so the bridge builds one service for each process, at its first call, and shares it.
+root, so the bridge builds one service for each process, at its first call, and shares it. Its
+cache serves no read made inside a transaction, yours or its own, so with `ATOMIC_REQUESTS` every
+read of a view reaches the database.
 
 ## Logging
 
-The [HTTP error mapping](http-api-integration.md#error-mapping) logs each 500 as an `ERROR` log
-record with its traceback. This setting mails those log records to the `ADMINS`, traceback
-included. An outage emits one log record for each request, so limit the rate of the emails.
+The [HTTP error mapping](http-api-integration.md#error-mapping) logs each 500 as an `ERROR` record
+with its traceback, which this setting mails to the `ADMINS`. An outage emits one for each request.
 
 ```python notest
 # settings.py

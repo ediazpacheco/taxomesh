@@ -30,8 +30,8 @@ test suite covers the command line and the Django backend, so the full suite nee
 ## Quality gates
 
 All four must pass before a change is merged to `main`. CI runs ruff and mypy on Python 3.13, and
-the tests on Python 3.13 and 3.14 with the Django version that `uv.lock` pins (6.0). CI also builds
-the wheel and checks that it installs and imports.
+the tests on Python 3.13 and 3.14 with the Django version that `uv.lock` pins (6.0), and on Python
+3.13 with the latest Django 6.x. CI also builds the wheel and checks that it installs and imports.
 
 ```bash
 uv run ruff check .

@@ -16,8 +16,9 @@ path = "data/taxomesh.yaml"  # by default data/taxomesh.yaml, or data/taxomesh.j
 ```
 
 A relative `path` is resolved from the working directory, not from the directory of
-`taxomesh.toml`. Each section is a table and each value a string; anything else raises
-`TaxomeshConfigError`.
+`taxomesh.toml`. Each section is a table and each value a string, `type` included; anything else
+raises `TaxomeshConfigError`. A key that taxomesh does not read, such as a misspelt `pth`, is
+ignored, so that one falls back to the default path.
 
 The Django backend names a database alias instead of a path, `"default"` unless given:
 
@@ -31,6 +32,7 @@ The `taxomesh` command sets Django up itself, from the settings module that `DJA
 names ([CLI reference](cli.md)).
 
 `taxomesh --show-config` prints the configuration in effect, each key with its accepted values
-and its default. [`taxomesh.toml.example`](../taxomesh.toml.example) is a ready-to-use template.
+and its default, as TOML that a file holds as it is: `taxomesh --show-config > taxomesh.toml`.
+[`taxomesh.toml.example`](../taxomesh.toml.example) is a ready-to-use template.
 
 ← [Back to README](../README.md)

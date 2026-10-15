@@ -104,7 +104,7 @@ for builtin in (iter, reversed):
 A row never changes in place. The seven models are frozen: assigning to a field raises pydantic's
 `ValidationError`, a `ValueError`. `metadata` is frozen all the way down: its dicts and lists raise
 `TypeError` on any change. `update` stores a new row and returns it, one `version` higher, and a
-row read before it keeps the values it was read with. A row carrying `metadata` is not hashable.
+row read before it keeps the values it was read with. No row is hashable: each holds `metadata`.
 
 ```python
 held = svc.categories[music]
@@ -621,10 +621,11 @@ Each service caches its reads in memory for `cache_ttl` seconds, 5 unless it is 
 a service clears that service's cache, and no other's: another service over the same repository, or
 over the same Django database from another process, sees the write once its own entries expire. A
 write reads what it changes from storage, never from the cache, so a service may be shared across
-threads: its writes are never stale, and its reads may be stale within `cache_ttl`. A listing reads
-its links, then the rows that they name, so it may raise the not-found error of a row that another
-writer deletes between the two reads; over HTTP, that request answers 404. A YAML or JSON file is
-read when its repository is built, so it has one writer: see [Storage](repositories.md).
+threads: its writes are never stale, and its reads may be stale within `cache_ttl`. Inside a
+transaction, which only Django has, a read is neither cached nor served from the cache. A listing
+reads its links, then the rows that they name, so it may raise the not-found error of a row that
+another writer deletes between the two reads; over HTTP, that request answers 404. A YAML or JSON
+file is read when its repository is built, so it has one writer: see [Storage](repositories.md).
 The [design notes](design.md#the-per-service-cache) say why.
 
 ```python
@@ -637,8 +638,9 @@ assert uncached.categories[music].name == "Music"  # read from storage every tim
 # Errors
 
 The members raise these errors, and one more: `TypeError`, for an argument of the wrong type, as
-`int(None)` raises it. A value of the right type that is refused is a `TaxomeshValidationError`, as
-`int("sarasa")` raises `ValueError`.
+`int(None)` raises it; the flags `recursive`, `fuzzy` and `include_items` are read as `if flag:`. A
+value of the right type that is refused is a `TaxomeshValidationError`, as `int("ten")` raises
+`ValueError`.
 
 ```
 TaxomeshError
@@ -662,8 +664,9 @@ serializer raises, is a `TaxomeshError` too, in `taxomesh.contrib.api.errors`. A
 raises `TaxomeshRepositoryError` from any write. A value the model refuses raises
 `TaxomeshValidationError`, with pydantic's error chained as its cause, so no
 `pydantic.ValidationError` leaves a member. A field takes what pydantic's lax mode takes, so
-`sort_index="5"` is 5, `name=b"Jazz"` is `"Jazz"` and `sort_index="sarasa"` is refused; a filter
-takes only its own type, so `enabled="yes"` raises `TypeError`, which is not a `TaxomeshError`.
+`sort_index="5"` is 5, `name=b"Jazz"` is `"Jazz"` and `sort_index="ten"` is refused; a filter
+takes only its own type, so `enabled="yes"` raises `TypeError`, which is not a `TaxomeshError`, and a
+flag is read as `if flag:`.
 
 ```python
 for call, error in (
