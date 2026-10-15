@@ -2,9 +2,11 @@
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import click
 import pytest
 from click.testing import Result
 from rich.console import Console
@@ -255,6 +257,15 @@ class TestMaxDepth:
         assert "L4" not in output, "L4 (depth 4) must be hidden in default output"
         assert "Item3" not in output, "Item at depth 4 must be hidden in default output"
         assert "Item4" not in output, "Item at depth 5 must be hidden in default output"
+
+    def test_graph_refuses_a_negative_max_depth(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(app, ["graph", "--max-depth", "-1"])
+
+        assert result.exit_code == 2
+        assert "--max-depth" in click.unstyle(result.output)
+        assert list(tmp_path.iterdir()) == []
 
     def test_graph_max_depth_zero_shows_all_nodes(self) -> None:
         """--max-depth 0 (unlimited) must render all nodes including the deepest."""

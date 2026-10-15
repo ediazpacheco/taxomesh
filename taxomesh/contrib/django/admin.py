@@ -17,7 +17,9 @@ from django import forms
 from django.apps import apps
 from django.conf import settings
 from django.contrib import admin, messages
+from django.contrib.admin.exceptions import NotRegistered
 from django.contrib.admin.widgets import FilteredSelectMultiple
+from django.contrib.auth import get_permission_codename
 from django.db import models
 from django.forms import ModelChoiceField
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
@@ -117,7 +119,7 @@ def _parent_from_payload(raw: str) -> UUID | None:
 
 
 def _graph_view_error(exc: Exception) -> JsonResponse:
-    """Answer an exception of a graph write view as the HTTP edge answers it.
+    """Answer an exception of a graph view as the HTTP edge answers it.
 
     A library error that maps to a client error is the caller's to correct: 400, with the message of
     the error. A library error that maps to 500, and any other exception, answers 500 with one
@@ -244,19 +246,6 @@ def _build_child_entries(  # noqa: PLR0913
 # ---------------------------------------------------------------------------
 # Shared mixin
 # ---------------------------------------------------------------------------
-
-
-class _ReadOnlyInlineMixin:
-    """A mixin that makes a ``TabularInline`` read-only: no add, no change and no delete."""
-
-    def has_add_permission(self, request: HttpRequest, obj: object = None) -> bool:
-        return False
-
-    def has_change_permission(self, request: HttpRequest, obj: object = None) -> bool:
-        return False
-
-    def has_delete_permission(self, request: HttpRequest, obj: object = None) -> bool:
-        return False
 
 
 class TaxomeshAdminMixin:
@@ -589,12 +578,12 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
 
 
 # ---------------------------------------------------------------------------
-# CategoryParentLink Form (cycle / self-reference validation via clean())
+# The forms of a link between two categories (cycle / self-reference validation via clean())
 # ---------------------------------------------------------------------------
 
 
-class CategoryParentLinkForm(_CategoryParentLinkFormBase):
-    """The form of a parent link on the category page: it refuses a link that makes a cycle.
+class _CategoryLinkForm(_CategoryParentLinkFormBase):
+    """The form of a link between two categories: it refuses a link that makes a cycle.
 
     ``clean()`` refuses a category as its own parent, and a parent link that makes a cycle with the
     stored links. It runs when Django validates the form, so the page shows the error with the
@@ -621,50 +610,28 @@ class CategoryParentLinkForm(_CategoryParentLinkFormBase):
         if category and parent_category:
             cat_id = category.category_id
             parent_id = parent_category.category_id
+            names = {cat_id: category.name, parent_id: parent_category.name}
             try:
-                check_no_cycle(cat_id, parent_id, DjangoRepository().list_category_parent_links())
+                check_no_cycle(cat_id, parent_id, DjangoRepository().list_category_parent_links(), names)
             except TaxomeshCyclicDependencyError as exc:
                 raise forms.ValidationError(str(exc)) from exc
         return cleaned_data
 
 
-# ---------------------------------------------------------------------------
-# CategoryChildLink Form (cycle / self-reference validation via clean())
-# ---------------------------------------------------------------------------
+class CategoryParentLinkForm(_CategoryLinkForm):
+    """The form of a parent link on the category page: it refuses a link that makes a cycle.
+
+    ``CategoryParentLinkInline`` uses it. Its ``parent_category`` field is the parent, and
+    ``category`` is the category of the page.
+    """
 
 
-class CategoryChildLinkForm(_CategoryParentLinkFormBase):
+class CategoryChildLinkForm(_CategoryLinkForm):
     """The form of a child link on the category page: it refuses a link that makes a cycle.
 
     ``CategoryChildLinkInline`` uses it. Its ``category`` field is the child, and
-    ``parent_category`` is the category of the page. ``clean()`` refuses a category as its own
-    parent, and a parent link that would make a cycle.
+    ``parent_category`` is the category of the page.
     """
-
-    class Meta:
-        model = CategoryParentLinkModel
-        fields = "__all__"
-
-    # Any: a form's cleaned_data, which django-stubs types as dict[str, Any].
-    def clean(self) -> dict[str, Any]:
-        """Refuse a category as its own parent, and a parent link that makes a cycle.
-
-        Raises:
-            forms.ValidationError: If ``category`` is ``parent_category``, or if the link would
-                make a cycle in the category graph.
-        """
-        super().clean()
-        cleaned_data = self.cleaned_data
-        category = cleaned_data.get("category")
-        parent_category = cleaned_data.get("parent_category")
-        if category and parent_category:
-            cat_id = category.category_id
-            parent_id = parent_category.category_id
-            try:
-                check_no_cycle(cat_id, parent_id, DjangoRepository().list_category_parent_links())
-            except TaxomeshCyclicDependencyError as exc:
-                raise forms.ValidationError(str(exc)) from exc
-        return cleaned_data
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +877,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         "version",
         "created_at",
         "updated_at",
-    )  # noqa: E501
+    )
     search_fields = ("name", "slug", "category_id")
     list_filter = ("enabled", HasSlugFilter, HasLinkedObjectListFilter)
     fields = (
@@ -984,27 +951,70 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         ]
         return custom + urls
 
-    def reorder_view(self, request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
-        """Reorder the items or the child categories of one parent, as the graph page's drag-and-drop sends them.
+    def _may_move(self, request: HttpRequest, kind: str) -> bool:
+        """Return whether the user may move a node of this kind: the change permission of its admin.
 
-        An empty ``parent_uuid`` names the top level, which only categories have.
+        A category asks this admin, and an item the admin that the same site registers for items, so
+        an override of ``has_change_permission`` is obeyed. With no admin for items on the site,
+        Django's own rule answers: the user's ``change`` permission on the item model.
         """
+        if kind == DRAG_KIND_CATEGORY:
+            return self.has_change_permission(request)
+        try:
+            return self.admin_site.get_model_admin(ItemModel).has_change_permission(request)
+        except NotRegistered:
+            opts = ItemModel._meta
+            return request.user.has_perm(f"{opts.app_label}.{get_permission_codename('change', opts)}")
 
+    def _move_refused(self, kind: str) -> JsonResponse:
+        """Answer a move that the user may not make: 403, in the shape the graph page shows."""
+        plural = "categories" if kind == DRAG_KIND_CATEGORY else "items"
+        return JsonResponse(
+            {"error": f"Moving {plural} needs the permission to change {plural}"}, status=HTTPStatus.FORBIDDEN
+        )
+
+    # Any: the JSON body of the request, whose values the view checks one by one.
+    def _read_move(self, request: HttpRequest, fields: tuple[str, ...]) -> dict[str, Any] | JsonResponse:
+        """Read the body of a move that the graph page sends, or return the answer that refuses it.
+
+        A move is a POST whose JSON object holds ``kind``, a kind the graph knows, and ``fields``,
+        from a user who may move that kind. A refusal answers 405, 400 or 403.
+
+        Args:
+            request: The current HTTP request.
+            fields: The fields the move needs besides ``kind``.
+
+        Returns:
+            The body, or the JSON answer that refuses the request.
+        """
         if request.method != "POST":
-            return JsonResponse({"error": "Method not allowed"}, status=405)
-
+            return JsonResponse({"error": "Method not allowed"}, status=HTTPStatus.METHOD_NOT_ALLOWED)
         try:
             body = json.loads(request.body)
         except (json.JSONDecodeError, UnicodeDecodeError):
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-        for field in ("kind", "parent_uuid", "ordered_uuids"):
+            body = None
+        if not isinstance(body, dict):
+            return JsonResponse({"error": "Invalid JSON"}, status=HTTPStatus.BAD_REQUEST)
+        for field in ("kind", *fields):
             if field not in body:
-                return JsonResponse({"error": f"Missing field: {field}"}, status=400)
-
+                return JsonResponse({"error": f"Missing field: {field}"}, status=HTTPStatus.BAD_REQUEST)
         kind = body["kind"]
         if kind not in (DRAG_KIND_ITEM, DRAG_KIND_CATEGORY):
-            return JsonResponse({"error": f"Invalid kind: {kind}"}, status=400)
+            return JsonResponse({"error": f"Invalid kind: {kind}"}, status=HTTPStatus.BAD_REQUEST)
+        if not self._may_move(request, kind):
+            return self._move_refused(kind)
+        return body
+
+    def reorder_view(self, request: HttpRequest) -> HttpResponse:
+        """Reorder the items or the child categories of one parent, as the graph page's drag-and-drop sends them.
+
+        An empty ``parent_uuid`` names the top level, which only categories have. The user needs the
+        permission to change the kind that the request reorders.
+        """
+        body = self._read_move(request, ("parent_uuid", "ordered_uuids"))
+        if isinstance(body, JsonResponse):
+            return body
+        kind = body["kind"]
 
         try:
             parent_uuid = _parent_from_payload(body["parent_uuid"])
@@ -1030,24 +1040,12 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         """Move an item or a category from one parent to another, as the graph page's drag-and-drop sends it.
 
         An empty ``old_parent_uuid`` or ``new_parent_uuid`` names the top level, which only
-        categories have.
+        categories have. The user needs the permission to change the kind that the request moves.
         """
-
-        if request.method != "POST":
-            return JsonResponse({"error": "Method not allowed"}, status=405)
-
-        try:
-            body = json.loads(request.body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-        for field in ("kind", "node_uuid", "old_parent_uuid", "new_parent_uuid", "insert_before_uuid"):
-            if field not in body:
-                return JsonResponse({"error": f"Missing field: {field}"}, status=400)
-
+        body = self._read_move(request, ("node_uuid", "old_parent_uuid", "new_parent_uuid", "insert_before_uuid"))
+        if isinstance(body, JsonResponse):
+            return body
         kind = body["kind"]
-        if kind not in (DRAG_KIND_ITEM, DRAG_KIND_CATEGORY):
-            return JsonResponse({"error": f"Invalid kind: {kind}"}, status=400)
 
         try:
             node_uuid = UUID(body["node_uuid"])
@@ -1167,14 +1165,17 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         return TemplateResponse(request, "admin/taxomesh_contrib_django/graph.html", context)
 
     def graph_children_view(self, request: HttpRequest) -> HttpResponse:
-        """Return an HTML fragment with the direct children of one category: its items and its child categories."""
+        """Return an HTML fragment with the direct children of one category: its items and its child categories.
+
+        A refusal or a failure answers as the graph's other views do: JSON with the key ``error``.
+        """
 
         sort_by = request.GET.get("sort_by", DEFAULT_SORT_MODE)
         try:
             parent_uuid = UUID(request.GET["parent_uuid"])
             depth = int(request.GET.get("depth", 1))
         except (KeyError, ValueError):
-            return HttpResponse("Bad request: missing or invalid parent_uuid/depth", status=400)
+            return JsonResponse({"error": "Missing or invalid parent_uuid or depth"}, status=HTTPStatus.BAD_REQUEST)
 
         try:
             repo = DjangoRepository()
@@ -1230,8 +1231,8 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
                     for target in found.of_type(relation_type)
                 ]
 
-        except TaxomeshError as exc:
-            return HttpResponse(str(exc), status=500)
+        except Exception as exc:
+            return _graph_view_error(exc)
 
         entries = self._resolve_sort_fn(sort_by)(entries)
 

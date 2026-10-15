@@ -71,6 +71,15 @@ def test_doc_python_examples_run(rel_path: str, tmp_path: Path, monkeypatch: pyt
     exec(compile("\n\n".join(blocks), str(path), "exec"), namespace)
 
 
+def test_the_readme_quick_start_runs_twice_in_one_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reader runs the quick start again where they ran it, and it runs as it did the first time."""
+    path = REPO_ROOT / "README.md"
+    code = compile("\n\n".join(_runnable_blocks(path.read_text(encoding="utf-8"))), str(path), "exec")
+    monkeypatch.chdir(tmp_path)
+    for _ in range(2):
+        exec(code, {"__name__": "__doc_example__"})
+
+
 def test_cli_examples_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The commands that need no identifier run cleanly, the global ``--verbose`` included."""
     monkeypatch.chdir(tmp_path)

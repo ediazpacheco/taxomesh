@@ -104,7 +104,7 @@ for builtin in (iter, reversed):
 A row never changes in place. The seven models are frozen: assigning to a field raises pydantic's
 `ValidationError`, a `ValueError`. `metadata` is frozen all the way down: its dicts and lists raise
 `TypeError` on any change. `update` stores a new row and returns it, one `version` higher, and a
-row read before it keeps the values it was read with. A row carrying `metadata` is not hashable.
+row read before it keeps the values it was read with. No row is hashable: each holds `metadata`.
 
 ```python
 held = svc.categories[music]
@@ -145,7 +145,8 @@ A row carries data and no behaviour. What you do with it is a member of its coll
 
 A link joins two entities, and the member named beside it stores it. `sort_index` is a position,
 lower first: among a parent's children or a category's items, as `reorder` and `move` set it, and
-among an item's relations.
+among an item's relations. A new link given no position goes after the last, and so does a new
+category at the top level.
 
 | Link | Fields | Stored by |
 |---|---|---|
@@ -230,7 +231,7 @@ assert [n.category.name for n in svc.graph().roots] == ["Music"]
 | `list(*, parent=None, item=None, enabled=True)` | `Sequence[Category]` | Every category; or a parent's children; or an item's categories |
 | `roots(*, enabled=True)` | `Sequence[Category]` | The top level |
 | `search(query, *, limit=20, parent=None, enabled=True, fuzzy=True)` | `Sequence[Category]` | Ranked matches: see [Search](#search) |
-| `add_parent(category, parent, *, sort_index=0)` | `CategoryParentLink` | Adds a parent, keeping the others |
+| `add_parent(category, parent, *, sort_index=None)` | `CategoryParentLink` | Adds a parent, keeping the others |
 | `remove_parent(category, parent)` | `None` | Removes one parent |
 | `move(category, *, from_parent, to_parent, before=None)` | `None` | Moves it from one parent to another |
 | `reorder(parent, categories)` | `None` | Orders a parent's children, or the top level |
@@ -372,12 +373,12 @@ else:
 | `get_many_by_external_id(external_ids, /, *, enabled=None)` | `Mapping[str, Item]` | The same, keyed by stored external id |
 | `list(*, category=None, recursive=False, tag=None, enabled=True)` | `Sequence[Item]` | Every item; or a category's; or a tag's; or both |
 | `search(query, *, limit=20, category=None, recursive=False, enabled=True, fuzzy=True)` | `Sequence[Item]` | Ranked matches: see [Search](#search) |
-| `place_in(item, category, *, sort_index=0)` | `ItemParentLink` | Places it in a category, or sets the sort index of that placement |
+| `place_in(item, category, *, sort_index=None)` | `ItemParentLink` | Places it in a category, or sets the sort index of that placement |
 | `remove_from(item, category)` | `None` | Removes one placement |
 | `move(item, *, from_category, to_category, before=None)` | `ItemParentLink` | Moves one placement |
 | `reorder(category, items)` | `None` | Orders the items placed in a category |
 | `tag(item, tag)` · `untag(item, tag)` | `ItemTagLink` · `None` | Tags an item, or removes a tag from it |
-| `relate(source, target, relation_type, *, sort_index=0, metadata=None)` | `ItemRelationLink` | Stores a directed, typed relation, or updates that one |
+| `relate(source, target, relation_type, *, sort_index=None, metadata=None)` | `ItemRelationLink` | Stores a directed, typed relation, or updates that one |
 | `unrelate(source, target, relation_type)` | `None` | Removes one relation |
 | `list_relations(item, *, relation_types=None, direction="outgoing")` | `Sequence[ItemRelationLink]` | The item's relation links |
 | `list_related(item, *, relation_types=None, direction="outgoing", enabled=True)` | `Sequence[Item]` | The items at the other end, in link order |
@@ -410,10 +411,12 @@ assert [i.name for i in recursive] == ["Kind of Blue", "Giant Steps", "Birth of 
 
 ## Placement, order and tags
 
-An item may be placed in any number of categories. `place_in` again sets the sort index of that
-placement rather than adding a second one; `remove_from`, `untag` and `unrelate` are no-ops when
-there is nothing to remove, and `tag` when the tag is already there. `reorder` works as it does for
-categories, and refuses an item not placed in that category.
+An item may be placed in any number of categories. `place_in` again sets the sort index it is
+given, or keeps the stored one, and adds no second placement; `remove_from`, `untag` and `unrelate`
+are no-ops when there is nothing to remove, and `tag` when the tag is already there. `reorder` works
+as it does for categories, and refuses an item not placed in that category. With no position,
+`place_in` reads the category's placements to find the last, so its cost grows with the category:
+a load of many items into one category passes their positions.
 
 ```python
 svc.items.place_in(kob, blues, sort_index=9)
@@ -618,10 +621,11 @@ Each service caches its reads in memory for `cache_ttl` seconds, 5 unless it is 
 a service clears that service's cache, and no other's: another service over the same repository, or
 over the same Django database from another process, sees the write once its own entries expire. A
 write reads what it changes from storage, never from the cache, so a service may be shared across
-threads: its writes are never stale, and its reads may be stale within `cache_ttl`. A listing reads
-its links, then the rows that they name, so it may raise the not-found error of a row that another
-writer deletes between the two reads; over HTTP, that request answers 404. A YAML or JSON file is
-read when its repository is built, so it has one writer: see [Storage](repositories.md).
+threads: its writes are never stale, and its reads may be stale within `cache_ttl`. Inside a
+transaction, which only Django has, a read is neither cached nor served from the cache. A listing
+reads its links, then the rows that they name, so it may raise the not-found error of a row that
+another writer deletes between the two reads; over HTTP, that request answers 404. A YAML or JSON
+file is read when its repository is built, so it has one writer: see [Storage](repositories.md).
 The [design notes](design.md#the-per-service-cache) say why.
 
 ```python
@@ -634,8 +638,9 @@ assert uncached.categories[music].name == "Music"  # read from storage every tim
 # Errors
 
 The members raise these errors, and one more: `TypeError`, for an argument of the wrong type, as
-`int(None)` raises it. A value of the right type that is refused is a `TaxomeshValidationError`, as
-`int("sarasa")` raises `ValueError`.
+`int(None)` raises it; the flags `recursive`, `fuzzy` and `include_items` are read as `if flag:`. A
+value of the right type that is refused is a `TaxomeshValidationError`, as `int("ten")` raises
+`ValueError`.
 
 ```
 TaxomeshError
@@ -659,8 +664,9 @@ serializer raises, is a `TaxomeshError` too, in `taxomesh.contrib.api.errors`. A
 raises `TaxomeshRepositoryError` from any write. A value the model refuses raises
 `TaxomeshValidationError`, with pydantic's error chained as its cause, so no
 `pydantic.ValidationError` leaves a member. A field takes what pydantic's lax mode takes, so
-`sort_index="5"` is 5, `name=b"Jazz"` is `"Jazz"` and `sort_index="sarasa"` is refused; a filter
-takes only its own type, so `enabled="yes"` raises `TypeError`, which is not a `TaxomeshError`.
+`sort_index="5"` is 5, `name=b"Jazz"` is `"Jazz"` and `sort_index="ten"` is refused; a filter
+takes only its own type, so `enabled="yes"` raises `TypeError`, which is not a `TaxomeshError`, and a
+flag is read as `if flag:`.
 
 ```python
 for call, error in (

@@ -41,6 +41,7 @@ def check_no_cycle(
     category_id: UUID,
     parent_id: UUID,
     existing_links: Sequence[CategoryParentLink],
+    names: Mapping[UUID, str] | None = None,
 ) -> None:
     """Raise TaxomeshCyclicDependencyError if the link category_id → parent_id makes a cycle.
 
@@ -51,6 +52,8 @@ def check_no_cycle(
         category_id: The child category that would get a new parent.
         parent_id: The new parent category.
         existing_links: Every parent link that the repository stores now.
+        names: The names of the two categories, when the caller has read them: the message then
+            names each as ``'Jazz' (<id>)``.
 
     Raises:
         TaxomeshCyclicDependencyError: If the proposed link would introduce a cycle.
@@ -61,8 +64,13 @@ def check_no_cycle(
         parents_map.setdefault(link.category_id, []).append(link.parent_category_id)
 
     if category_id in depth_first([parent_id], parents_map):
+        known = names or {}
+
+        def label(key: UUID) -> str:
+            return f"'{known[key]}' ({key})" if key in known else str(key)
+
         raise TaxomeshCyclicDependencyError(
-            f"Category {category_id} cannot have the parent {parent_id}: the parent link makes a cycle"
+            f"Category {label(category_id)} cannot have the parent {label(parent_id)}: the parent link makes a cycle"
         )
 
 

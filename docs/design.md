@@ -117,8 +117,9 @@ an example.
 - Every not-found error is a `KeyError` and every validation error a `ValueError`, so a caller who
   knows only the standard library catches them. No `pydantic.ValidationError` leaves a member. An
   argument of the wrong type raises `TypeError`, as `int(None)` does, and is no `TaxomeshError`: it
-  is a mistake to fix, not a failure to handle. A value of the right type that is refused raises
-  `TaxomeshValidationError`, as `int("sarasa")` raises `ValueError`.
+  is a mistake to fix, not a failure to handle. Only the flags `recursive`, `fuzzy` and
+  `include_items` are read as `if flag:`. A value of the right type that is refused raises
+  `TaxomeshValidationError`, as `int("ten")` raises `ValueError`.
 - A collection does not iterate, and is not a `collections.abc.Mapping`, which builds `keys()`,
   `values()` and `==` on iteration. Iterating a collection would read every row in a loop that does
   not show that cost, and would have to choose a meaning for `enabled` without telling the caller.
@@ -190,8 +191,8 @@ else:
 rows were mutable, one caller's edit would change what the next caller reads, and change the
 cache with it. With frozen rows, the mistake raises an error where it is made. Sequences come back
 as tuples, and mappings as a new dict on every call or, in `RelatedItems.by_type`, as a read-only
-mapping, for the same reason; a graph is a snapshot on every backend. A row carrying a `metadata`
-dict is not hashable.
+mapping, for the same reason; a graph is a snapshot on every backend. No row is hashable, since each
+holds a `metadata` dict.
 
 `expected_version` is optimistic concurrency. The repository compares the stored version and writes
 `version + 1` in one step. When the stored row is at another version, the update raises
@@ -239,7 +240,7 @@ assert {c.name for c in svc.categories.roots()} == {"Recorded music", "Jazz"}
   Every member treats the identifier of the implicit root as that of a category that is not
   stored: `get` answers `None`, and subscript or a filter raises not-found.
 - A store that breaks the invariant is repaired: the file adapters normalise it on load, and Django
-  migration `0011_root_invariant` does it once.
+  migration `0011_root_invariant` does it once; `0012_implicit_root` stores the implicit root once.
 
 **Why:** "top level" has one meaning, which every read agrees on. To list the top level, a member
 reads the links to the implicit root and then the rows they name, rather than the parents of every
@@ -259,6 +260,11 @@ collections it builds. A `@memoize` method reaches its owner's cache at call tim
   entry alive.
 - A read may be stale within `cache_ttl`; a write is not, since it reads what it changes from
   storage. On that basis, threads may share a service.
+- A read inside a transaction, the caller's or the repository's own, is neither stored in the cache
+  nor served from it: it sees the transaction's writes before they commit, and a rollback takes them
+  back. The port's `in_transaction` says when one is open on the calling thread; only Django has
+  transactions, and with `ATOMIC_REQUESTS` every read of a view is inside one.
+  `tests/contrib/django/test_transaction_cache.py` asserts it.
 - A listing reads its links, and then the rows that they name. When another writer deletes one of
   those rows between the two reads, the listing raises that row's not-found error.
 - A collection is never constructed directly: built any other way, it would hold a cache of its
@@ -341,7 +347,9 @@ absence of logic in a handler, or the imports of `contrib/api`.
 - **Cycles are refused in the domain.** `domain/dag.py` checks every new parent link before it is
   written, and no adapter repeats the check.
 - **A parent link carries its own order.** A parent link is `(category_id, parent_category_id,
-  sort_index)`, so a category under several parents has a position under each one.
+  sort_index)`, so a category under several parents has a position under each one. A new link
+  given no position goes after the last link of its parent, as `list.append` does, so a store lists
+  links in the order they were made. `tests/service/test_default_order.py` asserts it.
 - **No process in the product.** `taxomesh/` and `tests/` contain no task, specification,
   requirement or review-finding identifier, no account of how the code changed, and no citation of
   a planning document. The code states what is true now, and `CHANGELOG.md` holds the history.
@@ -352,7 +360,7 @@ absence of logic in a handler, or the imports of `contrib/api`.
 |---|---|
 | The layers, and the `Base` suffix | `tests/test_architecture.py` |
 | Member names, and no collection is a `Mapping` | `tests/surface/test_api_law.py` |
-| Every public signature, keyword-only filters included | `tests/surface/public_surface.txt`, a ledger edited only on purpose |
+| The signatures of the service, its three collections and the port, keyword-only filters included | `tests/surface/public_surface.txt`, a ledger edited only on purpose |
 | The `enabled` defaults | `tests/service/test_enabled_defaults.py` |
 | Stdlib error bases, and the wrong type's `TypeError` | `tests/test_exceptions.py`, `tests/service/test_stdlib_errors.py` |
 | The exports | `tests/test_packaging.py` |
@@ -372,8 +380,8 @@ absence of logic in a handler, or the imports of `contrib/api`.
 | The handlers' names and contracts | `tests/contrib/test_api_handlers.py` |
 | No process in the product | `tests/test_no_process_ids.py` |
 
-Tests enforce these rules, so a change that breaks one fails the build; no rule depends on a
-reviewer noticing. The behavior behind the names is asserted on every backend: the port's `None` on
-a miss, each `get*` member's answer to an absent key, and what each `enabled` value selects. The
-port contract suite runs on all four implementations, and so does each service test that uses the
-shared `service` fixture.
+Tests enforce the rules listed here, so a change that breaks one of them fails the build. The
+behavior behind the names is asserted on every backend: the port's `None` on a miss, each `get*`
+member's answer to an absent key, and what each `enabled` value selects. The port contract suite
+runs on all four implementations, and so does each service test that uses the shared `service`
+fixture.

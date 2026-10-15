@@ -13,6 +13,7 @@ from taxomesh.application.collections.base import (
     _changed,
     _given,
     _normalise_external_ids,
+    _position_among,
     _require_collection,
     _require_enabled,
     _require_limit,
@@ -237,19 +238,26 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """The cached read behind :meth:`get_many`, keyed by the set of identifiers."""
         return dict(self._service.repository.map_categories_by_id(category_ids, enabled=enabled))
 
-    def _top_level_link(self, category_id: UUID, /) -> CategoryParentLink:
-        """Return the link that puts a category at the top level, as :meth:`create` stores it.
+    def _top_level_links(self, category_ids: Sequence[UUID], /) -> list[CategoryParentLink]:
+        """Return the links that put these categories at the top level, after its last category, in this order.
 
-        A category holds this link exactly when it holds no other parent link, so every write that
-        takes a category's last parent stores it again.
+        A category holds such a link exactly when it holds no other parent link, so :meth:`create`
+        stores one, and every write that takes a category's last parent stores it again. The method
+        reads the top level's links, so the caller calls it inside its block.
         """
-        return CategoryParentLink(category_id=category_id, parent_category_id=self._root_id, sort_index=0)
+        top_level = self._service.repository.list_category_parent_links(parent_category_ids=[self._root_id])
+        start = _position_among(top_level)
+        return [
+            CategoryParentLink(category_id=category_id, parent_category_id=self._root_id, sort_index=start + n)
+            for n, category_id in enumerate(category_ids)
+        ]
 
     def delete(self, key: CategoryRef, /) -> None:
         """Delete a category, with its links to its parents and its children and its placements.
 
         The items that were placed in it, and the categories under it, are not deleted. A child
-        left with no other parent moves to the top level, in the same ``atomic()`` block.
+        left with no other parent moves to the top level, after its last category, in the same
+        ``atomic()`` block.
 
         Args:
             key: The category to delete, or its identifier.
@@ -272,9 +280,10 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
             if children:
                 parented = {lnk.category_id for lnk in repository.list_category_parent_links(category_ids=children)}
-                for child_id in children:
-                    if child_id not in parented:
-                        repository.save_category_parent_link(self._top_level_link(child_id))
+                orphans = [child_id for child_id in children if child_id not in parented]
+                if orphans:
+                    for link in self._top_level_links(orphans):
+                        repository.save_category_parent_link(link)
 
     def get_by_slug(self, slug: str, /) -> Category | None:
         """Return the category with this slug, or ``None``.
@@ -694,7 +703,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
         metadata: dict[str, Any] | None = None,
     ) -> Category:
-        """Create a category at the top level.
+        """Create a category at the top level, after its last category.
 
         Args:
             name: The name of the category.
@@ -742,7 +751,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         with self._atomic(then=self._corpus.invalidate):
             self._require_free_slug(category.slug)
             stored = self._service.repository.save_category(category)
-            self._service.repository.save_category_parent_link(self._top_level_link(category.category_id))
+            (link,) = self._top_level_links([category.category_id])
+            self._service.repository.save_category_parent_link(link)
         return stored
 
     def update(
@@ -825,7 +835,9 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             stored = self._service.repository.save_category(row, expected_version=expected_version)
         return stored
 
-    def add_parent(self, category: CategoryRef, parent: CategoryRef, *, sort_index: int = 0) -> CategoryParentLink:
+    def add_parent(
+        self, category: CategoryRef, parent: CategoryRef, *, sort_index: int | None = None
+    ) -> CategoryParentLink:
         """Give a category an additional parent.
 
         A category with a parent is not at the top level, so a category that was at the top
@@ -834,7 +846,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         Args:
             category: The category that gets a parent, or its identifier.
             parent: The category that becomes a parent, or its identifier.
-            sort_index: The position among the children of that parent.
+            sort_index: The position among the children of that parent. ``None`` (the default) puts
+                a new link after the last child, and leaves a stored link where it is.
 
         Returns:
             The new ``CategoryParentLink``.
@@ -852,15 +865,26 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         category_id = category_id_of(category)
         parent_id = category_id_of(parent)
         with _as_validation_error():
-            link = CategoryParentLink(category_id=category_id, parent_category_id=parent_id, sort_index=sort_index)
+            link = CategoryParentLink(
+                category_id=category_id,
+                parent_category_id=parent_id,
+                sort_index=0 if sort_index is None else sort_index,
+            )
         if self._is_root(category_id):
             raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
         check_not_own_parent(category_id, parent_id)
         repository = self._service.repository
         with self._atomic():
-            self._require_stored(category_id)
-            self._require_stored(parent_id)
-            check_no_cycle(category_id, parent_id, repository.list_category_parent_links())
+            child = self._require_stored(category_id)
+            joined = self._require_stored(parent_id)
+            links = repository.list_category_parent_links()
+            check_no_cycle(category_id, parent_id, links, {category_id: child.name, parent_id: joined.name})
+            if sort_index is None:
+                position = _position_among(
+                    (lnk for lnk in links if lnk.parent_category_id == parent_id),
+                    stored=lambda lnk: lnk.category_id == category_id,
+                )
+                link = link.model_copy(update={"sort_index": position})
             repository.save_category_parent_link(link)
             repository.delete_category_parent_link(category_id, self._root_id)
         return link
@@ -869,7 +893,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """Remove one parent link from a category.
 
         A no-op when the link is not stored. A category that loses its last parent moves to the
-        top level, in the same ``atomic()`` block.
+        top level, after its last category, in the same ``atomic()`` block.
 
         Args:
             category: The category that loses a parent, or its identifier.
@@ -888,7 +912,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             self._require_stored(parent_id)
             removed = repository.delete_category_parent_link(category_id, parent_id)
             if removed and not repository.list_category_parent_links(category_ids=[category_id]):
-                repository.save_category_parent_link(self._top_level_link(category_id))
+                (link,) = self._top_level_links([category_id])
+                repository.save_category_parent_link(link)
 
     def move(
         self,
@@ -932,10 +957,10 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         joining = self._root_id if to_parent_id is None else to_parent_id
 
         with self._atomic():
-            self._require_stored(category_id)
+            names = {category_id: self._require_stored(category_id).name}
             for parent_id in (from_parent_id, to_parent_id):
                 if parent_id is not None:
-                    self._require_stored(parent_id)
+                    names[parent_id] = self._require_stored(parent_id).name
 
             links = self._service.repository.list_category_parent_links()
             if to_parent_id is None:
@@ -945,7 +970,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                         f"Category {category_id} keeps another parent, so it cannot be at the top level"
                     )
             else:
-                check_no_cycle(category_id, to_parent_id, links)
+                check_no_cycle(category_id, to_parent_id, links, names)
 
             siblings = sorted(
                 (lnk for lnk in links if lnk.parent_category_id == joining and lnk.category_id != category_id),

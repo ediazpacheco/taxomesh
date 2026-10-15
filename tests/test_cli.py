@@ -384,6 +384,18 @@ def test_item_place_in() -> None:
     assert result.output.splitlines() == [f"Placed item {item.item_id} in category {cat.category_id} at sort index 0"]
 
 
+def test_item_place_in_with_no_sort_index_places_the_item_last() -> None:
+    repo = InMemoryRepository()
+    svc = _svc_with_repo(repo)
+    cat = svc.categories.create(name="C")
+    svc.items.place_in(svc.items.create(name="first"), cat)
+    item = svc.items.create(name="second")
+    with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
+        result = runner.invoke(app, ["item", "place-in", str(item.item_id), "--category-id", str(cat.category_id)])
+    assert result.exit_code == 0
+    assert result.output.splitlines() == [f"Placed item {item.item_id} in category {cat.category_id} at sort index 1"]
+
+
 def test_item_place_in_not_found() -> None:
     repo = InMemoryRepository()
     with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
@@ -856,7 +868,7 @@ def test_json_repo_config_summary_does_not_raise(tmp_path: Path) -> None:
     repo = JsonRepository(tmp_path / "any.json")
     try:
         _ = repo.config_summary
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         pytest.fail(f"config_summary raised unexpectedly: {exc}")
 
 

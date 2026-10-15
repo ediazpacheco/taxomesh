@@ -1,5 +1,6 @@
 """Tests for taxomesh.domain.constants — field constraint values."""
 
+from collections.abc import Callable
 from uuid import uuid4
 
 import pytest
@@ -12,40 +13,35 @@ from taxomesh.domain.constants import (
     MAX_EXTERNAL_ID_STR_LENGTH,
     MAX_TAG_NAME_LENGTH,
 )
-from taxomesh.domain.models import Category, Tag
+from taxomesh.domain.models import Category, Item, Tag
 
 
-def test_default_item_external_id_is_none() -> None:
-    assert DEFAULT_ITEM_EXTERNAL_ID is None
+def test_an_item_with_no_external_id_holds_the_default() -> None:
+    assert Item(name="x").external_id is DEFAULT_ITEM_EXTERNAL_ID is None
 
 
-def test_max_category_name_length_is_256() -> None:
-    assert MAX_CATEGORY_NAME_LENGTH == 256
-
-
-def test_max_tag_name_length_is_25() -> None:
-    assert MAX_TAG_NAME_LENGTH == 25
-
-
-def test_max_description_length_is_100_000() -> None:
-    assert MAX_DESCRIPTION_LENGTH == 100_000
-
-
-def test_max_external_id_str_length_is_256() -> None:
-    assert MAX_EXTERNAL_ID_STR_LENGTH == 256
-
-
-def test_category_name_field_enforces_max_length() -> None:
+@pytest.mark.parametrize(
+    ("build", "documented"),
+    [
+        (lambda n: Category(category_id=uuid4(), name="x" * n), 256),
+        (lambda n: Tag(tag_id=uuid4(), name="x" * n), 25),
+        (lambda n: Category(category_id=uuid4(), name="c", description="x" * n), 100_000),
+        (lambda n: Item(name="i", external_id="x" * n), 256),
+        (lambda n: Category(category_id=uuid4(), name="c", external_id="x" * n), 256),
+    ],
+    ids=["category name", "tag name", "description", "item external id", "category external id"],
+)
+def test_a_field_holds_its_documented_length_and_no_more(build: Callable[[int], object], documented: int) -> None:
+    """The limits the API reference states: ``MAX_CATEGORY_NAME_LENGTH`` and the others it names."""
+    build(documented)
     with pytest.raises(ValidationError):
-        Category(category_id=uuid4(), name="x" * (MAX_CATEGORY_NAME_LENGTH + 1))
-
-    cat = Category(category_id=uuid4(), name="x" * MAX_CATEGORY_NAME_LENGTH)
-    assert len(cat.name) == MAX_CATEGORY_NAME_LENGTH
+        build(documented + 1)
 
 
-def test_tag_name_field_enforces_max_length() -> None:
-    with pytest.raises(ValidationError):
-        Tag(tag_id=uuid4(), name="x" * (MAX_TAG_NAME_LENGTH + 1))
-
-    tag = Tag(tag_id=uuid4(), name="x" * MAX_TAG_NAME_LENGTH)
-    assert len(tag.name) == MAX_TAG_NAME_LENGTH
+def test_the_constants_are_the_limits_the_models_apply() -> None:
+    assert (MAX_CATEGORY_NAME_LENGTH, MAX_TAG_NAME_LENGTH, MAX_DESCRIPTION_LENGTH, MAX_EXTERNAL_ID_STR_LENGTH) == (
+        256,
+        25,
+        100_000,
+        256,
+    )

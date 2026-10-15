@@ -7,7 +7,7 @@ error with ``from``, and a validation error a model raises itself, as a relation
 reaches the caller as that error.
 
 An argument of the wrong type is a different failure, and it is Python's: ``TypeError``, as
-``int(None)`` raises, where ``int("sarasa")`` raises ``ValueError``. It is not a ``TaxomeshError``,
+``int(None)`` raises, where ``int("ten")`` raises ``ValueError``. It is not a ``TaxomeshError``,
 and it is raised before anything is read or written.
 """
 
@@ -157,12 +157,12 @@ REFUSALS: list[RefusalCase] = [
     ),
     RefusalCase(
         "add_parent with a sort index that is no number",
-        lambda svc: svc.categories.add_parent(_category(svc), _category(svc), sort_index=untyped("sarasa")),
+        lambda svc: svc.categories.add_parent(_category(svc), _category(svc), sort_index=untyped("ten")),
         "sort_index",
     ),
     RefusalCase(
         "place_in with a sort index that is no number",
-        lambda svc: svc.items.place_in(_item(svc), _category(svc), sort_index=untyped("sarasa")),
+        lambda svc: svc.items.place_in(_item(svc), _category(svc), sort_index=untyped("ten")),
         "sort_index",
     ),
     RefusalCase(
@@ -336,29 +336,6 @@ WRONG_TYPES: list[WrongTypeCase] = [
     ),
     WrongTypeCase("item reorder, a set", lambda svc: _reorder_placed(svc, lambda item: {item})),
     WrongTypeCase("item reorder, a dict", lambda svc: _reorder_placed(svc, lambda item: {item: 0})),
-    # A sort index is an integer, refused before any read: before a cycle, before an unknown row.
-    WrongTypeCase(
-        "add_parent, a None sort index",
-        lambda svc: svc.categories.add_parent(_category(svc), _category(svc), sort_index=untyped(None)),
-    ),
-    WrongTypeCase(
-        "add_parent to itself, a None sort index",
-        lambda svc: (
-            category := _category(svc),
-            svc.categories.add_parent(category, category, sort_index=untyped(None)),
-        ),
-    ),
-    WrongTypeCase(
-        "place_in, a None sort index",
-        lambda svc: svc.items.place_in(_item(svc), _category(svc), sort_index=untyped(None)),
-    ),
-    WrongTypeCase(
-        "place_in an unknown category, a None sort index",
-        lambda svc: svc.items.place_in(_item(svc), uuid4(), sort_index=untyped(None)),
-    ),
-    WrongTypeCase(
-        "relate, a None sort index", lambda svc: svc.items.relate(*_pair(svc), "covers", sort_index=untyped(None))
-    ),
     # A relation type is text, and so is each of the relation types a read filters by.
     WrongTypeCase("relate, a relation type that is no str", lambda svc: svc.items.relate(*_pair(svc), untyped(5))),
     WrongTypeCase("unrelate, a None relation type", lambda svc: svc.items.unrelate(*_pair(svc), untyped(None))),

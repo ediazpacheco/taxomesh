@@ -668,6 +668,7 @@ def test_a_direction_member_reaches_the_port_as_its_value() -> None:
     repository = _DirectionRecordingRepository()
     service = TaxomeshService(repository=repository)
     mid = _related_around(service)
+    repository.directions.clear()
 
     service.items.list_relations(mid, direction=Direction.INCOMING)
     service.items.list_related(mid, direction=Direction.BOTH)

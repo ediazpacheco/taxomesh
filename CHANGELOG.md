@@ -12,7 +12,7 @@ The full entries of that series are in
 ## [0.2.0] — 2026-10-12
 
 0.2.0 gives taxomesh a Python stdlib-style interface: every operation is a member of
-`svc.categories`, `svc.items` or `svc.tags`, or is `svc.graph()`; rows are frozen values; and the
+`svc.categories`, `svc.items` or `svc.tags`, or is `svc.graph()` or `svc.info`; rows are frozen; the
 command line and the HTTP handlers are named after the member they call. It breaks nearly every
 `0.1.0a50` call, with no alias: an old name fails at once with `AttributeError`, which
 `mypy --strict` reports first.
@@ -49,21 +49,29 @@ other breaking changes.
   included, raises `TypeError` before storage is read. Filters, `sort_index` and `metadata` are
   keyword-only.
 - ⚠ **`items.tag(item, tag)` and `untag` take the item first**, where `assign_tag` took the tag
-  first. Passed as two `UUID`s, a call left in the old order type-checks: edit each by hand.
+  first, and `tag` returns its `ItemTagLink`. Passed as two `UUID`s, a call left in the old order
+  type-checks: edit each by hand.
 - ⚠ **Rows are frozen.** Assigning to a field raises pydantic's `ValidationError`, a `ValueError`,
   and changing `metadata` in place `TypeError`. `update` returns a new row; each field defaults to
   `UNSET`, which leaves it, and `None` clears `external_id` and is a `TypeError` for any other.
   `str(row)` is a plain label, `Music (slug: music, id: …)`, and `Category.is_root` is gone.
 - ⚠ **Errors are stdlib errors too:** not-found is a `KeyError`, a refused value a `ValueError`, and
-  an argument of the wrong type a `TypeError` (`enabled="yes"` used to match nothing, and
-  `using=None` to open the `"default"` database). No `pydantic.ValidationError` leaves a member.
+  an argument of the wrong type a `TypeError` (`enabled="yes"` matched nothing, `using=None` opened
+  `"default"`); the flags `recursive`, `fuzzy` and `include_items` are read as `if flag:`. No
+  `pydantic.ValidationError` leaves a member, and on Django every database error, a commit's
+  included, is `TaxomeshRepositoryError`: `except django.db.DatabaseError` no longer matches.
   `TaxomeshRootCategoryError`, a validation error, also refuses a rename to the reserved name.
 - ⚠ **A category is at the top level exactly when it has no parent:** `add_parent` removes it from
   the top level, removing its last parent puts it back, and `roots()` and `graph().roots` agree.
   `None`, not the identifier of the implicit root, which is not-found everywhere, stands for the top
   level in `move` and `reorder`, and `move` returns `None`. File stores are normalised as they load,
   and on Django `migrate` runs `0011_root_invariant`; both drop an item's placement in the implicit
-  root, so `categories.list(item=…)` never returns it.
+  root, so `categories.list(item=…)` never returns it. `0012_implicit_root` stores the implicit root,
+  and folds a second one, which two services starting at once could store, into the first.
+- ⚠ **A new link with no position goes after the last** (API change): `add_parent`, `place_in` and
+  `relate` take `sort_index=None`, so a store lists links in the order they were made, where each
+  was at 0 and ties fell to the identifier. A stored link keeps its position, a new category goes
+  last, and the HTTP bodies and `--sort-index` do the same.
 - ⚠ **Relations:** `unrelate` of an absent relation does nothing, and both relation listings raise
   for an item that is not stored. `list_related` and `get_many_related` keep `enabled` items by
   default and skip a relation to an absent item with one `WARNING` from
@@ -71,9 +79,9 @@ other breaking changes.
   `skip_on_error` is gone.
 - ⚠ **Each service caches its own reads** for `cache_ttl` seconds (5 by default; `0` caches
   nothing), `get_many` included, and a write clears only that service's entries; an expired entry
-  is dropped when its member stores the next one. A YAML or JSON file has one writer, and a
-  repository whose file another writer changed refuses to write. `@memoize(ttl)` on a function of
-  yours, and `clear_all_caches()`, are gone.
+  is dropped when its member stores the next one; a read inside a transaction is neither cached nor
+  served from the cache. A YAML or JSON file has one writer, and a repository whose file another
+  writer changed refuses to write. `@memoize(ttl)` and `clear_all_caches()` are gone.
 - ⚠ **`YAMLRepository` is `YamlRepository`**, and `taxomesh.repositories` holds the three repository
   classes. `Direction` replaces `DIRECTION_OUTGOING` and `DIRECTION_INCOMING`.
 - ⚠ **The repository port**, for a custom backend: lookups are `find_*`, keyed batch reads `map_*`,
@@ -82,8 +90,9 @@ other breaking changes.
   `list_item_relation_links_for_items` `list_item_relation_links_batch`. The saves return the stored
   row and take `expected_version`, a delete removes its links, listings return `Sequence`, and
   `list_item_parent_links` takes `item_ids`, `list_category_parent_links` `category_ids` too.
-  `atomic()` keeps every other block of the store out, and both relation listings raise `TypeError`
-  for a bare `str` as `relation_types`.
+  `atomic()` keeps every other block of the store out, the read-only property `in_transaction` (API
+  change) says whether a transaction is open, and both relation listings raise `TypeError` for a
+  bare `str` as `relation_types`.
 - ⚠ **Each HTTP handler is `<namespace>_<member>`** (`get_category` is `categories_get`,
   `list_categories` `categories_roots`, `get_graph` `graph`) and returns what its member returns, so
   a lookup answers `None` and your application makes the 404. Arguments after the subject are
@@ -98,8 +107,9 @@ other breaking changes.
   stored none.
 - ⚠ **The Django admin is type-checked** against django-stubs, its mixins take Django's signatures,
   and `GraphEntry` and `RelationEntry` import from `taxomesh.contrib.django.graph_types`. Its graph
-  skips relations to a disabled item; a category's page shows *At the top level* read-only and saves
-  parents through the service. Its debug page names each row as `svc.info` names it.
+  skips relations to a disabled item, and a move on it needs the permission to change that kind; a
+  category's page shows *At the top level* read-only and saves parents through the service. Its
+  debug page names each row as `svc.info` names it. The `django` extra takes Django 6.x.
 - ⚠ **`Item.name` is required.** It may be `""`, but a stored item without the key fails to load.
 - ⚠ **The graph holds one node per category**, shared by every parent and compared by identity;
   `walk()` enumerates it, and its roots are ordered by sort index, then identifier. The HTTP
@@ -129,7 +139,9 @@ other breaking changes.
 - **Commands:** `category roots`, `add-parent` and `remove-parent`; `item remove-from` and `untag`;
   and `--state` on `item list-related`.
 - **`taxomesh` exports the whole surface**, the service, collections, graph and nodes have
-  readable reprs, and [`llms.txt`](llms.txt) states the surface on one page.
+  readable reprs, a link's `str()` is a sentence, and [`llms.txt`](llms.txt) states the surface.
+- **`YamlRepository` uses libyaml** when PyYAML has it, as its wheels do: one write is about four
+  times faster on a large store.
 
 ### Fixed
 
@@ -141,21 +153,26 @@ other breaking changes.
 - `items.search(category=…, enabled=False)` returns the disabled items it asks for, and
   `get_by_slug("")` answers `None` instead of an unrelated row without a slug.
 - Building the graph, serializing it and `taxomesh graph` end on a stored cycle and on any depth;
-  `taxomesh graph` stops past 100,000 drawn categories and names `--max-depth`. `--show-config`
-  refuses a repository type that every command refuses, and the command runs over Django.
-- The admin's graph views cost a constant number of queries, and its forms save every field they
-  show, a tag without metadata and a top-level category included. An inline saves each row on its
-  own, the new link before the old one goes, so a refused row keeps the link it had.
+  `taxomesh graph` stops past 100,000 drawn categories and names `--max-depth`, and refuses a
+  negative one. `--show-config` writes values that TOML reads back, refuses a repository type that
+  every command refuses, a `type` that is not text included, and the command runs over Django.
+- The admin's graph views cost a constant number of queries and answer a failure as the HTTP edge
+  does, and its forms save every field they show, a tag without metadata and a top-level category.
+  An inline saves each row on its own, the new link before the old one goes, so a refused row keeps
+  the link it had.
 - `--direction` refuses a value other than its three, which used to answer as `both`.
 - A failed file write raises `TaxomeshRepositoryError` from every write, not an `OSError`, and no
-  later write carries the failed change to disk; an operation whose later write fails clears its
-  service's cache, so the service reads what was stored. A file repository's lock stops two threads
-  passing one `expected_version`, and a write keeps the file's mode.
+  later write carries the failed change to disk, while a write stopped after its file is in place
+  keeps it; an operation whose later write fails clears its service's cache, so the service reads
+  what was stored. A file repository's lock stops two threads passing one `expected_version`, and a
+  write keeps the file's mode.
 - An update builds on the stored row, so it never undoes a change another service made within
   `cache_ttl`, and a write that names an entity that another service deleted raises its not-found
-  error. Two writes at the same moment run one after the other, so neither loses a change or stores
-  a cycle, a deleted row or link, or a slug that the other took. On Django, a slug that another row
-  holds raises `TaxomeshDuplicateSlugError`, not `TaxomeshExternalIdConflictError`.
-- Migrations `0008` and `0011` change the database `migrate --database` names, not `default`.
+  error. Two writes at the same moment, through one repository or on Django, run one after the
+  other, so neither loses a change or stores a cycle, a deleted row or link, or a slug that the other
+  took. On Django, a slug that another row holds raises `TaxomeshDuplicateSlugError`, not
+  `TaxomeshExternalIdConflictError`, and a read past the database's limit on query parameters runs
+  in several queries: a category of 40,000 items lists on SQLite.
+- Migrations `0008`, `0011` and `0012` change the database `migrate --database` names.
   `0008`, released in 0.1.0a30, no longer fails on a store holding a row without an external id.
 - A category name the model reads as `__root__`, such as `b"__root__"`, is refused as reserved.

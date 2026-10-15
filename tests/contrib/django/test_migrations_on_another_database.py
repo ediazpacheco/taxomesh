@@ -7,10 +7,6 @@ after. Each case runs ``_two_databases.py`` in a process of its own, with two SQ
 second database stays out of the other Django tests.
 """
 
-import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,24 +14,15 @@ import pytest
 
 pytest.importorskip("django", reason="Django is not installed")
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+from tests.contrib.django._process import run_helper
+
 HELPER = "tests.contrib.django._two_databases"
 
 
 # Any: the helper's JSON, whose shape each case knows.
 def _run(directory: Path, case: str) -> Any:
     """Run one case of the helper and return what it printed."""
-    env = {key: value for key, value in os.environ.items() if key != "DJANGO_SETTINGS_MODULE"}
-    result = subprocess.run(
-        [sys.executable, "-m", HELPER, str(directory), case],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    return run_helper(HELPER, str(directory), case)
 
 
 def test_the_root_invariant_migration_changes_only_the_database_it_migrates(tmp_path: Path) -> None:
@@ -48,6 +35,13 @@ def test_the_root_invariant_migration_changes_only_the_database_it_migrates(tmp_
         "after": ["Bop -> Jazz", "Jazz -> __root__", "Orphan -> __root__"],
         "recorded": True,
     }
+
+
+def test_the_implicit_root_migration_stores_the_root_only_in_the_database_it_migrates(tmp_path: Path) -> None:
+    held = _run(tmp_path, "implicit-root")
+
+    assert held["default"] == {"links": [], "recorded": False}
+    assert held["other"] == {"links": ["Jazz -> __root__", "Tango -> __root__"], "recorded": True}
 
 
 def test_the_external_id_migration_nulls_an_empty_id_only_in_the_database_it_migrates(tmp_path: Path) -> None:

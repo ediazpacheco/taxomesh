@@ -8,7 +8,6 @@ planted through the repository port, which is the only way to store those shapes
 """
 
 import importlib
-from pathlib import Path
 from types import ModuleType
 from uuid import UUID, uuid4
 
@@ -26,12 +25,12 @@ from taxomesh.contrib.django.models import (  # noqa: E402
     CategoryParentLinkModel,
     ItemParentLinkModel,
 )
+from taxomesh.domain.constants import ROOT_CATEGORY_NAME  # noqa: E402
 from taxomesh.domain.models import Category, CategoryParentLink, ItemParentLink  # noqa: E402
 
 pytestmark = pytest.mark.django_db
 
 MIGRATION = "taxomesh.contrib.django.migrations.0011_root_invariant"
-MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "taxomesh" / "contrib" / "django" / "migrations"
 
 
 def _migration() -> ModuleType:
@@ -105,7 +104,8 @@ class TestTheMigrationFixesAStore:
         assert _rows() == before
 
     def test_a_store_with_no_root_row_is_left_as_it_is(self) -> None:
-        """Nothing links to a root that is not stored; the service creates it when it first opens."""
+        """Nothing links to a root that is not stored; migration ``0012`` stores it."""
+        CategoryModel.objects.filter(name=ROOT_CATEGORY_NAME).delete()
         DjangoRepository().save_category(Category(category_id=uuid4(), name="Loose"))
         before = _rows()
 
@@ -126,8 +126,3 @@ class TestTheMigrationFile:
         assert len(operations) == 1
         assert isinstance(operations[0], migrations.RunPython)
         assert operations[0].reverse_code is migrations.RunPython.noop
-
-    def test_it_is_the_latest_migration(self) -> None:
-        numbered = sorted(path.stem for path in MIGRATIONS_DIR.glob("[0-9][0-9][0-9][0-9]_*.py"))
-
-        assert numbered[-1] == MIGRATION.rsplit(".", 1)[1]

@@ -879,3 +879,23 @@ class TestAtomic:
         with repo.atomic():
             stored = repo.save_category(_category(1))
         assert repo.find_category(_uuid(1)) == stored
+
+
+class TestInTransaction:
+    """``in_transaction`` says whether a read may see a write that a rollback takes back.
+
+    Only Django has transactions: it answers ``True`` inside a block, and every other backend answers
+    ``False`` there too. The Django parameter is a transactional test, so outside a block no
+    transaction is open. A caller's own transaction is asserted beside Django's tests, in
+    ``tests/contrib/django/test_transaction_cache.py``.
+    """
+
+    def test_no_transaction_is_open_outside_a_block(self, repo: TaxomeshRepositoryBase) -> None:
+        assert repo.in_transaction is False
+
+    def test_inside_a_block_only_a_backend_with_transactions_is_in_one(self, repo: TaxomeshRepositoryBase) -> None:
+        with repo.atomic():
+            inside = repo.in_transaction
+
+        assert inside is (type(repo).__name__ == "DjangoRepository")
+        assert repo.in_transaction is False

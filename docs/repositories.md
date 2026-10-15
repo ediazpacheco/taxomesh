@@ -2,7 +2,8 @@
 
 Choose a storage backend by where the taxonomy should live; the service's API is the same over each.
 The classes of the three that taxomesh ships import from `taxomesh.repositories`, which imports no
-Django: `DjangoRepository` needs the `django` extra only when it is constructed.
+Django: `DjangoRepository` needs the `django` extra only when it is constructed. A
+[`taxomesh.toml`](configuration.md) can name it instead, so code builds `TaxomeshService()`.
 
 | Repository | Stores in | Notes |
 |---|---|---|
@@ -11,14 +12,14 @@ Django: `DjangoRepository` needs the `django` extra only when it is constructed.
 | `DjangoRepository(using="default")` | the Django ORM | for use inside a Django project, which it needs configured: [Django integration](django-integration.md) |
 
 A YAML or JSON file is read once, when its repository is built, and written whole, atomically, on
-every write. A file therefore has one writer. A repository whose file another writer changed, in
-this process or another, refuses to write with a `TaxomeshRepositoryError` that says to build a new
-repository, which reads the change. The check runs before each write, so two processes writing at
-the same moment can still lose one write. One repository may be shared by threads: each call, and
-each `atomic()` block, runs whole under the repository's lock. A write keeps the file's mode, and a
-new file is `0600`. With 10,000 items, one write takes of the order of a second on YAML and of 30 ms
-on JSON. Only `DjangoRepository` rolls several writes back together, and processes that share a
-taxonomy use it.
+every write. A file therefore has one writer. A repository whose file another writer changed refuses
+to write with a `TaxomeshRepositoryError` that says to build a new repository, which reads the
+change. The check runs before each write, so two repositories writing at the same moment, in one
+process or in two, can still lose one write. One repository may be shared by threads: each call, and
+each `atomic()` block, runs whole under its lock. A write keeps the file's mode, and a new file is
+`0600`. With 10,000 items, one write took 0.3 s on YAML, with the libyaml of PyYAML's wheels, and
+25 ms on JSON, on an Apple M5 Max. Only `DjangoRepository` rolls writes back together, and processes
+that share a taxonomy use it.
 
 ```python
 from pathlib import Path
@@ -30,15 +31,12 @@ svc = TaxomeshService(repository=YamlRepository(Path("data/taxomesh.yaml")))
 svc = TaxomeshService(repository=JsonRepository("data/taxomesh.json"))  # a str path works too
 ```
 
-A [`taxomesh.toml`](configuration.md) can name the repository instead, so application code builds
-`TaxomeshService()` and nothing else.
-
 ## Custom backends
 
 A class implementing `TaxomeshRepositoryBase` is a backend: it can keep the taxonomy in a database,
 behind a remote API or in memory, if it keeps the contract below. The port is a `typing.Protocol`,
 declared in `taxomesh/ports/repository.py` and exported from `taxomesh`, so nothing is inherited.
-Each of its 37 members states its contract in its docstring: its arguments, what it returns, and,
+Each of its 38 members states its contract in its docstring: its arguments, what it returns, and,
 for a lookup or a delete, what absence looks like.
 
 | Group | Members |
@@ -48,7 +46,7 @@ for a lookup or a delete, what absence looks like.
 | Listings, `Sequence` | `list_categories`, `list_items`, `list_tags`, `list_category_parent_links`, `list_item_parent_links`, `list_item_tag_links`, `list_item_relation_links`, `list_item_relation_links_batch` |
 | Writes | `save_category`, `save_item`, `save_tag`, `save_category_parent_link`, `save_item_parent_link`, `save_item_relation_link`, `add_item_tag_link` |
 | Deletes, `bool` | `delete_category`, `delete_item`, `delete_tag`, `delete_category_parent_link`, `delete_item_parent_link`, `delete_item_relation_link`, `delete_item_tag_link` |
-| Transactions and introspection | `atomic()`, `describe()`, `config_summary` |
+| Transactions and introspection | `atomic()`, `in_transaction`, `describe()`, `config_summary` |
 
 What a backend must keep, as `tests/adapters/repositories/test_repository_contract.py` checks for
 every shipped backend:
@@ -65,16 +63,18 @@ every shipped backend:
 - **An external id is unique within its kind.** `save_category` and `save_item` raise
   `TaxomeshExternalIdConflictError` when another entity of that kind holds the external id.
 - **A storage failure raises `TaxomeshRepositoryError`**, from a read or a write, and a failed write
-  writes nothing. The file backends put back what memory held before a write that fails or is
-  interrupted, so no later write carries that change to disk.
+  writes nothing. A file backend puts back what memory held before a write that fails before its
+  new file is in place, so no later write carries that change to disk.
 - **`atomic()` keeps every other block of the store out.** A block that another thread opens on the
-  same repository, or another process on a shared database, waits until this one ends. A backend
-  that one thread at a time uses may do nothing. Entering a block may wait, and raises only
-  `TaxomeshRepositoryError`.
+  same repository, or another process on a shared database, waits until this one ends; on SQLite, a
+  block inside a caller's transaction that has read already waits only with `"OPTIONS":
+  {"transaction_mode": "IMMEDIATE"}`, and fails at once without it. A backend that one thread at a
+  time uses may do nothing. Entering a block may wait, and raises only `TaxomeshRepositoryError`.
+  `in_transaction` is `True` only while this thread is in a transaction.
 - **`relation_types` is a collection.** The two relation listings raise `TypeError` for a `str`.
 - **The port stores the links it is given.** The service keeps the root invariant: a category holds
   a link to the implicit root exactly when it holds no other parent link. A custom backend holding a
   store written without it brings the store to it; the shipped file backends do so as they load a
-  file, and Django's migration `0011` does it once.
+  file, and Django's migrations `0011` and `0012` do it once.
 
 ← [Back to README](../README.md)

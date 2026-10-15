@@ -78,9 +78,24 @@ def test_categories_add_parent_cyclic_raises(service: TaxomeshService) -> None:
     cat_a = service.categories.create(name="A")
     cat_b = service.categories.create(name="B")
     service.categories.add_parent(cat_a.category_id, cat_b.category_id)  # A → B (valid)
-    message = f"Category {cat_b.category_id} cannot have the parent {cat_a.category_id}: the parent link makes a cycle"
+    message = (
+        f"Category 'B' ({cat_b.category_id}) cannot have the parent 'A' ({cat_a.category_id}): "
+        "the parent link makes a cycle"
+    )
     with pytest.raises(TaxomeshCyclicDependencyError, match=re.escape(message)):
         service.categories.add_parent(cat_b.category_id, cat_a.category_id)  # B → A → cycle!
+
+
+def test_a_move_that_makes_a_cycle_names_both_categories(service: TaxomeshService) -> None:
+    music = service.categories.create(name="Music")
+    jazz = service.categories.create(name="Jazz")
+    service.categories.add_parent(jazz, music)
+    message = (
+        f"Category 'Music' ({music.category_id}) cannot have the parent 'Jazz' ({jazz.category_id}): "
+        "the parent link makes a cycle"
+    )
+    with pytest.raises(TaxomeshCyclicDependencyError, match=re.escape(message)):
+        service.categories.move(music, from_parent=None, to_parent=jazz)
 
 
 def test_categories_add_parent_self_loop_raises(service: TaxomeshService) -> None:

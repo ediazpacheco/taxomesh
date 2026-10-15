@@ -16,6 +16,7 @@ from taxomesh.adapters.repositories._version import row_to_store
 from taxomesh.adapters.repositories.json_repository import JsonRepository
 from taxomesh.adapters.repositories.yaml_repository import YamlRepository
 from taxomesh.application.service import TaxomeshService
+from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 from taxomesh.domain.info import RepositoryInfo
 from taxomesh.domain.models import (
     Category,
@@ -51,6 +52,11 @@ class InMemoryRepository:
     def atomic(self) -> AbstractContextManager[None]:
         """Return a best-effort no-op boundary (in-memory has no transaction)."""
         return contextlib.nullcontext()
+
+    @property
+    def in_transaction(self) -> bool:
+        """``False``: memory has no transaction."""
+        return False
 
     # --- Category ---
 
@@ -447,8 +453,11 @@ class InMemoryRepository:
 
 
 # The Django parameter carries the ``django_db`` mark, so pytest-django creates the test
-# database for any selection of tests, including one file run alone.
-DJANGO_PARAM: Final = pytest.param("django", marks=pytest.mark.django_db)
+# database for any selection of tests, including one file run alone. It is a transactional test,
+# which commits and then empties the database, so a service's reads run outside a transaction, as
+# in a view: inside one, the service caches nothing, and every read-count assertion would measure
+# that instead.
+DJANGO_PARAM: Final = pytest.param("django", marks=pytest.mark.django_db(transaction=True))
 
 # The four backends a parametrized fixture runs over.
 BACKEND_PARAMS: Final = ("in_memory", "json", "yaml", DJANGO_PARAM)
@@ -465,7 +474,12 @@ def _build_repository(request: pytest.FixtureRequest, tmp_path: Path) -> Taxomes
     # django
     pytest.importorskip("django", reason="django not installed")
     from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+    from taxomesh.contrib.django.models import CategoryModel  # noqa: PLC0415
 
+    # Migration 0012 stores the implicit root in the test database, and a test that flushes the
+    # database removes it, so whether it is there depends on the tests that ran before. Deleted here,
+    # the store is empty, as a new file is.
+    CategoryModel.objects.filter(name=ROOT_CATEGORY_NAME).delete()
     return DjangoRepository()
 
 

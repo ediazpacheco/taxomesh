@@ -163,7 +163,7 @@ def main(
     ),
     show_config: bool = typer.Option(
         False, "--show-config", help="Print the configuration in effect, as TOML, and exit"
-    ),  # noqa: E501
+    ),
 ) -> None:
     """Read and change the categories, items and tags that taxomesh stores."""
     ctx.ensure_object(dict)
@@ -234,7 +234,9 @@ def category_add_parent(
     ctx: typer.Context,
     category_id: UUID = typer.Argument(..., help="Category UUID"),
     parent_id: UUID = typer.Option(..., "--parent-id", help="Parent category UUID to add"),
-    sort_index: int = typer.Option(0, "--sort-index", help="Sort index within the parent"),
+    sort_index: int | None = typer.Option(
+        None, "--sort-index", help="Sort index within the parent; without it, after the last child"
+    ),
 ) -> None:
     """Add a parent to a category; a category with a parent leaves the top level."""
     svc = _service(ctx)
@@ -374,7 +376,9 @@ def item_place_in(
     ctx: typer.Context,
     item_id: UUID = typer.Argument(..., help="Item UUID"),
     category_id: UUID = typer.Option(..., "--category-id", help="Category UUID"),
-    sort_index: int = typer.Option(0, "--sort-index", help="Sort index within the category"),
+    sort_index: int | None = typer.Option(
+        None, "--sort-index", help="Sort index within the category; without it, after the last item"
+    ),
 ) -> None:
     """Place an item in a category (idempotent)."""
     svc = _service(ctx)
@@ -454,7 +458,11 @@ def item_relate(
     source_item_id: UUID = typer.Argument(..., help="Source item UUID"),
     target_item_id: UUID = typer.Argument(..., help="Target item UUID"),
     relation_type: str = typer.Argument(..., help="Relation type, such as related_to"),
-    sort_index: int = typer.Option(0, "--sort-index", help="Sort index among the relations of the source item"),
+    sort_index: int | None = typer.Option(
+        None,
+        "--sort-index",
+        help="Sort index among the relations of the source item; without it, after the last relation",
+    ),
     metadata: list[str] | None = typer.Option(None, "--metadata", help="KEY=VALUE pairs (repeatable)"),
 ) -> None:
     """Create or update a directed relation between two items."""
@@ -703,7 +711,13 @@ def graph_cmd(
             ends pass the filter, so a disabled category under an enabled parent loses that
             link. It stays under any parent that the filter keeps; with none, it is not drawn.
             A relation is drawn when its related item passes the filter too.
+
+    Raises:
+        typer.BadParameter: If ``max_depth`` is negative: a usage error, before anything is read.
     """
+    # Checked here rather than with ``min=0``, which would widen the help past 80 columns.
+    if max_depth < 0:
+        raise typer.BadParameter(f"{max_depth} is negative; 0 draws every level", param_hint="'--max-depth'")
     svc = _service(ctx)
     enabled = STATE_FILTERS[state]
     try:

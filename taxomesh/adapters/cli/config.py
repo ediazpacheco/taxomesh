@@ -9,7 +9,6 @@ configuration that ``taxomesh._config`` finds, the defaults included, and builds
 no service.
 """
 
-import json
 import os
 import sys
 from dataclasses import dataclass
@@ -27,6 +26,28 @@ from taxomesh.ports.repository import TaxomeshRepositoryBase
 
 # The names of the supported TOML settings, as dotted paths. dump_config reads its key names here.
 CONFIG_KEYS: Final[list[str]] = ["repository.type", "repository.path", "repository.using", "taxomesh.name"]
+
+# The control characters that a TOML basic string writes by a short name.
+_TOML_SHORT_ESCAPES: Final[dict[str, str]] = {"\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"}
+
+
+def _toml_string(value: str) -> str:
+    """Return ``value`` as a TOML basic string, which ``tomllib`` reads back as the same text.
+
+    ``\\`` and ``"`` are escaped, a control character by its short name or as ``\\uXXXX``, and every
+    other character, one outside the Basic Multilingual Plane included, is written as it is.
+    """
+    out = []
+    for char in value:
+        if char in ('"', "\\"):
+            out.append("\\" + char)
+        elif char in _TOML_SHORT_ESCAPES:
+            out.append(_TOML_SHORT_ESCAPES[char])
+        elif char < " " or char == "\x7f":
+            out.append(f"\\u{ord(char):04X}")
+        else:
+            out.append(char)
+    return '"' + "".join(out) + '"'
 
 
 def dump_config(repo_type: str, repo_detail: str, name: str | None = None) -> str:
@@ -56,12 +77,12 @@ def dump_config(repo_type: str, repo_detail: str, name: str | None = None) -> st
         detail_comment = (
             f'# The Django database alias: a key of the DATABASES setting.\n# Default: "{_DJANGO_USING_DEFAULT}"\n'
         )
-        detail_line = f'{_using_key} = "{repo_detail}"\n'
+        detail_line = f"{_using_key} = {_toml_string(repo_detail)}\n"
     else:
         detail_comment = (
             f'# The path of the data file.\n# Default: "{DEFAULT_YAML_PATH}" (yaml) or "{DEFAULT_JSON_PATH}" (json)\n'
         )
-        detail_line = f'{_path_key} = "{repo_detail}"\n'
+        detail_line = f"{_path_key} = {_toml_string(repo_detail)}\n"
     name_block = (
         ""
         if name is None
@@ -69,7 +90,7 @@ def dump_config(repo_type: str, repo_detail: str, name: str | None = None) -> st
             f"[{name_section}]\n"
             "\n"
             "# The name of this configuration, reported as svc.info.config_name.\n"
-            f"{name_key} = {json.dumps(name)}\n"
+            f"{name_key} = {_toml_string(name)}\n"
             "\n"
         )
     )
@@ -82,7 +103,7 @@ def dump_config(repo_type: str, repo_detail: str, name: str | None = None) -> st
         f"# The storage backend.\n"
         f'# Accepted values: "{accepted}"\n'
         f'# Default: "{YAML_REPO_TYPE}"\n'
-        f'{_type_key} = "{repo_type}"\n'
+        f"{_type_key} = {_toml_string(repo_type)}\n"
         "\n" + detail_comment + detail_line
     )
 

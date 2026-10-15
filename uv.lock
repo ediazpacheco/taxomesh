@@ -667,7 +667,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "django", marker = "extra == 'django'", specifier = ">=6.0" },
+    { name = "django", marker = "extra == 'django'", specifier = ">=6.0,<7" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rapidfuzz", specifier = ">=3.0" },

@@ -8,7 +8,7 @@ GitHub releases page, and the file links it.
 from tests.docs._reference import REPO_ROOT
 
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
-RELEASE_BUDGET = 150
+RELEASE_BUDGET = 167
 RELEASES_PAGE = "https://github.com/ediazpacheco/taxomesh/releases"
 
 

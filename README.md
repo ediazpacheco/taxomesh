@@ -36,9 +36,13 @@ pip install "taxomesh[django]"   # with the Django ORM backend and admin
 ## Quick start
 
 ```python
-from taxomesh import TaxomeshService
+from pathlib import Path
 
-svc = TaxomeshService()  # taxomesh.toml in the working directory, else data/taxomesh.yaml, kept between runs
+from taxomesh import TaxomeshService
+from taxomesh.repositories import YamlRepository
+
+Path("quickstart.yaml").unlink(missing_ok=True)  # each run starts with an empty store
+svc = TaxomeshService(YamlRepository("quickstart.yaml"))
 
 # Categories form a graph: Jazz has two parents, Music and Genres.
 music = svc.categories.create(name="Music")
@@ -60,11 +64,14 @@ assert svc.items.get_by_slug("no-such-slug") is None  # get* never raises
 assert jazz in svc.categories and len(svc.categories) == 3
 assert [c.name for c in svc.categories.list(item=album)] == ["Jazz"]
 assert [i.name for i in svc.items.list(tag=featured)] == ["Kind of Blue"]
-assert sorted(c.name for c in svc.categories.roots()) == ["Genres", "Music"]
+assert [c.name for c in svc.categories.roots()] == ["Music", "Genres"]  # in the order they were made
 
 node = svc.graph()[jazz]  # a read-only snapshot of the whole taxonomy
 assert sorted(parent.category.name for parent in node.parents) == ["Genres", "Music"]
 ```
+
+With no argument, `TaxomeshService()` reads `taxomesh.toml` in the working directory, and without one
+keeps its store in `data/taxomesh.yaml`, between runs.
 
 ## The forms
 
@@ -105,8 +112,9 @@ The collections do not iterate ([why](https://github.com/ediazpacheco/taxomesh/b
   or your own backend implementing `TaxomeshRepositoryBase`. One contract suite holds every shipped
   backend to that port.
 - **Errors**: a member raises a `TaxomeshError`, a not-found one also a `KeyError` and a validation
-  one also a `ValueError`, or a `TypeError` for an argument of the wrong type. Log records go to the
-  `taxomesh` logger, which has only a `NullHandler` of its own.
+  one also a `ValueError`, or a `TypeError` for an argument of the wrong type, except that the flags
+  `recursive`, `fuzzy` and `include_items` are read as `if flag:`. Log records go to the `taxomesh`
+  logger, which has only a `NullHandler` of its own.
 
 ## Documentation
 
@@ -131,30 +139,24 @@ every breaking change. From 1.0.0, the plan is that what `taxomesh`, `taxomesh.c
 `taxomesh.contrib.django` export, and the repository port, change incompatibly only in a major
 release, after a `DeprecationWarning` in at least one minor release.
 
-taxomesh supports Python 3.13 and 3.14, and Django 6.0 or later. Every release passes `ruff`,
-`mypy --strict` over the package and its tests, the Django integration included, and the full test
-suite with at least 80% line coverage, a measure that leaves out the Django integration, which its
-own tests exercise.
+taxomesh supports Python 3.13 and 3.14, and Django 6.x. CI checks every change to `main` with
+`ruff`, `mypy --strict` over the package and its tests, the Django integration included, and the full
+test suite with at least 80% line coverage, a measure that leaves out the Django integration, which
+its own tests exercise.
 
 ## Used in production
 
-`taxomesh` was extracted from, and is used in production by,
-[LetrasTango](https://letrastango.com/), a **personal, non-commercial side project** cataloguing
-tango lyrics, artists and works. It shares an author with `taxomesh` and is the **only known
-production consumer**: one deep, owner-operated integration rather than independent external
-validation. Over the Django backend it exercises external-id binding and bulk lookup, multi-parent
-categories with ordered placements, typed directed item relations with batched traversal, and fuzzy
-search. Tags, the HTTP handlers, the JSON and YAML backends and the CLI are tested in the library
-but not proven by this use. Its public artist graph is derived by LetrasTango from its own domain
-logic: `taxomesh` supplies the categories and relations, and does not render or own that view.
+taxomesh is used in production at [LetrasTango](https://letrastango.com/) to organise the categories
+and relations of its tango content.
 
 ## Development
 
 ```bash
 uv sync --all-extras
-uv run pytest
 uv run ruff check .
+uv run ruff format --check .
 uv run mypy --strict .
+uv run pytest
 ```
 
 Contributions are welcome: see [CONTRIBUTING.md](https://github.com/ediazpacheco/taxomesh/blob/main/CONTRIBUTING.md) for the setup and the quality gates.

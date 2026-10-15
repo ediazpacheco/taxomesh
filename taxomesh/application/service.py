@@ -84,8 +84,9 @@ class TaxomeshService:
         """Build the service over one repository, and store the implicit root if it is absent.
 
         Building a service reads every stored category once, to find the implicit root by its
-        reserved name. When no root is stored, the service stores one. So build one service and
-        share it, rather than one for each request.
+        reserved name. When no root is stored, the service reads them again inside one
+        ``atomic()`` block and stores one there, so two services built at the same moment store
+        one root. So build one service and share it, rather than one for each request.
 
         Args:
             repository: The repository to use. When it is given, the service reads no config file
@@ -122,7 +123,9 @@ class TaxomeshService:
             repository, self._config_name = resolve_repository(config_path)
         self._repo = repository
         self._root_id: UUID = self._ensure_root()
-        self._cache = ReadCache(cache_ttl)
+        # A read inside a transaction may see a write that a rollback takes back, so the cache
+        # neither stores nor serves one: it asks the repository at each read.
+        self._cache = ReadCache(cache_ttl, suspended=lambda: self._repo.in_transaction)
         self._item_corpus: SearchCorpus[Item] = SearchCorpus(self._cache)
         self._category_corpus: SearchCorpus[Category] = SearchCorpus(self._cache)
         # Built once, here, and not on each access. Building them does no I/O. The service owns the
@@ -175,16 +178,31 @@ class TaxomeshService:
     def _ensure_root(self) -> UUID:
         """Make sure that the implicit root is stored, and return its identifier.
 
-        Reads every stored category to find the implicit root by its reserved name, and stores one
-        when none is found. ``__init__`` calls it once. It is the one read of the repository that
-        building a service makes, because the port has no lookup by name.
+        Reads every stored category to find the implicit root by its reserved name. ``__init__``
+        calls it once, and on a store that holds the root it is the one read of the repository that
+        building a service makes, because the port has no lookup by name. When the root is absent,
+        the method reads again inside one ``atomic()`` block and stores the root only if it is still
+        absent: a service that another thread or worker builds at the same moment waits for the
+        block, and then finds the root that this one stored. On Django, migration ``0012`` stores the
+        root, so the block opens only on a store that the migration has not reached.
         """
-        for cat in self._repo.list_categories(enabled=None):
-            if cat.name == ROOT_CATEGORY_NAME:
-                return cat.category_id
-        root = Category(category_id=uuid4(), name=ROOT_CATEGORY_NAME)
-        self._repo.save_category(root)
-        return root.category_id
+        root_id = self._find_root()
+        if root_id is not None:
+            return root_id
+        with self._repo.atomic():
+            root_id = self._find_root()
+            if root_id is not None:
+                return root_id
+            root = Category(category_id=uuid4(), name=ROOT_CATEGORY_NAME)
+            self._repo.save_category(root)
+            return root.category_id
+
+    def _find_root(self) -> UUID | None:
+        """Return the identifier of the stored implicit root, or ``None`` when none is stored."""
+        return next(
+            (cat.category_id for cat in self._repo.list_categories(enabled=None) if cat.name == ROOT_CATEGORY_NAME),
+            None,
+        )
 
     @memoize
     def _load_graph_rows(self, *, enabled: bool | None, include_items: bool) -> _GraphRows:
@@ -340,11 +358,11 @@ class TaxomeshService:
             children=children_by_id,
             parents=parents_by_id,
             items=sorted_items_by_cat,
-            # The identifier breaks a tie. On ordinary data every top-level category is a tie:
-            # ``create`` writes ``sort_index=0`` on each link to the implicit root. With the
-            # identifier, the order does not depend on the order in which the repository lists the
-            # links: it is the port's ``(parent, sort_index, category_id)`` order, which
-            # ``categories.roots()`` also gives.
+            # The identifier breaks a tie: ``create`` puts each new category after the last, but a
+            # position given by hand, or a top level that a migration or a file load normalised at
+            # 0, can tie. With the identifier, the order does not depend on the order in which the
+            # repository lists the links: it is the port's ``(parent, sort_index, category_id)``
+            # order, which ``categories.roots()`` also gives.
             roots=sorted(root_sort, key=lambda cid: (root_sort[cid], str(cid))),
         )
 

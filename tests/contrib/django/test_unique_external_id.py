@@ -76,11 +76,9 @@ def test_save_item_resave_same_item_does_not_raise(repo: DjangoRepository) -> No
 
 def test_save_item_none_external_id_does_not_conflict(repo: DjangoRepository) -> None:
     """Multiple NULL external_ids must not trigger unique constraint violation."""
-    for _ in range(3):
-        item = Item(name="Item", external_id=None)
-        repo.save_item(item)
-    count = repo._ItemModel.objects.filter(external_id__isnull=True).count()
-    assert count >= 3
+    items = [repo.save_item(Item(name="Item", external_id=None)) for _ in range(3)]
+
+    assert repo.map_items_by_id([item.item_id for item in items]) == {item.item_id: item for item in items}
 
 
 # ---------------------------------------------------------------------------
@@ -107,11 +105,10 @@ def test_save_category_resave_same_category_does_not_raise(repo: DjangoRepositor
 
 def test_save_category_none_external_id_does_not_conflict(repo: DjangoRepository) -> None:
     """Multiple NULL external_ids must not trigger unique constraint violation."""
-    for _ in range(3):
-        cat = Category(name="NullCat", external_id=None)
-        repo.save_category(cat)
-    count = repo._CategoryModel.objects.filter(external_id__isnull=True).count()
-    assert count >= 3
+    categories = [repo.save_category(Category(name="NullCat", external_id=None)) for _ in range(3)]
+
+    stored = repo.map_categories_by_id([category.category_id for category in categories])
+    assert stored == {category.category_id: category for category in categories}
 
 
 # ---------------------------------------------------------------------------

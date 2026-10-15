@@ -19,6 +19,7 @@ TaxomeshRepositoryBase.find_item(self, item_id: uuid.UUID) -> taxomesh.domain.mo
 TaxomeshRepositoryBase.find_item_by_external_id(self, external_id: builtins.str) -> taxomesh.domain.models.item.Item | None
 TaxomeshRepositoryBase.find_item_by_slug(self, slug: builtins.str) -> taxomesh.domain.models.item.Item | None
 TaxomeshRepositoryBase.find_tag(self, tag_id: uuid.UUID) -> taxomesh.domain.models.tag.Tag | None
+TaxomeshRepositoryBase.in_transaction: property -> builtins.bool
 TaxomeshRepositoryBase.list_categories(self, *, enabled: bool | None = True) -> collections.abc.Sequence[taxomesh.domain.models.category.Category]
 TaxomeshRepositoryBase.list_category_parent_links(self, *, category_ids: collections.abc.Collection[uuid.UUID] | None = None, parent_category_ids: collections.abc.Collection[uuid.UUID] | None = None) -> collections.abc.Sequence[taxomesh.domain.models.category_parent_link.CategoryParentLink]
 TaxomeshRepositoryBase.list_item_parent_links(self, *, item_ids: collections.abc.Collection[uuid.UUID] | None = None, category_ids: collections.abc.Collection[uuid.UUID] | None = None) -> collections.abc.Sequence[taxomesh.domain.models.item_parent_link.ItemParentLink]
@@ -38,7 +39,7 @@ TaxomeshRepositoryBase.save_item(self, item: taxomesh.domain.models.item.Item, *
 TaxomeshRepositoryBase.save_item_parent_link(self, link: taxomesh.domain.models.item_parent_link.ItemParentLink) -> None
 TaxomeshRepositoryBase.save_item_relation_link(self, link: taxomesh.domain.models.item_relation_link.ItemRelationLink) -> None
 TaxomeshRepositoryBase.save_tag(self, tag: taxomesh.domain.models.tag.Tag) -> None
-CategoryCollection.add_parent(self, category: CategoryRef, parent: CategoryRef, *, sort_index: int = 0) -> CategoryParentLink
+CategoryCollection.add_parent(self, category: CategoryRef, parent: CategoryRef, *, sort_index: int | None = None) -> CategoryParentLink
 CategoryCollection.create(self, name: str, *, description: str = '', slug: str = '', external_id: ExternalId = None, metadata: dict[str, Any] | None = None) -> Category
 CategoryCollection.delete(self, key: CategoryRef, /) -> None
 CategoryCollection.get(self, key: K, default: D | None = None, /) -> T | D | None
@@ -65,8 +66,8 @@ ItemCollection.list(self, *, category: CategoryRef | None = None, recursive: boo
 ItemCollection.list_related(self, item: ItemRef, *, relation_types: str | Collection[str] | None = None, direction: Direction | Literal['outgoing', 'incoming', 'both'] = 'outgoing', enabled: bool | None = True) -> Sequence[Item]
 ItemCollection.list_relations(self, item: ItemRef, *, relation_types: str | Collection[str] | None = None, direction: Direction | Literal['outgoing', 'incoming', 'both'] = 'outgoing') -> Sequence[ItemRelationLink]
 ItemCollection.move(self, item: ItemRef, *, from_category: CategoryRef, to_category: CategoryRef, before: ItemRef | None = None) -> ItemParentLink
-ItemCollection.place_in(self, item: ItemRef, category: CategoryRef, *, sort_index: int = 0) -> ItemParentLink
-ItemCollection.relate(self, source: ItemRef, target: ItemRef, relation_type: str, *, sort_index: int = 0, metadata: dict[str, Any] | None = None) -> ItemRelationLink
+ItemCollection.place_in(self, item: ItemRef, category: CategoryRef, *, sort_index: int | None = None) -> ItemParentLink
+ItemCollection.relate(self, source: ItemRef, target: ItemRef, relation_type: str, *, sort_index: int | None = None, metadata: dict[str, Any] | None = None) -> ItemRelationLink
 ItemCollection.remove_from(self, item: ItemRef, category: CategoryRef) -> None
 ItemCollection.reorder(self, category: CategoryRef, items: Sequence[ItemRef]) -> None
 ItemCollection.search(self, query: str, *, limit: int = 20, category: CategoryRef | None = None, recursive: bool = False, enabled: bool | None = True, fuzzy: bool = True) -> Sequence[Item]

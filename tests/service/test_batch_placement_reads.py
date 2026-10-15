@@ -79,8 +79,8 @@ class TestItemsListOrdering:
 
         assert [item.item_id for item in result] == [link.item_id for link in links]
 
-    def test_default_sort_index_is_applied(self, service: TaxomeshService) -> None:
-        """Feature 034: a placement made without a sort_index still lands deterministically."""
+    def test_a_placement_with_no_sort_index_goes_after_the_last(self, service: TaxomeshService) -> None:
+        """Placements made without a sort_index take the positions 0, 1, 2, so the list keeps their order."""
         category = service.categories.create("Defaults")
         for index in range(3):
             item = service.items.create(name=f"Default {index}")
@@ -89,9 +89,9 @@ class TestItemsListOrdering:
 
         result = service.items.list(category=category.category_id)
 
-        assert len(result) == 3
+        assert [item.name for item in result] == ["Default 0", "Default 1", "Default 2"]
         links = service.repository.list_item_parent_links(category_ids=[category.category_id])
-        assert {link.sort_index for link in links} == {0}
+        assert [link.sort_index for link in links] == [0, 1, 2]
 
 
 # ---------------------------------------------------------------------------

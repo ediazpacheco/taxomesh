@@ -186,5 +186,5 @@ class TaxomeshLinkedFKWidget(AutocompleteSelect):
                 url,
             )
             return mark_safe(output + link)
-        except (NoReverseMatch, Exception):  # noqa: BLE001
+        except NoReverseMatch:
             return output

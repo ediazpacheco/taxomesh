@@ -90,10 +90,11 @@ def _repository_section(document: Mapping[str, Any], path: Path) -> tuple[Mappin
     """Return the document's ``[repository]`` section and the type it names, YAML when it names none.
 
     Raises:
-        TaxomeshConfigError: If the section names a repository type that taxomesh does not support, or
-            holds a ``path`` or a ``using`` that is not a string.
+        TaxomeshConfigError: If the section holds a ``type``, a ``path`` or a ``using`` that is not a
+            string, or names a repository type that taxomesh does not support.
     """
     section = _table(document, "repository", path)
+    _check_text(section, "repository", "type", path)
     repo_type = section.get("type", YAML_REPO_TYPE)
     if repo_type not in _BUILDERS:
         supported = ", ".join(f"'{name}'" for name in SUPPORTED_REPO_TYPES)
@@ -105,6 +106,7 @@ def _repository_section(document: Mapping[str, Any], path: Path) -> tuple[Mappin
     return section, repo_type
 
 
+# Any: a TOML document's values are whatever the file holds, as tomllib types them.
 def _name(document: Mapping[str, Any], path: Path) -> str | None:
     """Return the document's ``[taxomesh] name``, or ``None`` when it declares none.
 

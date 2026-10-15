@@ -14,12 +14,12 @@ jobs:
     name: Static checks (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --locked --all-extras
       - name: Lint (ruff check)
         run: uv run ruff check .
       - name: Format check (ruff format)
@@ -35,14 +35,31 @@ jobs:
       matrix:
         python-version: ["3.13", "3.14"]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --locked --all-extras
       - name: Tests + coverage
         run: uv run pytest
+
+  test-latest-django:
+    name: Tests (Python 3.13 + the latest Django 6.x)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          python-version: "3.13"
+      - name: Install dependencies, then the latest Django that the extra allows
+        # `uv run --with` would keep the locked Django, which the range also allows.
+        run: |
+          uv sync --locked --all-extras
+          uv pip install --upgrade "django>=6.0,<7"
+          uv run --no-sync python -c "import django; print('Django', django.get_version())"
+      - name: Tests + coverage
+        run: uv run --no-sync pytest
 
   wheel:
     name: Wheel consumer smoke (Python ${{ matrix.python-version }})
@@ -52,8 +69,8 @@ jobs:
       matrix:
         python-version: ["3.13", "3.14"]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheel
@@ -96,16 +113,16 @@ jobs:
           /tmp/consumer/bin/python - <<'PY'
           import django
 
-          # The floor that pyproject.toml declares (django>=6.0). An exact minor version here
-          # would fail CI at each new minor release of Django that the floor allows.
-          assert django.VERSION >= (6, 0), django.VERSION
+          # The range that pyproject.toml declares (django>=6.0,<7). An exact minor version here
+          # would fail CI at each new minor release of Django that the range allows.
+          assert (6, 0) <= django.VERSION < (7, 0), django.VERSION
           import taxomesh  # noqa: F401  core still imports alongside the Django extra
           print("django extra OK — Django", django.get_version())
           PY
 
   ci:
     name: ci
-    needs: [static, test, wheel]
+    needs: [static, test, test-latest-django, wheel]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -113,6 +130,7 @@ jobs:
         run: |
           if [[ "${{ needs.static.result }}" != "success" \
              || "${{ needs.test.result }}" != "success" \
+             || "${{ needs.test-latest-django.result }}" != "success" \
              || "${{ needs.wheel.result }}" != "success" ]]; then
             echo "One or more quality gates failed"
             exit 1

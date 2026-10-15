@@ -12,7 +12,9 @@ Nothing else gates the admin's query count. ``test_django_placement_queries.py``
 The views are called through ``RequestFactory`` rather than ``admin_client`` deliberately:
 the figure is then the view's own cost, with no login, session or permission queries folded
 in. Every measurement is taken cold: each view builds its own service for the request, and with
-it an empty cache, so a second call pays what the first did.
+it an empty cache, so a second call pays what the first did. The tests are transactional, so a view
+reads outside a transaction, as in a site without ``ATOMIC_REQUESTS``: inside one, the service
+caches nothing, and the children view reads one more time.
 """
 
 from collections.abc import Callable
@@ -36,7 +38,7 @@ from taxomesh.application.service import TaxomeshService  # noqa: E402
 from taxomesh.contrib.django.admin import CategoryModelAdmin  # noqa: E402
 from taxomesh.contrib.django.models import CategoryModel  # noqa: E402
 
-pytestmark = pytest.mark.django_db
+pytestmark = pytest.mark.django_db(transaction=True)
 
 # Two sizes far enough apart that any per-row term is unmissable.
 CORPUS_SIZES = (3, 12)
