@@ -136,10 +136,9 @@ class TestWalkEnumeratesEveryNode:
     def test_the_walk_is_an_iterator(self) -> None:
         """The contract says ``Iterator``, so a caller may consume it one node at a time.
 
-        *Which* root comes first is deliberately not asserted. ``create`` gives every category the
-        same root-link sort index, so top-level categories tie and the assembler resolves the tie
-        by iterating a set — making the order of two roots vary from run to run. That belongs to
-        the assembler, not to the walk, and pinning it here would only buy a coin-flip failure.
+        *Which* root comes first is not asserted. ``create`` puts each new category after the last,
+        and ``roots`` orders the top level by sort index, then by identifier. That order belongs to
+        ``roots``, not to the walk, so this test does not pin it.
         """
         service = TaxomeshService(repository=InMemoryRepository())
         build_shared_taxonomy(service)
@@ -156,9 +155,9 @@ class TestWalkEnumeratesEveryNode:
         """``iter(graph)`` raises ``TypeError``, so ``walk`` stays the only enumerator.
 
         Defining no ``__iter__`` is not enough. With ``__getitem__`` defined, Python's old sequence
-        protocol would make the graph iterable anyway, and the first ``next()`` would raise a
-        not-found error for the key ``0``. The call form of ``pytest.raises``, because ``mypy``
-        rejects the statement ``iter(graph)`` as well.
+        protocol would make the graph iterable anyway, and the first ``next()`` would call
+        ``graph[0]`` and raise ``TypeError``, since an integer is not a key. The call form of
+        ``pytest.raises``, because ``mypy`` rejects the statement ``iter(graph)`` as well.
         """
         service = TaxomeshService(repository=InMemoryRepository())
         build_shared_taxonomy(service)
@@ -171,9 +170,9 @@ class TestWalkEnumeratesEveryNode:
         """``reversed(graph)`` raises ``TypeError``, the protocol's second door closed too.
 
         With ``__len__`` and ``__getitem__`` defined, the same protocol would make the graph
-        reversible without a ``__reversed__``, and the first ``next()`` would raise a not-found
-        error for the key ``len(graph) - 1``. The call form of ``pytest.raises``, because ``mypy``
-        rejects the statement ``reversed(graph)`` as well.
+        reversible without a ``__reversed__``, and the first ``next()`` would call
+        ``graph[len(graph) - 1]`` and raise ``TypeError`` in the same way. The call form of
+        ``pytest.raises``, because ``mypy`` rejects the statement ``reversed(graph)`` as well.
         """
         service = TaxomeshService(repository=InMemoryRepository())
         build_shared_taxonomy(service)

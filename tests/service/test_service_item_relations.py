@@ -444,7 +444,7 @@ class TestGetManyRelated:
 
 
 # ---------------------------------------------------------------------------
-# 056 — direction-aware batched traversal: incoming
+# get_many_related(direction="incoming")
 # ---------------------------------------------------------------------------
 
 
@@ -520,7 +520,7 @@ class TestGetManyRelatedIncoming:
 
 
 # ---------------------------------------------------------------------------
-# 056 — direction-aware batched traversal: default outgoing preserved
+# get_many_related with no direction is direction="outgoing"
 # ---------------------------------------------------------------------------
 
 
@@ -541,7 +541,7 @@ class TestGetManyRelatedDefaultEquivalence:
 
 
 # ---------------------------------------------------------------------------
-# 056 — direction-aware batched traversal: both
+# get_many_related(direction="both")
 # ---------------------------------------------------------------------------
 
 

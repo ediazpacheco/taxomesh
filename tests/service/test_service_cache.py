@@ -415,7 +415,7 @@ class TestBatchRelatedItemsCaching:
         assert repo.list_item_relation_links_batch.call_count == 2
 
     def test_direction_variants_are_independent_entries(self) -> None:
-        """056 — outgoing/incoming/both are distinct cache keys (one unified query each)."""
+        """Outgoing, incoming and both are distinct cache keys, and each is read in one query."""
         a, b = uuid4(), uuid4()
         repo = _repo_with_batch_relation(a, b)
         svc = _make_service(repo)
@@ -427,7 +427,7 @@ class TestBatchRelatedItemsCaching:
         assert repo.list_item_relation_links_batch.call_count == 3
 
     def test_incoming_identical_calls_hit_repo_once(self) -> None:
-        """056 — two identical incoming calls query the repository once."""
+        """Two identical incoming calls query the repository once."""
         a, b = uuid4(), uuid4()
         repo = _repo_with_batch_relation(a, b)
         svc = _make_service(repo)

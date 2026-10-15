@@ -4,19 +4,19 @@ All notable changes to taxomesh are documented here, in the format of
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-The alpha series before 0.2.0, `0.1.0a1` to `0.1.0a50`, is described on the
+The alpha series before 1.0.0, `0.1.0a1` to `0.1.0a50`, is described on the
 [GitHub releases page](https://github.com/ediazpacheco/taxomesh/releases), one release per git tag.
 The full entries of that series are in
 [`CHANGELOG.md` at the tag `v0.1.0a50`](https://github.com/ediazpacheco/taxomesh/blob/v0.1.0a50/CHANGELOG.md).
 
-## [0.2.0] — 2026-10-12
+## [1.0.0] — 2026-10-15
 
-0.2.0 gives taxomesh a Python stdlib-style interface: every operation is a member of
+1.0.0 gives taxomesh a Python stdlib-style interface: every operation is a member of
 `svc.categories`, `svc.items` or `svc.tags`, or is `svc.graph()` or `svc.info`; rows are frozen; the
 command line and the HTTP handlers are named after the member they call. It breaks nearly every
 `0.1.0a50` call, with no alias: an old name fails at once with `AttributeError`, which
-`mypy --strict` reports first.
-[`docs/python-api.md`](docs/python-api.md) states the new surface.
+`mypy --strict` reports first. [`docs/python-api.md`](docs/python-api.md) states the new surface.
+From this release, the README's Stability and versioning section is the rule.
 
 ### Silent changes
 
@@ -87,12 +87,12 @@ other breaking changes.
 - ⚠ **The repository port**, for a custom backend: lookups are `find_*`, keyed batch reads `map_*`,
   `assign_tag` and `remove_tag` `add_item_tag_link` and `delete_item_tag_link`,
   `get_config_summary()` the `config_summary` property, `get_debug_info()` `describe()`, and
-  `list_item_relation_links_for_items` `list_item_relation_links_batch`. The saves return the stored
-  row and take `expected_version`, a delete removes its links, listings return `Sequence`, and
-  `list_item_parent_links` takes `item_ids`, `list_category_parent_links` `category_ids` too.
-  `atomic()` keeps every other block of the store out, the read-only property `in_transaction` (API
-  change) says whether a transaction is open, and both relation listings raise `TypeError` for a
-  bare `str` as `relation_types`.
+  `list_item_relation_links_for_items` `list_item_relation_links_batch`. `save_category` and
+  `save_item` return the stored row and take `expected_version`, a delete removes its links,
+  listings return `Sequence`, and `list_item_parent_links` takes `item_ids`,
+  `list_category_parent_links` `category_ids` too. `atomic()` keeps every other block of the store
+  out, the read-only property `in_transaction` (API change) says whether a transaction is open, and
+  both relation listings raise `TypeError` for a bare `str` as `relation_types`.
 - ⚠ **Each HTTP handler is `<namespace>_<member>`** (`get_category` is `categories_get`,
   `list_categories` `categories_roots`, `get_graph` `graph`) and returns what its member returns, so
   a lookup answers `None` and your application makes the 404. Arguments after the subject are
@@ -171,8 +171,8 @@ other breaking changes.
   error. Two writes at the same moment, through one repository or on Django, run one after the
   other, so neither loses a change or stores a cycle, a deleted row or link, or a slug that the other
   took. On Django, a slug that another row holds raises `TaxomeshDuplicateSlugError`, not
-  `TaxomeshExternalIdConflictError`, and a read past the database's limit on query parameters runs
-  in several queries: a category of 40,000 items lists on SQLite.
+  `TaxomeshExternalIdConflictError`, and a read given more identifiers or external ids than the
+  database accepts in one query runs in several queries: a category of 40,000 items lists on SQLite.
 - Migrations `0008`, `0011` and `0012` change the database `migrate --database` names.
   `0008`, released in 0.1.0a30, no longer fails on a store holding a row without an external id.
 - A category name the model reads as `__root__`, such as `b"__root__"`, is refused as reserved.

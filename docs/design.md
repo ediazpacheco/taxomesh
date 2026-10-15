@@ -140,7 +140,7 @@ serializer raises that error, so `taxomesh.contrib.api.errors` defines it, besid
 
 ## The public surface
 
-`taxomesh/__init__.py` exports the whole public surface, in six groups:
+`taxomesh/__init__.py` exports six groups of the public surface:
 
 - the service, `TaxomeshService`;
 - the errors;

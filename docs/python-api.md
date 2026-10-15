@@ -565,7 +565,7 @@ that category and its descendants; `include_items=False` reads no items at all.
 | Node member | Returns |
 |---|---|
 | `node.category` | the `Category` row |
-| `node.children` · `node.parents` | `Sequence[CategoryNode]`, one level: children by sort index, parents as stored |
+| `node.children` · `node.parents` | `Sequence[CategoryNode]`, one level: children by sort index, parents by identifier |
 | `node.items` | `Sequence[Item]`, by sort index; `()` in a graph built with `include_items=False` |
 | `node.descendants()` · `node.ancestors()` | `Sequence[CategoryNode]`, every level down or up, depth-first in stored order, each once, the node left out |
 

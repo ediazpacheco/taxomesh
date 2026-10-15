@@ -1,4 +1,4 @@
-"""Spy-repository tests for 054: the four hot read paths must not issue full-table scans."""
+"""Spy-repository tests: the hot read paths below issue no full-table scan."""
 
 import logging
 from collections.abc import Collection, Mapping
@@ -183,7 +183,7 @@ def test_related_items_disabled_target_returned_unfiltered(
 
 
 # ---------------------------------------------------------------------------
-# Site 1b — direction-aware batched traversal: incoming / both anti-N+1 (056)
+# Site 1b — get_many_related, incoming and both: a fixed number of reads, whatever the input size
 # ---------------------------------------------------------------------------
 
 

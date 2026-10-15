@@ -68,6 +68,9 @@ def test_untag_noop_if_not_linked(service: TaxomeshService) -> None:
     tag = service.tags.create(name="unused")
     item = service.items.create(name="ref-w", external_id="ref-w")
     service.items.untag(item.item_id, tag.tag_id)  # no prior assignment, must not raise
+    assert service.repository.list_item_tag_links(item_ids=[item.item_id]) == []
+    assert tag.tag_id in service.tags
+    assert item.item_id in service.items
 
 
 def test_assign_missing_tag_raises(service: TaxomeshService) -> None:
@@ -129,7 +132,7 @@ class TestItemFirstTagging:
 
 
 # ---------------------------------------------------------------------------
-# T-06: tags.update, tags.delete
+# tags.update, tags.delete and tags.get_many
 # ---------------------------------------------------------------------------
 
 

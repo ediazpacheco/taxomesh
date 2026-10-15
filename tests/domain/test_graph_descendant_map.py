@@ -166,9 +166,8 @@ class TestChildOrderParity:
     def test_every_entry_lists_its_children_in_the_listing_order(self) -> None:
         """Compared against the read itself, not against a recorded literal.
 
-        On ordinary data every sibling ties on ``sort_index``, so the order is decided by the
-        identifier tie-break the repository port documents. Hard-coding the expected names would
-        pin whichever category happened to be allocated the lower UUID.
+        What the test pins is that the graph and ``categories.list`` agree on the order, whatever
+        positions the links hold, so it reads the expected order from the listing.
         """
         service = TaxomeshService(repository=InMemoryRepository())
         stack_diamonds(service, 3)

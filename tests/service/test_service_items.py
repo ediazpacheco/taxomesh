@@ -63,7 +63,7 @@ def test_delete_missing_item_raises(service: TaxomeshService) -> None:
 
 
 # ---------------------------------------------------------------------------
-# T-06: items.update, items.place_in, items.list filtered
+# items.update, items.place_in, and items.list filtered by category
 # ---------------------------------------------------------------------------
 
 

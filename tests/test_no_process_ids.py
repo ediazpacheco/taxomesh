@@ -22,6 +22,7 @@ SKIPPED_DIRECTORIES: Final[frozenset[str]] = frozenset({"__pycache__"})
 #: pass for a clean tree.
 PATTERNS: Final[dict[str, tuple[str, str]]] = {
     "task": (r"\bT\d{3}[a-z]?\b", "see T180"),
+    "task with a dash": (r"\bT-\d{2}\b", "T-42: the cache tests"),
     "requirement": (r"\bFR-\d", "(FR-012)"),
     "non-functional requirement": (r"\bNFR-\d", "(NFR-008)"),
     "success criterion": (r"\bSC-\d", "the bytes SC-009 pins"),
@@ -32,6 +33,8 @@ PATTERNS: Final[dict[str, tuple[str, str]]] = {
     "acceptance criterion": (r"\bAC\d\b", "meets AC2"),
     "phase": (r"\bPhase \d+\b", "Phase 4"),
     "spec number": (r"(?i)\bspecs? ?\d{3}\b|specs/\d{3}", "introduced in spec 034"),
+    "spec number in brackets": (r"\(0\d{2}\)", "the batch reads (093)"),
+    "spec number as a label": (r"(?<![\w.,+-])0\d{2}(?: —|:)", "093 — one query each"),
     "spec slug": (r"\b0\d{2}-[a-z][a-z-]+", "(047-some-feature)"),
     "research note": (r"research\.md", "(research.md R2)"),
     "research decision": (r"\bR\d{2}\b", "as R07 decided"),

@@ -92,7 +92,7 @@ def test_migration_0008_has_alter_field_operations() -> None:
 
     mod = importlib.import_module("taxomesh.contrib.django.migrations.0008_unique_external_id")
     alter_ops = [op for op in mod.Migration.operations if isinstance(op, AlterField)]
-    assert len(alter_ops) >= 2, f"Migration 0008 must contain at least 2 AlterField operations, got: {len(alter_ops)}"
+    assert len(alter_ops) == 4, f"Migration 0008 must contain 4 AlterField operations, got: {len(alter_ops)}"
 
 
 # ---------------------------------------------------------------------------
