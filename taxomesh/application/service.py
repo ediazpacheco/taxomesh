@@ -123,7 +123,9 @@ class TaxomeshService:
             repository, self._config_name = resolve_repository(config_path)
         self._repo = repository
         self._root_id: UUID = self._ensure_root()
-        self._cache = ReadCache(cache_ttl)
+        # A read inside a transaction may see a write that a rollback takes back, so the cache
+        # neither stores nor serves one: it asks the repository at each read.
+        self._cache = ReadCache(cache_ttl, suspended=lambda: self._repo.in_transaction)
         self._item_corpus: SearchCorpus[Item] = SearchCorpus(self._cache)
         self._category_corpus: SearchCorpus[Category] = SearchCorpus(self._cache)
         # Built once, here, and not on each access. Building them does no I/O. The service owns the

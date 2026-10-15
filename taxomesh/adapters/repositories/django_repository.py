@@ -237,6 +237,20 @@ class DjangoRepository:
                 raise
             raise TaxomeshRepositoryError(str(exc)) from exc
 
+    @property
+    def in_transaction(self) -> bool:
+        """Whether a transaction of this repository's database is open on the calling thread.
+
+        ``True`` inside an ``atomic`` block of the database alias, the caller's or this
+        repository's own, and while the open connection's autocommit is off. Django keeps one
+        connection for each thread, so another thread's transaction is not this thread's. Reading
+        it opens no connection.
+        """
+        from django.db import connections  # noqa: PLC0415
+
+        connection = connections[self._using]
+        return connection.in_atomic_block or (connection.connection is not None and not connection.get_autocommit())
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

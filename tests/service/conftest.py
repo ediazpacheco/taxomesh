@@ -53,6 +53,11 @@ class InMemoryRepository:
         """Return a best-effort no-op boundary (in-memory has no transaction)."""
         return contextlib.nullcontext()
 
+    @property
+    def in_transaction(self) -> bool:
+        """``False``: memory has no transaction."""
+        return False
+
     # --- Category ---
 
     def save_category(self, category: Category, *, expected_version: int | None = None) -> Category:
@@ -448,8 +453,11 @@ class InMemoryRepository:
 
 
 # The Django parameter carries the ``django_db`` mark, so pytest-django creates the test
-# database for any selection of tests, including one file run alone.
-DJANGO_PARAM: Final = pytest.param("django", marks=pytest.mark.django_db)
+# database for any selection of tests, including one file run alone. It is a transactional test,
+# which commits and then empties the database, so a service's reads run outside a transaction, as
+# in a view: inside one, the service caches nothing, and every read-count assertion would measure
+# that instead.
+DJANGO_PARAM: Final = pytest.param("django", marks=pytest.mark.django_db(transaction=True))
 
 # The four backends a parametrized fixture runs over.
 BACKEND_PARAMS: Final = ("in_memory", "json", "yaml", DJANGO_PARAM)

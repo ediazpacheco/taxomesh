@@ -203,6 +203,11 @@ class FileRepositoryBase(ABC):
         with self._lock:
             yield
 
+    @property
+    def in_transaction(self) -> bool:
+        """``False``: a file has no transactions, so no read sees a write that a rollback could take back."""
+        return False
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

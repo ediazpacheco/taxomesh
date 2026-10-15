@@ -259,6 +259,11 @@ collections it builds. A `@memoize` method reaches its owner's cache at call tim
   entry alive.
 - A read may be stale within `cache_ttl`; a write is not, since it reads what it changes from
   storage. On that basis, threads may share a service.
+- A read inside a transaction, the caller's or the repository's own, is neither stored in the cache
+  nor served from it: it sees the transaction's writes before they commit, and a rollback takes them
+  back. The port's `in_transaction` says when one is open on the calling thread; only Django has
+  transactions, and with `ATOMIC_REQUESTS` every read of a view is inside one.
+  `tests/contrib/django/test_transaction_cache.py` asserts it.
 - A listing reads its links, and then the rows that they name. When another writer deletes one of
   those rows between the two reads, the listing raises that row's not-found error.
 - A collection is never constructed directly: built any other way, it would hold a cache of its

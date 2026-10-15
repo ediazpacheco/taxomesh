@@ -18,6 +18,8 @@ The rest of the library depends on five invariants:
   of one lifetime at most, however many keys it is asked about over time.
 * **A lifetime of zero stores nothing.** Every call is computed, ``prime`` stores nothing and
   ``cached`` answers :data:`MISS`.
+* **A suspended cache stores and serves nothing.** While the predicate that the owner gives the
+  cache answers ``True``, it behaves as a lifetime of zero, and keeps its entries for later.
 * **``time`` is read through the module global at call time**, so a test can replace the clock.
 """
 
@@ -56,13 +58,16 @@ class ReadCache:
     them clears every read the service cached, and no other service's.
     """
 
-    def __init__(self, ttl: float) -> None:
+    def __init__(self, ttl: float, *, suspended: Callable[[], bool] = lambda: False) -> None:
         """Start empty.
 
         Args:
             ttl: Seconds an entry is served from memory. Zero or less stores nothing.
+            suspended: Asked at each read: while it answers ``True``, the cache neither stores nor
+                serves an entry. A service passes its repository's ``in_transaction``.
         """
         self._ttl = ttl
+        self._suspended = suspended
         # Every store walks its member's entries, and a service may be shared across threads. The
         # lock is reentrant: a store hashes its key while holding it, and hashing a key may run code
         # that reads through this cache again, on the same thread. functools' own pure-Python
@@ -80,8 +85,11 @@ class ReadCache:
 
     @property
     def enabled(self) -> bool:
-        """Return whether this cache stores anything: ``False`` when the lifetime is not positive."""
-        return self._ttl > 0
+        """Return whether this cache stores and serves entries now.
+
+        ``False`` when the lifetime is not positive, and while the cache is suspended.
+        """
+        return self._ttl > 0 and not self._suspended()
 
     def now(self) -> float:
         """Return the clock reading an entry is stamped with."""

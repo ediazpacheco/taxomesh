@@ -68,6 +68,28 @@ class TaxomeshRepositoryBase(Protocol):
         """
         ...
 
+    @property
+    def in_transaction(self) -> bool:
+        """Whether a transaction of this store is open on the calling thread, as ``sqlite3.Connection.in_transaction``.
+
+        A read inside a transaction sees the transaction's own writes before they commit, and a
+        rollback takes them back, so the service neither caches such a read nor serves one from its
+        cache while this is ``True``. The transaction may be the caller's or one that the backend
+        opens for ``atomic()``.
+
+        - A backend with transactions answers for the calling thread's connection: ``DjangoRepository``
+          answers ``True`` inside an ``atomic`` block of its database alias, and while autocommit
+          is off.
+        - A backend without transactions, such as ``JsonRepository``, ``YamlRepository`` or one in
+          memory, answers ``False``, inside its ``atomic()`` too.
+
+        Reading it never raises, and opens no connection.
+
+        Returns:
+            ``True`` while a transaction of this store is open on the calling thread.
+        """
+        ...
+
     # --- Category ---
 
     def save_category(self, category: Category, *, expected_version: int | None = None) -> Category:

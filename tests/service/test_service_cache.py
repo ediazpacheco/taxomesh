@@ -36,6 +36,7 @@ def _make_service(repo: MagicMock) -> TaxomeshService:
 def _mock_repo() -> MagicMock:
     """Create a mock repository with common return values."""
     repo = MagicMock()
+    repo.in_transaction = False
     cat_id = uuid4()
     item_id = uuid4()
     tag_id = uuid4()

@@ -38,7 +38,7 @@ A [`taxomesh.toml`](configuration.md) can name the repository instead, so applic
 A class implementing `TaxomeshRepositoryBase` is a backend: it can keep the taxonomy in a database,
 behind a remote API or in memory, if it keeps the contract below. The port is a `typing.Protocol`,
 declared in `taxomesh/ports/repository.py` and exported from `taxomesh`, so nothing is inherited.
-Each of its 37 members states its contract in its docstring: its arguments, what it returns, and,
+Each of its 38 members states its contract in its docstring: its arguments, what it returns, and,
 for a lookup or a delete, what absence looks like.
 
 | Group | Members |
@@ -48,7 +48,7 @@ for a lookup or a delete, what absence looks like.
 | Listings, `Sequence` | `list_categories`, `list_items`, `list_tags`, `list_category_parent_links`, `list_item_parent_links`, `list_item_tag_links`, `list_item_relation_links`, `list_item_relation_links_batch` |
 | Writes | `save_category`, `save_item`, `save_tag`, `save_category_parent_link`, `save_item_parent_link`, `save_item_relation_link`, `add_item_tag_link` |
 | Deletes, `bool` | `delete_category`, `delete_item`, `delete_tag`, `delete_category_parent_link`, `delete_item_parent_link`, `delete_item_relation_link`, `delete_item_tag_link` |
-| Transactions and introspection | `atomic()`, `describe()`, `config_summary` |
+| Transactions and introspection | `atomic()`, `in_transaction`, `describe()`, `config_summary` |
 
 What a backend must keep, as `tests/adapters/repositories/test_repository_contract.py` checks for
 every shipped backend:
@@ -70,7 +70,7 @@ every shipped backend:
 - **`atomic()` keeps every other block of the store out.** A block that another thread opens on the
   same repository, or another process on a shared database, waits until this one ends. A backend
   that one thread at a time uses may do nothing. Entering a block may wait, and raises only
-  `TaxomeshRepositoryError`.
+  `TaxomeshRepositoryError`. `in_transaction` is `True` only while this thread is in a transaction.
 - **`relation_types` is a collection.** The two relation listings raise `TypeError` for a `str`.
 - **The port stores the links it is given.** The service keeps the root invariant: a category holds
   a link to the implicit root exactly when it holds no other parent link. A custom backend holding a

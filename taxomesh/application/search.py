@@ -102,22 +102,30 @@ class SearchCorpus[T]:
 
     @property
     def candidates(self) -> list[SearchCandidate[T]] | None:
+        """Return the corpus to search, or ``None`` when none is held or the cache serves nothing now.
+
+        The cache serves nothing inside a transaction, so a search there reads the transaction's
+        own writes from storage.
+        """
+        return self._held() if self._cache.enabled else None
+
+    @property
+    def size(self) -> int | None:
+        """Return how many candidates are held, or ``None`` when no corpus is held."""
+        held = self._held()
+        return None if held is None else len(held)
+
+    def _held(self) -> list[SearchCandidate[T]] | None:
         """Return the held corpus, or ``None`` when it was never built, was dropped, or has expired."""
         if self._candidates is None or not self._cache.is_fresh(self._built_at):
             return None
         return self._candidates
 
-    @property
-    def size(self) -> int | None:
-        """Return how many candidates are held, or ``None`` when no corpus is held."""
-        held = self.candidates
-        return None if held is None else len(held)
-
     def hold(self, candidates: list[SearchCandidate[T]]) -> list[SearchCandidate[T]]:
         """Hold these candidates for the cache's lifetime, and return them.
 
         Holds nothing when the cache stores nothing, so a service built with ``cache_ttl=0``
-        builds the corpus from storage on every search.
+        builds the corpus from storage on every search, and so does a search inside a transaction.
 
         Args:
             candidates: The corpus just built from storage.
