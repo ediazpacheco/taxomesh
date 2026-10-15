@@ -142,3 +142,24 @@ def test_a_category_that_holds_more_items_than_the_limit_lists_them_all_in_order
 
     assert listed == expected
     assert max(counts) <= LIMIT
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        lambda r, s: r.list_item_parent_links(item_ids=[s.items[0]] * (LIMIT + 1)),
+        lambda r, s: r.list_category_parent_links(category_ids=[s.categories[1]] * (LIMIT + 1)),
+        lambda r, s: r.list_item_tag_links(item_ids=[s.items[0]] * (LIMIT + 1)),
+    ],
+    ids=["placements", "parent links", "tag links"],
+)
+def test_a_value_repeated_across_the_parts_of_a_read_returns_each_link_once(
+    read: Read, scene: Scene, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = DjangoRepository()
+    expected = read(repository, scene)
+
+    with _parameters_per_query(monkeypatch):
+        held = read(repository, scene)
+
+    assert held == expected

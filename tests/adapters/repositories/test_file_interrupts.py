@@ -16,6 +16,7 @@ from taxomesh.adapters.repositories._file import FileRepositoryBase
 from taxomesh.adapters.repositories.json_repository import JsonRepository
 from taxomesh.adapters.repositories.yaml_repository import YamlRepository
 from taxomesh.application.service import TaxomeshService
+from taxomesh.exceptions import TaxomeshRepositoryError
 
 type FileKind = Literal["json", "yaml"]
 
@@ -68,6 +69,41 @@ def test_an_interrupt_after_the_file_is_in_place_keeps_the_write_in_memory(kind:
     assert _tags(repo) == _tags(_open(kind, path)) == ["written"]
     svc.tags.create("next")
     assert _tags(_open(kind, path)) == ["next", "written"]
+
+
+def test_an_interrupt_between_the_rename_and_the_stamp_keeps_the_write(kind: FileKind, tmp_path: Path) -> None:
+    path = tmp_path / f"store.{kind}"
+    repo = _open(kind, path)
+    svc = TaxomeshService(repo, cache_ttl=0)
+    rename = os.replace
+
+    def rename_then_interrupt(source: str, destination: str) -> None:
+        rename(source, destination)
+        raise KeyboardInterrupt
+
+    with patch(REPLACE, rename_then_interrupt), pytest.raises(KeyboardInterrupt):
+        svc.tags.create("written")
+
+    assert _tags(repo) == _tags(_open(kind, path)) == ["written"]
+    svc.tags.create("next")
+    assert _tags(_open(kind, path)) == ["next", "written"]
+
+
+def test_an_interrupt_whose_file_cannot_be_read_back_leaves_as_itself(kind: FileKind, tmp_path: Path) -> None:
+    path = tmp_path / f"store.{kind}"
+    repo = _open(kind, path)
+    svc = TaxomeshService(repo, cache_ttl=0)
+    status = path.stat()
+    unreadable = TaxomeshRepositoryError("status unreadable")
+
+    with (
+        patch(REPLACE, side_effect=KeyboardInterrupt),
+        patch.object(FileRepositoryBase, "_stat", side_effect=[status, unreadable]),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        svc.tags.create("interrupted")
+
+    assert _tags(repo) == _tags(_open(kind, path)) == []
 
 
 def test_a_write_keeps_the_mode_of_the_file(kind: FileKind, tmp_path: Path) -> None:

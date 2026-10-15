@@ -71,6 +71,25 @@ def test_after_the_last_is_after_the_largest_position(service: TaxomeshService) 
     assert link.sort_index == 11
 
 
+def test_after_the_last_is_after_a_negative_largest_position(service: TaxomeshService) -> None:
+    top, shelf, source = (
+        service.categories.create("Top"),
+        service.categories.create("Shelf"),
+        service.items.create("s"),
+    )
+    service.categories.add_parent(service.categories.create("far"), top, sort_index=-5)
+    service.items.place_in(service.items.create("far"), shelf, sort_index=-5)
+    service.items.relate(source, service.items.create("far"), "r", sort_index=-5)
+
+    positions = (
+        service.categories.add_parent(service.categories.create("next"), top).sort_index,
+        service.items.place_in(service.items.create("next"), shelf).sort_index,
+        service.items.relate(source, service.items.create("next"), "r").sort_index,
+    )
+
+    assert positions == (-4, -4, -4)
+
+
 def test_a_link_that_is_stored_keeps_its_position(service: TaxomeshService) -> None:
     shelf = service.categories.create("Shelf")
     first, second = (service.items.create(name) for name in ("first", "second"))

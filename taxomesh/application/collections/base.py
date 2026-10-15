@@ -274,12 +274,12 @@ def _position_among[L: _Positioned](siblings: Iterable[L], /, *, stored: Callabl
     Returns:
         The position of the stored link, or the position after the last sibling.
     """
-    last = -1
+    last: int | None = None
     for sibling in siblings:
         if stored is not None and stored(sibling):
             return sibling.sort_index
-        last = max(last, sibling.sort_index)
-    return last + 1
+        last = sibling.sort_index if last is None else max(last, sibling.sort_index)
+    return 0 if last is None else last + 1
 
 
 def _changed[R: BaseModel](row: R, changes: Mapping[str, object], /) -> R:

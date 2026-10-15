@@ -325,8 +325,9 @@ class DjangoRepository:
 
         A database accepts a limited number of parameters in one query: ``max_query_params`` on the
         connection's features, by default 32,766 on SQLite, and ``None``, no limit, on PostgreSQL.
-        When the values fit, or the engine sets no limit, the read is one query, as it would be
-        without this method. Past the limit, each list is cut, in its order, into parts of at most
+        A value given twice is kept once, in its first place, so the parts return each row once, as
+        one query does. When the values fit, or the engine sets no limit, the read is one query, as
+        it would be without this method. Past the limit, each list is cut, in its order, into parts of at most
         ``(limit - fixed) // (uses * number of lists)`` values, and one query reads each combination
         of parts: a row that matches every list matches one combination.
 
@@ -343,7 +344,7 @@ class DjangoRepository:
         """
         from django.db import connections  # noqa: PLC0415
 
-        given = {key: list(values) for key, values in lists.items() if values is not None}
+        given = {key: list(dict.fromkeys(values)) for key, values in lists.items() if values is not None}
         limit = connections[self._using].features.max_query_params
         if not given or limit is None or fixed + uses * sum(len(values) for values in given.values()) <= limit:
             return [given]

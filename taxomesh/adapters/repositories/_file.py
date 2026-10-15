@@ -68,8 +68,8 @@ def _writing[S: FileRepositoryBase, **P, R](method: Callable[Concatenate[S, P], 
     The write is refused before it starts when another writer changed the file. When it fails before
     its new file is in place, memory gets back a copy of what it held before, which is what the file
     still holds, so a later write does not write the failed change to disk. Once the new file is in
-    place, which changes the stamp, memory keeps the write: the file holds it, and an interrupt that
-    lands before the method returns loses nothing.
+    place, memory keeps the write and the repository records the file's stamp: the file holds the
+    write, and an interrupt that lands before the method returns loses nothing.
     """
 
     @functools.wraps(method)
@@ -77,11 +77,12 @@ def _writing[S: FileRepositoryBase, **P, R](method: Callable[Concatenate[S, P], 
         with self._lock:
             self._require_unchanged()
             before, stamp = self._contents(), self._stamp
+            self._pending_stamp = None
             try:
                 return method(self, *args, **kwargs)
             except BaseException:
                 if self._stamp == stamp:
-                    self._put(before)
+                    self._settle(before)
                 raise
 
     return locked
@@ -136,6 +137,8 @@ class FileRepositoryBase(ABC):
         self._path = Path(path)
         self._lock = threading.RLock()
         self._stamp: FileStamp | None = None
+        # The stamp of the file a write is putting in place, from just before its rename.
+        self._pending_stamp: FileStamp | None = None
         self._categories: dict[UUID, Category] = {}
         self._items: dict[UUID, Item] = {}
         self._tags: dict[UUID, Tag] = {}
@@ -291,6 +294,26 @@ class FileRepositoryBase(ABC):
         except OSError as exc:
             raise TaxomeshRepositoryError(f"Could not read {self._path}: {exc}") from exc
 
+    def _settle(self, before: _Contents) -> None:
+        """After a write that failed with no new stamp recorded, make memory hold what the file holds.
+
+        The file holds the write when its stamp is the pending one, the rename done and its stamp not
+        yet recorded: memory keeps the write, and the stamp is recorded. Otherwise memory gets back
+        ``before``. A status that cannot be read counts as the old file, so the write's own error is
+        the one that leaves.
+
+        Args:
+            before: What memory held before the write.
+        """
+        try:
+            status = self._stat()
+        except TaxomeshRepositoryError:
+            status = None
+        if self._pending_stamp is not None and status is not None and _stamp_of(status) == self._pending_stamp:
+            self._stamp = self._pending_stamp
+        else:
+            self._put(before)
+
     def _require_unchanged(self) -> None:
         """Refuse to write over a file another writer changed since this repository read it.
 
@@ -366,6 +389,7 @@ class FileRepositoryBase(ABC):
                 fh.flush()
                 os.fsync(fh.fileno())
                 stamp = _stamp_of(os.fstat(fh.fileno()))
+            self._pending_stamp = stamp
             os.replace(tmp_path, self._path)
             self._stamp = stamp
         except BaseException as exc:
