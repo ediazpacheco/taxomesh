@@ -48,12 +48,12 @@ def codecs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     load, dump_all = yaml.load, yaml.dump_all
 
     # Any: what PyYAML's loader returns, passed on unchanged.
-    def recording_load(stream: str, Loader: type[yaml.SafeLoader] | type[yaml.CSafeLoader]) -> Any:  # noqa: N803
+    def recording_load(stream: str, Loader: type[yaml.SafeLoader] | type[yaml.CSafeLoader]) -> Any:
         used.append(Loader.__name__)
         return load(stream, Loader=Loader)
 
     # Any: PyYAML's options and its result, passed on unchanged.
-    def recording_dump_all(documents: Any, stream: Any = None, Dumper: Any = yaml.Dumper, **options: Any) -> Any:  # noqa: N803
+    def recording_dump_all(documents: Any, stream: Any = None, Dumper: Any = yaml.Dumper, **options: Any) -> Any:
         used.append(Dumper.__name__)
         return dump_all(documents, stream, Dumper=Dumper, **options)
 

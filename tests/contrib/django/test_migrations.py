@@ -3,7 +3,7 @@
 Verifies that:
 1. ItemModel.external_id and CategoryModel.external_id are null=True, unique=True.
 2. The migration file exists with the correct structure.
-3. Empty-string external_id converts to NULL (enforced at field level via Django).
+3. The database refuses a second row with the same external id, and takes any number with none.
 """
 
 import importlib
@@ -120,8 +120,6 @@ def test_multiple_null_external_ids_are_allowed() -> None:
 
     from taxomesh.contrib.django.models import ItemModel  # noqa: PLC0415
 
-    for _ in range(3):
-        ItemModel.objects.create(item_id=uuid4(), name="NullItem", external_id=None)
+    ids = [ItemModel.objects.create(item_id=uuid4(), name="NullItem", external_id=None).item_id for _ in range(3)]
 
-    count = ItemModel.objects.filter(external_id__isnull=True).count()
-    assert count >= 3
+    assert ItemModel.objects.filter(item_id__in=ids, external_id__isnull=True).count() == 3

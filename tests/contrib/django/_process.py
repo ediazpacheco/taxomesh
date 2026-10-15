@@ -14,9 +14,11 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-
 # Any: the helper's JSON, whose shape each test knows.
-def run_helper(module: str, *args: str) -> Any:
+type Printed = Any
+
+
+def run_helper(module: str, *args: str) -> Printed:
     """Run ``python -m <module> <args>`` from the repository root and return what it printed.
 
     Args:

@@ -16,17 +16,21 @@ def test_tags_create_returns_tag_with_id(service: TaxomeshService) -> None:
     assert tag.name == "urgent"
 
 
-def test_tag_succeeds(service: TaxomeshService) -> None:
+def test_tag_puts_the_tag_on_the_item(service: TaxomeshService) -> None:
     tag = service.tags.create(name="hot")
     item = service.items.create(name="ref-x", external_id="ref-x")
-    service.items.tag(item.item_id, tag.tag_id)  # must not raise
+    service.items.tag(item.item_id, tag.tag_id)
+    assert list(service.tags.list(item=item)) == [tag]
 
 
 def test_tag_idempotent(service: TaxomeshService) -> None:
     tag = service.tags.create(name="cold")
     item = service.items.create(name="ref-y", external_id="ref-y")
     service.items.tag(item.item_id, tag.tag_id)
-    service.items.tag(item.item_id, tag.tag_id)  # second call must not raise or duplicate
+    service.items.tag(item.item_id, tag.tag_id)
+    assert service.repository.list_item_tag_links(item_ids=[item.item_id]) == [
+        ItemTagLink(item_id=item.item_id, tag_id=tag.tag_id)
+    ]
 
 
 def test_tag_returns_the_stored_link(service: TaxomeshService) -> None:
@@ -51,11 +55,13 @@ def test_tag_again_returns_the_same_link(service: TaxomeshService) -> None:
     assert len(service.repository.list_item_tag_links(item_ids=[item.item_id])) == 1
 
 
-def test_untag_succeeds(service: TaxomeshService) -> None:
+def test_untag_takes_the_tag_off_the_item(service: TaxomeshService) -> None:
     tag = service.tags.create(name="temp")
     item = service.items.create(name="ref-z", external_id="ref-z")
     service.items.tag(item.item_id, tag.tag_id)
-    service.items.untag(item.item_id, tag.tag_id)  # must not raise
+    service.items.untag(item.item_id, tag.tag_id)
+    assert list(service.tags.list(item=item)) == []
+    assert service.repository.list_item_tag_links(item_ids=[item.item_id]) == []
 
 
 def test_untag_noop_if_not_linked(service: TaxomeshService) -> None:

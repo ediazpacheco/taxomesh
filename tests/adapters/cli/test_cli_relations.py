@@ -55,6 +55,7 @@ class TestItemRelate:
         with patch("taxomesh.adapters.cli.main.build", return_value=_build_result(repo)):
             result = runner.invoke(app, ["item", "relate", str(src_id), str(tgt_id), "covers", "--sort-index", "5"])
         assert result.exit_code == 0
+        assert [(lnk.target_item_id, lnk.sort_index) for lnk in repo.list_item_relation_links(src_id)] == [(tgt_id, 5)]
 
     def test_relate_with_metadata(self) -> None:
         repo, src_id, tgt_id = _make_repo_with_two_items()
@@ -72,6 +73,7 @@ class TestItemRelate:
                 ],
             )
         assert result.exit_code == 0
+        assert [lnk.metadata for lnk in repo.list_item_relation_links(src_id)] == [{"key": "value"}]
 
     def test_relate_self_relation_rejected(self) -> None:
         repo, src_id, _ = _make_repo_with_two_items()

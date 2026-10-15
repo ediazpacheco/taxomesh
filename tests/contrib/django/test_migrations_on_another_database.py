@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("django", reason="Django is not installed")
 
-from tests.contrib.django._process import run_helper  # noqa: E402
+from tests.contrib.django._process import run_helper
 
 HELPER = "tests.contrib.django._two_databases"
 

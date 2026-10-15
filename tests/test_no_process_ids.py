@@ -44,6 +44,8 @@ PATTERNS: Final[dict[str, tuple[str, str]]] = {
     "release": (r"\b0\.\d+\.\d+a\d+\b", "no counterpart in 0.1.0a50"),
     "added in a spec": (r"(?i)\b(?:added|introduced|removed) in (?:spec )?0\d{2}\b", "(removed in 025)"),
     "constitution": (r"(?i)\bconstitution\b", "(Constitution II)"),
+    "feature number": (r"(?i)\bfeature \d{3}\b", "Feature 052: the list is ordered"),
+    "before or after a spec": (r"(?i)\b(?:before|after|since|until) 0\d{2}\b", "raised a 500 before 071"),
 }
 COMPILED: Final[dict[str, re.Pattern[str]]] = {name: re.compile(pattern) for name, (pattern, _) in PATTERNS.items()}
 

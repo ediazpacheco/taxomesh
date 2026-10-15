@@ -17,11 +17,11 @@ import pytest
 
 pytest.importorskip("django", reason="Django is not installed")
 
-from django.db import connection  # noqa: E402
-from django.db.backends.utils import CursorWrapper  # noqa: E402
+from django.db import connection
+from django.db.backends.utils import CursorWrapper
 
-from taxomesh import TaxomeshService  # noqa: E402
-from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: E402
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.django_repository import DjangoRepository
 
 pytestmark = pytest.mark.django_db
 

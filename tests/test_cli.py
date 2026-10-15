@@ -868,7 +868,7 @@ def test_json_repo_config_summary_does_not_raise(tmp_path: Path) -> None:
     repo = JsonRepository(tmp_path / "any.json")
     try:
         _ = repo.config_summary
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         pytest.fail(f"config_summary raised unexpectedly: {exc}")
 
 

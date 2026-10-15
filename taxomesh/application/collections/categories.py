@@ -875,10 +875,10 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         check_not_own_parent(category_id, parent_id)
         repository = self._service.repository
         with self._atomic():
-            self._require_stored(category_id)
-            self._require_stored(parent_id)
+            child = self._require_stored(category_id)
+            joined = self._require_stored(parent_id)
             links = repository.list_category_parent_links()
-            check_no_cycle(category_id, parent_id, links)
+            check_no_cycle(category_id, parent_id, links, {category_id: child.name, parent_id: joined.name})
             if sort_index is None:
                 position = _position_among(
                     (lnk for lnk in links if lnk.parent_category_id == parent_id),
@@ -957,10 +957,10 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         joining = self._root_id if to_parent_id is None else to_parent_id
 
         with self._atomic():
-            self._require_stored(category_id)
+            names = {category_id: self._require_stored(category_id).name}
             for parent_id in (from_parent_id, to_parent_id):
                 if parent_id is not None:
-                    self._require_stored(parent_id)
+                    names[parent_id] = self._require_stored(parent_id).name
 
             links = self._service.repository.list_category_parent_links()
             if to_parent_id is None:
@@ -970,7 +970,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                         f"Category {category_id} keeps another parent, so it cannot be at the top level"
                     )
             else:
-                check_no_cycle(category_id, to_parent_id, links)
+                check_no_cycle(category_id, to_parent_id, links, names)
 
             siblings = sorted(
                 (lnk for lnk in links if lnk.parent_category_id == joining and lnk.category_id != category_id),

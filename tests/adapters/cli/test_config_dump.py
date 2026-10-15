@@ -12,6 +12,7 @@ from taxomesh import TaxomeshService
 from taxomesh._config import SUPPORTED_REPO_TYPES
 from taxomesh.adapters.cli.config import CONFIG_KEYS, dump_config
 from taxomesh.adapters.cli.main import app
+from taxomesh.exceptions import TaxomeshConfigError
 
 runner = CliRunner()
 
@@ -416,3 +417,69 @@ class TestShowConfigName:
         bad.write_text("[taxomesh]\nname = 3\n", encoding="utf-8")
         result = runner.invoke(app, ["--config", str(bad), "--show-config"])
         assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# The printed configuration reads back as the same values
+# ---------------------------------------------------------------------------
+
+# Values that a TOML basic string must escape, or must keep as they are.
+AWKWARD: list[tuple[str, str, str | None]] = [
+    ("yaml", "data/plain.yaml", "Tango 🎵"),
+    ("yaml", 'data/say "hi".yaml', 'the "best" one'),
+    ("json", "data\\new.json", "back\\slash"),
+    ("django", 'alias"quoted', "tab\there"),
+    ("yaml", "data/bell\x07.yaml", "line\nbreak"),
+]
+
+
+class TestTheDumpReadsBack:
+    @pytest.mark.parametrize(("repo_type", "detail", "name"), AWKWARD)
+    def test_tomllib_reads_back_the_values_that_were_dumped(
+        self, repo_type: str, detail: str, name: str | None
+    ) -> None:
+        parsed = tomllib.loads(dump_config(repo_type, detail, name))
+
+        key = "using" if repo_type == "django" else "path"
+        assert parsed["repository"] == {"type": repo_type, key: detail}
+        assert parsed["taxomesh"] == {"name": name}
+
+    def test_the_command_reads_back_what_it_printed(self, tmp_path: Path) -> None:
+        good = tmp_path / "good.toml"
+        good.write_text(
+            '[taxomesh]\nname = "Tango 🎵"\n\n[repository]\ntype = "yaml"\npath = "data\\\\new \\"one\\".yaml"\n'
+        )
+        first = runner.invoke(app, ["--config", str(good), "--show-config"])
+        printed = tmp_path / "out.toml"
+        printed.write_text(first.stdout, encoding="utf-8")
+
+        second = runner.invoke(app, ["--config", str(printed), "--show-config"])
+
+        assert (first.exit_code, second.exit_code) == (0, 0)
+        assert second.stdout == first.stdout
+        assert tomllib.loads(second.stdout)["repository"]["path"] == 'data\\new "one".yaml'
+
+
+# ---------------------------------------------------------------------------
+# A type that is not text
+# ---------------------------------------------------------------------------
+
+
+class TestATypeThatIsNotText:
+    @pytest.mark.parametrize(("value", "kind"), [("[]", "list"), ("{}", "dict"), ("[1, 2]", "list"), ("3", "int")])
+    def test_the_command_names_the_key_and_the_type_it_needs(self, tmp_path: Path, value: str, kind: str) -> None:
+        toml_file = tmp_path / "taxomesh.toml"
+        toml_file.write_text(f"[repository]\ntype = {value}\n")
+
+        result = runner.invoke(app, ["--config", str(toml_file), "--show-config"])
+
+        assert result.exit_code == 1
+        message = f"Invalid config file {toml_file}: repository.type must be a string, not {kind}"
+        assert result.stderr.strip() == message
+
+    def test_the_service_raises_a_config_error(self, tmp_path: Path) -> None:
+        toml_file = tmp_path / "taxomesh.toml"
+        toml_file.write_text("[repository]\ntype = []\n")
+
+        with pytest.raises(TaxomeshConfigError, match=r"repository\.type must be a string, not list"):
+            TaxomeshService(config_path=toml_file)

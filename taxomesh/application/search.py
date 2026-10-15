@@ -21,7 +21,6 @@ from typing import Final
 
 from rapidfuzz import fuzz
 
-from taxomesh.domain.constants import DEFAULT_ITEM_EXTERNAL_ID
 from taxomesh.utils.memoize import ReadCache
 
 # ---------------------------------------------------------------------------
@@ -200,7 +199,7 @@ def score_candidate(
     """
     norm_name = normalize(name)
     norm_slug = normalize(slug)
-    norm_ext = normalize(external_id) if external_id != DEFAULT_ITEM_EXTERNAL_ID else ""
+    norm_ext = normalize(external_id)
     return score_prenorm(query, norm_name, norm_slug, norm_ext, fuzzy=fuzzy)
 
 
@@ -336,12 +335,7 @@ def score_and_rank[T](  # noqa: PLR0913
         )
         for c in candidates
     ]
-    scored: list[tuple[float, str, T]] = []
-    for sc in search_candidates:
-        score = score_prenorm(norm_q, sc.norm_name, sc.norm_slug, sc.norm_ext, fuzzy=fuzzy)
-        if score is not None:
-            scored.append((score, sc.norm_name, sc.obj))
-    return _rank_scored(scored, limit)
+    return score_corpus(norm_q, search_candidates, fuzzy=fuzzy, limit=limit)
 
 
 def _compute_boost(query: str, norm_name: str, norm_slug: str, norm_ext: str) -> int:  # noqa: PLR0911

@@ -33,6 +33,14 @@ class ItemRelationLink(MetadataModelBase):
     sort_index: int = 0
     metadata: Metadata = Field(default_factory=FrozenDict)
 
+    def __str__(self) -> str:
+        """Return the relation as the command line prints it, such as ``<id> --[covers]--> <id> (sort_index: 0)``.
+
+        The metadata is left out; ``repr()`` shows every field.
+        """
+        relation = f"{self.source_item_id} --[{self.relation_type}]--> {self.target_item_id}"
+        return f"{relation} (sort_index: {self.sort_index})"
+
     @field_validator("relation_type", mode="before")
     @classmethod
     def _normalise_relation_type(cls, v: object) -> str:

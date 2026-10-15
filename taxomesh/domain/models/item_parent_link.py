@@ -18,3 +18,7 @@ class ItemParentLink(ModelBase):
     item_id: UUID
     category_id: UUID
     sort_index: int = 0
+
+    def __str__(self) -> str:
+        """Return the item in its category and its position, such as ``<id> in <id> (sort_index: 0)``."""
+        return f"{self.item_id} in {self.category_id} (sort_index: {self.sort_index})"

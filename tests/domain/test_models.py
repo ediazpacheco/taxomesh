@@ -57,7 +57,7 @@ class TestItem:
 
     def test_external_id_str_at_max_length_is_valid(self) -> None:
         item = Item(name="Item", external_id="a" * 256)
-        assert len(str(item.external_id)) == 256  # noqa: PLR2004
+        assert len(str(item.external_id)) == 256
 
     def test_external_id_str_exceeding_max_length_raises(self) -> None:
         with pytest.raises(ValidationError):
@@ -109,7 +109,7 @@ class TestCategory:
 
     def test_name_at_max_length_is_valid(self) -> None:
         cat = Category(category_id=uuid4(), name="a" * 256)
-        assert len(cat.name) == 256  # noqa: PLR2004
+        assert len(cat.name) == 256
 
     def test_name_exceeding_max_length_raises(self) -> None:
         with pytest.raises(ValidationError):
@@ -125,7 +125,7 @@ class TestCategory:
 
     def test_description_at_max_length_is_valid(self) -> None:
         cat = Category(category_id=uuid4(), name="Jazz", description="a" * 100_000)
-        assert len(cat.description) == 100_000  # noqa: PLR2004
+        assert len(cat.description) == 100_000
 
     def test_description_exceeding_max_length_raises(self) -> None:
         with pytest.raises(ValidationError):
@@ -199,7 +199,7 @@ class TestTag:
 
     def test_name_at_max_length_is_valid(self) -> None:
         tag = Tag(tag_id=uuid4(), name="a" * 25)
-        assert len(tag.name) == 25  # noqa: PLR2004
+        assert len(tag.name) == 25
 
     def test_name_exceeding_max_length_raises(self) -> None:
         with pytest.raises(ValidationError):
@@ -227,7 +227,7 @@ class TestCategoryParentLink:
     def test_sort_index_is_int(self) -> None:
         link = CategoryParentLink(category_id=uuid4(), parent_category_id=uuid4(), sort_index=5)
         assert isinstance(link.sort_index, int)
-        assert link.sort_index == 5  # noqa: PLR2004
+        assert link.sort_index == 5
 
 
 class TestItemParentLink:

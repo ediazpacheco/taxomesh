@@ -163,7 +163,7 @@ def main(
     ),
     show_config: bool = typer.Option(
         False, "--show-config", help="Print the configuration in effect, as TOML, and exit"
-    ),  # noqa: E501
+    ),
 ) -> None:
     """Read and change the categories, items and tags that taxomesh stores."""
     ctx.ensure_object(dict)
@@ -711,7 +711,13 @@ def graph_cmd(
             ends pass the filter, so a disabled category under an enabled parent loses that
             link. It stays under any parent that the filter keeps; with none, it is not drawn.
             A relation is drawn when its related item passes the filter too.
+
+    Raises:
+        typer.BadParameter: If ``max_depth`` is negative: a usage error, before anything is read.
     """
+    # Checked here rather than with ``min=0``, which would widen the help past 80 columns.
+    if max_depth < 0:
+        raise typer.BadParameter(f"{max_depth} is negative; 0 draws every level", param_hint="'--max-depth'")
     svc = _service(ctx)
     enabled = STATE_FILTERS[state]
     try:

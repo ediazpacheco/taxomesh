@@ -15,7 +15,7 @@ from tests.service._concurrent_writes import SCHEDULES, Outcome, Schedule
 
 pytest.importorskip("django", reason="Django is not installed")
 
-from tests.contrib.django._process import run_helper  # noqa: E402
+from tests.contrib.django._process import run_helper
 
 HELPER = "tests.contrib.django._concurrent_writes"
 

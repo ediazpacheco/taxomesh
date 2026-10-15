@@ -610,8 +610,9 @@ class _CategoryLinkForm(_CategoryParentLinkFormBase):
         if category and parent_category:
             cat_id = category.category_id
             parent_id = parent_category.category_id
+            names = {cat_id: category.name, parent_id: parent_category.name}
             try:
-                check_no_cycle(cat_id, parent_id, DjangoRepository().list_category_parent_links())
+                check_no_cycle(cat_id, parent_id, DjangoRepository().list_category_parent_links(), names)
             except TaxomeshCyclicDependencyError as exc:
                 raise forms.ValidationError(str(exc)) from exc
         return cleaned_data
@@ -876,7 +877,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         "version",
         "created_at",
         "updated_at",
-    )  # noqa: E501
+    )
     search_fields = ("name", "slug", "category_id")
     list_filter = ("enabled", HasSlugFilter, HasLinkedObjectListFilter)
     fields = (

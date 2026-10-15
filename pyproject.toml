@@ -56,7 +56,7 @@ target-version = "py313"
 line-length = 119
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
+select = ["E", "F", "I", "UP", "B", "SIM", "PL", "RUF100"]
 ignore = []
 
 [tool.ruff.lint.flake8-bugbear]

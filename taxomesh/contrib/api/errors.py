@@ -12,7 +12,6 @@ from taxomesh.exceptions import (
     TaxomeshError,
     TaxomeshExternalIdConflictError,
     TaxomeshNotFoundError,
-    TaxomeshRepositoryError,
     TaxomeshValidationError,
     TaxomeshVersionConflictError,
 )
@@ -82,8 +81,6 @@ def to_tuple(exc: TaxomeshError) -> tuple[int, dict[str, Any]]:
         return _HTTP_404, _client_error_body(exc)
     if isinstance(exc, TaxomeshValidationError):
         return _HTTP_422, _client_error_body(exc)
-    if isinstance(exc, TaxomeshRepositoryError):
-        return _HTTP_500, _server_error_body(exc)
     return _HTTP_500, _server_error_body(exc)
 
 

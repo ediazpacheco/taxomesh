@@ -8,17 +8,16 @@ block raises keeps its type: the caller's own ORM error, or any other exception.
 """
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 pytest.importorskip("django", reason="Django is not installed")
 
-from django.db import OperationalError, connection  # noqa: E402
+from django.db import OperationalError, connection
 
-from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: E402
-from taxomesh.exceptions import TaxomeshValidationError  # noqa: E402
-from tests.contrib.django._process import run_helper  # noqa: E402
+from taxomesh.adapters.repositories.django_repository import DjangoRepository
+from taxomesh.exceptions import TaxomeshValidationError
+from tests.contrib.django._process import Printed, run_helper
 
 HELPER = "tests.contrib.django._transaction_failures"
 WRITES = ("categories.create", "categories.update", "items.create", "items.place_in", "tags.create", "tags.delete")
@@ -26,12 +25,14 @@ REPOSITORY_ERROR = {"error": "TaxomeshRepositoryError", "taxomesh": True, "cause
 
 
 @pytest.fixture(scope="module")
-def unreachable(tmp_path_factory: pytest.TempPathFactory) -> Any:
+def unreachable(tmp_path_factory: pytest.TempPathFactory) -> Printed:
     return run_helper(HELPER, str(tmp_path_factory.mktemp("unreachable")), "unreachable")
 
 
 @pytest.mark.parametrize("write", WRITES)
-def test_a_write_raises_a_repository_error_when_the_database_cannot_be_reached(write: str, unreachable: Any) -> None:
+def test_a_write_raises_a_repository_error_when_the_database_cannot_be_reached(
+    write: str, unreachable: Printed
+) -> None:
     assert unreachable[write] == REPOSITORY_ERROR
 
 

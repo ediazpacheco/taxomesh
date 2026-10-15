@@ -15,3 +15,7 @@ class ItemTagLink(ModelBase):
 
     tag_id: UUID
     item_id: UUID
+
+    def __str__(self) -> str:
+        """Return the tag on its item, such as ``<id> on <id>``."""
+        return f"{self.tag_id} on {self.item_id}"

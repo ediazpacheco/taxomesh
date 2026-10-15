@@ -15,19 +15,19 @@ import pytest
 
 pytest.importorskip("django", reason="Django is not installed")
 
-from django.db import connection  # noqa: E402
-from django.test.utils import CaptureQueriesContext  # noqa: E402
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
-from taxomesh import TaxomeshService  # noqa: E402
-from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: E402
-from taxomesh.contrib.django.models import (  # noqa: E402
+from taxomesh import TaxomeshService
+from taxomesh.adapters.repositories.django_repository import DjangoRepository
+from taxomesh.contrib.django.models import (
     CategoryParentLinkModel,
     ItemParentLinkModel,
     ItemRelationLinkModel,
     ItemTagLinkModel,
     TagModel,
 )
-from taxomesh.domain.models import CategoryParentLink, ItemParentLink, ItemRelationLink, Tag  # noqa: E402
+from taxomesh.domain.models import CategoryParentLink, ItemParentLink, ItemRelationLink, Tag
 
 pytestmark = pytest.mark.django_db
 

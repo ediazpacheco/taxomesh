@@ -312,10 +312,8 @@ class TestCategoriesDelete:
 class TestRootAddressedWritesMapTo404:
     """The root id is not-found through the handlers, so it surfaces as 404.
 
-    These three raised TaxomeshRootCategoryError before 062, which matches no branch in
-    errors.to_tuple and therefore landed on the redacted 500 fallback. Both halves change: the
-    status, and the body, which now carries the caller-actionable message instead of the generic
-    server-error detail.
+    Both halves are asserted: the status, and the body, which carries the message that tells the
+    caller what to correct, and not the generic detail of a server error.
     """
 
     def test_categories_update_maps_to_404(self, service: TaxomeshService) -> None:
@@ -659,12 +657,13 @@ class TestCategoriesRemoveParent:
     """Tests for handlers.categories_remove_parent."""
 
     def test_removes_parent(self, service: TaxomeshService) -> None:
-        """Parent relationship is removed without error."""
+        """The parent link is removed, and the child is back at the top level."""
         parent = service.categories.create(name="P")
         child = service.categories.create(name="C")
         service.categories.add_parent(child.category_id, parent.category_id)
         handlers.categories_remove_parent(service, child.category_id, parent_id=parent.category_id)
-        # No exception means success; we simply verify it doesn't raise.
+        assert list(service.categories.list(parent=parent)) == []
+        assert child.category_id in {category.category_id for category in service.categories.roots()}
 
 
 class TestItemsPlaceIn:
@@ -708,12 +707,12 @@ class TestItemsTag:
     """Tests for handlers.items_tag."""
 
     def test_assigns_tag(self, service: TaxomeshService) -> None:
-        """Tag is assigned to item without error (idempotent)."""
+        """The tag is on the item once, however many times it is assigned."""
         tag = service.tags.create(name="hot")
         item = service.items.create(name="Product")
         handlers.items_tag(service, item.item_id, tag_id=tag.tag_id)
-        # Second call is idempotent — no error.
         handlers.items_tag(service, item.item_id, tag_id=tag.tag_id)
+        assert list(service.tags.list(item=item)) == [tag]
 
     def test_returns_the_link_the_member_returns(self, service: TaxomeshService) -> None:
         tag = service.tags.create(name="warm")
@@ -727,12 +726,13 @@ class TestItemsUntag:
     """Tests for handlers.items_untag."""
 
     def test_removes_tag(self, service: TaxomeshService) -> None:
-        """Tag association is removed without error."""
+        """The tag is no longer on the item, and the tag itself stays."""
         tag = service.tags.create(name="cool")
         item = service.items.create(name="Thing")
         service.items.tag(item.item_id, tag.tag_id)
         handlers.items_untag(service, item.item_id, tag_id=tag.tag_id)
-        # No exception = success.
+        assert list(service.tags.list(item=item)) == []
+        assert service.tags.get(tag.tag_id) == tag
 
 
 # ---------------------------------------------------------------------------
