@@ -4,19 +4,19 @@ All notable changes to taxomesh are documented here, in the format of
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-The alpha series before 0.2.0, `0.1.0a1` to `0.1.0a50`, is described on the
+The alpha series before 1.0.0, `0.1.0a1` to `0.1.0a50`, is described on the
 [GitHub releases page](https://github.com/ediazpacheco/taxomesh/releases), one release per git tag.
 The full entries of that series are in
 [`CHANGELOG.md` at the tag `v0.1.0a50`](https://github.com/ediazpacheco/taxomesh/blob/v0.1.0a50/CHANGELOG.md).
 
-## [0.2.0] — 2026-10-12
+## [1.0.0] — 2026-10-15
 
-0.2.0 gives taxomesh a Python stdlib-style interface: every operation is a member of
+1.0.0 gives taxomesh a Python stdlib-style interface: every operation is a member of
 `svc.categories`, `svc.items` or `svc.tags`, or is `svc.graph()` or `svc.info`; rows are frozen; the
 command line and the HTTP handlers are named after the member they call. It breaks nearly every
 `0.1.0a50` call, with no alias: an old name fails at once with `AttributeError`, which
-`mypy --strict` reports first.
-[`docs/python-api.md`](docs/python-api.md) states the new surface.
+`mypy --strict` reports first. [`docs/python-api.md`](docs/python-api.md) states the new surface.
+From this release, the README's Stability and versioning section is the rule.
 
 ### Silent changes
 

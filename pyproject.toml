@@ -1,6 +1,6 @@
 [project]
 name = "taxomesh"
-version = "0.2.0"
+version = "1.0.0"
 description = "taxomesh gives a multi-parent category graph a Python stdlib-style interface: categories, items and tags take subscript, get, in, len and del as a dict does. The graph is stored in a YAML file, a JSON file, the Django ORM or a backend of your own."
 readme = "README.md"
 license = "MIT"
@@ -9,7 +9,7 @@ authors = [{ name = "Ezequiel Diaz Pacheco", email = "ediazpacheco@gmail.com" }]
 requires-python = ">=3.13"
 keywords = ["taxonomy", "categorization", "tags", "dag", "hierarchy", "repository"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",

@@ -1,8 +1,7 @@
 # Contributing
 
-`taxomesh` is a personal open-source project, currently published as pre-1.0
-releases. Issues and pull requests are welcome. There is no guaranteed response
-time.
+`taxomesh` is a personal open-source project. Issues and pull requests are
+welcome. There is no guaranteed response time.
 
 ## What a change needs
 

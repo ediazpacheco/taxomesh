@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-`taxomesh` is pre-1.0. A security fix goes into the next release only; earlier releases are not
-patched.
+Only the latest release is supported: a security fix goes into the next release, and earlier releases
+are not patched.
 
 ## Reporting a vulnerability
 
