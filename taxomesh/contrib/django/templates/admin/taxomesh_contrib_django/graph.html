@@ -195,7 +195,10 @@
       var sortBy = graph.dataset.sortBy || "";
       fetch(CHILDREN_URL + "?parent_uuid=" + encodeURIComponent(uuid) + "&depth=" + (depth + 1)
             + (sortBy ? "&sort_by=" + encodeURIComponent(sortBy) : ""))
-        .then(function (r) { return r.text(); })
+        .then(function (r) {
+          if (r.ok) return r.text();
+          return r.json().then(function (data) { throw new Error(data.error || "Server error"); });
+        })
         .then(function (html) {
           insertAfterEntry(entry, html);
           toggle.dataset.loaded = "true";
@@ -204,9 +207,12 @@
           initRelToggles();
           initHandles();
         })
-        .catch(function () {
+        .catch(function (err) {
           toggle.textContent = prevText;
           toggle.disabled = false;
+          var errorEl = document.getElementById("taxomesh-dnd-error");
+          errorEl.textContent = "Loading failed: " + (err.message || "Network error");
+          errorEl.style.display = "";
         });
     }
   });

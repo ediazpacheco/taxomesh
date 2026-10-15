@@ -1093,8 +1093,8 @@ class TestDragHandleRendering:
         assert response.status_code == 200
         assert b"taxomesh-drag-handle" in response.content
         assert b'title="Drag to reorder or move"' in response.content
-        # A failed drag names one of the page's two operations, a move or a reorder.
-        assert set(re.findall(r'"(\w+) failed: "', response.content.decode())) == {"Move", "Reorder"}
+        # A failed request names what failed: a move or a reorder, or loading a category's children.
+        assert set(re.findall(r'"(\w+) failed: "', response.content.decode())) == {"Move", "Reorder", "Loading"}
 
 
 class TestGraphChildrenView:
