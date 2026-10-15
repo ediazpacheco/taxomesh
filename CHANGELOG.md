@@ -87,12 +87,12 @@ other breaking changes.
 - ⚠ **The repository port**, for a custom backend: lookups are `find_*`, keyed batch reads `map_*`,
   `assign_tag` and `remove_tag` `add_item_tag_link` and `delete_item_tag_link`,
   `get_config_summary()` the `config_summary` property, `get_debug_info()` `describe()`, and
-  `list_item_relation_links_for_items` `list_item_relation_links_batch`. The saves return the stored
-  row and take `expected_version`, a delete removes its links, listings return `Sequence`, and
-  `list_item_parent_links` takes `item_ids`, `list_category_parent_links` `category_ids` too.
-  `atomic()` keeps every other block of the store out, the read-only property `in_transaction` (API
-  change) says whether a transaction is open, and both relation listings raise `TypeError` for a
-  bare `str` as `relation_types`.
+  `list_item_relation_links_for_items` `list_item_relation_links_batch`. `save_category` and
+  `save_item` return the stored row and take `expected_version`, a delete removes its links,
+  listings return `Sequence`, and `list_item_parent_links` takes `item_ids`,
+  `list_category_parent_links` `category_ids` too. `atomic()` keeps every other block of the store
+  out, the read-only property `in_transaction` (API change) says whether a transaction is open, and
+  both relation listings raise `TypeError` for a bare `str` as `relation_types`.
 - ⚠ **Each HTTP handler is `<namespace>_<member>`** (`get_category` is `categories_get`,
   `list_categories` `categories_roots`, `get_graph` `graph`) and returns what its member returns, so
   a lookup answers `None` and your application makes the 404. Arguments after the subject are
@@ -171,8 +171,8 @@ other breaking changes.
   error. Two writes at the same moment, through one repository or on Django, run one after the
   other, so neither loses a change or stores a cycle, a deleted row or link, or a slug that the other
   took. On Django, a slug that another row holds raises `TaxomeshDuplicateSlugError`, not
-  `TaxomeshExternalIdConflictError`, and a read past the database's limit on query parameters runs
-  in several queries: a category of 40,000 items lists on SQLite.
+  `TaxomeshExternalIdConflictError`, and a read given more identifiers or external ids than the
+  database accepts in one query runs in several queries: a category of 40,000 items lists on SQLite.
 - Migrations `0008`, `0011` and `0012` change the database `migrate --database` names.
   `0008`, released in 0.1.0a30, no longer fails on a store holding a row without an external id.
 - A category name the model reads as `__root__`, such as `b"__root__"`, is refused as reserved.

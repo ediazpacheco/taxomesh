@@ -32,7 +32,9 @@ The `taxomesh` command sets Django up itself, from the settings module that `DJA
 names ([CLI reference](cli.md)).
 
 `taxomesh --show-config` prints the configuration in effect, each key with its accepted values
-and its default, as TOML that a file holds as it is: `taxomesh --show-config > taxomesh.toml`.
+and its default, as TOML that a file holds as it is. Redirect it to a new file, such as
+`taxomesh --show-config > taxomesh.toml.new`, never to the `taxomesh.toml` in use: the shell empties
+that file before taxomesh reads it, so the file then holds the defaults.
 [`taxomesh.toml.example`](../taxomesh.toml.example) is a ready-to-use template.
 
 ← [Back to README](../README.md)

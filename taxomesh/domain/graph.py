@@ -264,8 +264,8 @@ class TaxomeshGraph:
         In a graph of the whole taxonomy, these are the categories that have no parent: the same
         categories, in the same order, as ``service.categories.roots()`` with the same ``enabled``
         value. The identifier orders two categories with the same sort index, as the ordering
-        contract of the repository port does, and ``create`` gives the same sort index to every
-        new category at the top level.
+        contract of the repository port does. ``create`` puts each new category after the last, so
+        two categories tie only when a caller or the stored data gives them the same position.
 
         In a graph limited by ``root``, ``service.graph(root=…)``, this is that one category, and
         the paragraph above does not apply to it. The graph leaves out its parents with the rest

@@ -6,7 +6,7 @@ each of them keeps it as ``_cache``. ``@memoize`` on a method of such an object 
 method. So ``prime`` and ``cached`` are typed methods of the bound member, and not a module-level
 helper that reads a closure.
 
-The rest of the library depends on five invariants:
+The rest of the library depends on six invariants:
 
 * **The entries belong to the cache.** They are keyed by the member and the arguments, so
   ``ReadCache.clear()`` reaches every entry of every member, and nothing outside the objects that

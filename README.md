@@ -133,10 +133,10 @@ The whole Python API is on one page ([`llms.txt`](https://github.com/ediazpachec
 
 ## Stability and versioning
 
-taxomesh uses [Semantic Versioning](https://semver.org/): what `taxomesh`, `taxomesh.contrib.api` and
-`taxomesh.contrib.django` export, and the repository port, change incompatibly only in a major
-release. The [changelog](https://github.com/ediazpacheco/taxomesh/blob/main/CHANGELOG.md) names every
-breaking change.
+taxomesh uses [Semantic Versioning](https://semver.org/): what `taxomesh`, `taxomesh.repositories`,
+`taxomesh.contrib.api` and `taxomesh.contrib.django` export, and the repository port, change
+incompatibly only in a major release. The [changelog](https://github.com/ediazpacheco/taxomesh/blob/main/CHANGELOG.md)
+names every breaking change.
 
 taxomesh supports Python 3.13 and 3.14, and Django 6.x. CI checks every change to `main` with
 `ruff`, `mypy --strict` over the package and its tests, the Django integration included, and the full
