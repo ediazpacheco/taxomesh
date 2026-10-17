@@ -806,8 +806,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             existing_siblings = sorted(
                 [
                     lnk
-                    for lnk in self._service.repository.list_item_parent_links()
-                    if lnk.category_id == to_category_id and lnk.item_id != item_id
+                    for lnk in self._service.repository.list_item_parent_links(category_ids=[to_category_id])
+                    if lnk.item_id != item_id
                 ],
                 key=lambda lnk: lnk.sort_index,
             )
@@ -851,9 +851,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         with self._atomic():
             self._service.categories._require_stored(category_id)
             existing = {
-                lnk.item_id: lnk
-                for lnk in self._service.repository.list_item_parent_links()
-                if lnk.category_id == category_id
+                lnk.item_id: lnk for lnk in self._service.repository.list_item_parent_links(category_ids=[category_id])
             }
             for uid in item_ids:
                 if uid not in existing:

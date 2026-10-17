@@ -49,7 +49,8 @@ default path. The members for categories, items and tags are on `svc.categories`
 default file path (`DEFAULT_YAML_PATH`, `DEFAULT_JSON_PATH`). When `taxomesh.toml` names a file
 backend and no path, `_config.py` builds the backend with no path argument, so the adapter applies
 its own default. `_config.py` imports the two constants only to report which path a configuration
-resolves to. It never repeats their values.
+resolves to. It never repeats their values. `tests/service/test_service_config.py` asserts that the
+backend gets no path argument and that `_config.py` writes no file path.
 
 **The port reports absence and the service raises.** The port, `TaxomeshRepositoryBase`, is a
 `typing.Protocol`: a backend inherits nothing, and mypy checks that it has the port's members
@@ -61,8 +62,8 @@ file backend writes each one to disk on its own. A block also keeps every other 
 out: on Django, its first statement locks the implicit root's row. Each member that writes runs in
 one block and makes its reads inside it, so no other write lands between its checks and its writes,
 and `tests/service/test_concurrent_writes.py` asserts it. Cascades on delete are part of the port
-contract, and one suite, `tests/adapters/repositories/test_repository_contract.py`, holds all four
-implementations to it.
+contract, and `tests/service/test_delete_cascade.py` holds the four implementations to them:
+`YamlRepository`, `JsonRepository`, `DjangoRepository` and the tests' `InMemoryRepository`.
 
 ## Names
 
@@ -167,9 +168,13 @@ A row never changes in place. The models are frozen, `metadata` is frozen all th
 (`FrozenDict` and `FrozenList` in `domain/types.py`), and `update` builds a new, validated row:
 
 ```python
-from taxomesh import TaxomeshService, TaxomeshVersionConflictError
+from pathlib import Path
 
-svc = TaxomeshService()
+from taxomesh import TaxomeshService, TaxomeshVersionConflictError
+from taxomesh.repositories import YamlRepository
+
+Path("example.yaml").unlink(missing_ok=True)  # each run starts with an empty store
+svc = TaxomeshService(YamlRepository("example.yaml"))
 music = svc.categories.create("Music")
 renamed = svc.categories.update(music, name="Recorded music", expected_version=music.version)
 assert music.name == "Music" and renamed.name == "Recorded music"
@@ -345,7 +350,11 @@ absence of logic in a handler, or the imports of `contrib/api`.
   stored value. `None` clears a nullable field.
 - **Removing an absent link is a no-op**, as `set.discard` is. Deleting an absent row raises.
 - **Cycles are refused in the domain.** `domain/dag.py` checks every new parent link before it is
-  written, and no adapter repeats the check.
+  written, and no adapter repeats the check. The check needs the whole category graph, so
+  `add_parent` and `categories.move` read every parent link, in one read.
+- **A move or a reorder reads only the links it orders.** `items.move` and `items.reorder` read the
+  placements of one category, and `categories.reorder` the parent links of one parent or of the top
+  level, as `items.place_in` does. `tests/service/test_ordering_reads.py` asserts it.
 - **A parent link carries its own order.** A parent link is `(category_id, parent_category_id,
   sort_index)`, so a category under several parents has a position under each one. A new link
   given no position goes after the last link of its parent, as `list.append` does, so a store lists
@@ -353,12 +362,15 @@ absence of logic in a handler, or the imports of `contrib/api`.
 - **No process in the product.** `taxomesh/` and `tests/` contain no task, specification,
   requirement or review-finding identifier, no account of how the code changed, and no citation of
   a planning document. The code states what is true now, and `CHANGELOG.md` holds the history.
+  `tests/test_no_process_ids.py` refuses each identifier and label by its pattern. An account of a
+  change written in plain words matches no pattern, so a review finds it, not the build.
 
 ## Where the rules are enforced
 
 | Rule | Test |
 |---|---|
 | The layers, and the `Base` suffix | `tests/test_architecture.py` |
+| An adapter keeps its own defaults | `tests/service/test_service_config.py` |
 | Member names, and no collection is a `Mapping` | `tests/surface/test_api_law.py` |
 | The signatures of the service, its three collections and the port, keyword-only filters included | `tests/surface/public_surface.txt`, a ledger edited only on purpose |
 | The `enabled` defaults | `tests/service/test_enabled_defaults.py` |
@@ -371,11 +383,13 @@ absence of logic in a handler, or the imports of `contrib/api`.
 | Entity or identifier | `tests/service/test_entity_or_id.py` |
 | One value where a lookup takes several | `tests/service/test_single_values.py` |
 | Idempotent removal, and unstored subjects | `tests/service/test_removal_idempotent.py`, `tests/service/test_unknown_subjects.py` |
-| A listing's wrong address | `tests/service/test_batch_placement_reads.py` |
+| A listing's wrong address | `tests/service/test_batch_placement_reads.py`, `tests/service/test_unknown_subjects.py` |
 | The root invariant | `tests/service/test_root_invariant.py`, `tests/service/test_root_invisible.py` |
 | The per-service cache | `tests/service/test_service_cache.py`, `tests/utils/test_memoize.py` |
+| A move or a reorder reads only the links it orders | `tests/service/test_ordering_reads.py` |
 | Category listings prime the cache, item listings do not | `tests/service/test_memoize_priming.py` |
 | The port contract | `tests/adapters/repositories/test_repository_contract.py` |
+| Cascades on delete | `tests/service/test_delete_cascade.py` |
 | A write's checks and writes are one step | `tests/service/test_concurrent_writes.py`, `tests/contrib/django/test_concurrent_writes.py` |
 | The handlers' names and contracts | `tests/contrib/test_api_handlers.py` |
 | No process in the product | `tests/test_no_process_ids.py` |
@@ -383,5 +397,5 @@ absence of logic in a handler, or the imports of `contrib/api`.
 Tests enforce the rules listed here, so a change that breaks one of them fails the build. The
 behavior behind the names is asserted on every backend: the port's `None` on a miss, each `get*`
 member's answer to an absent key, and what each `enabled` value selects. The port contract suite
-runs on all four implementations, and so does each service test that uses the shared `service`
-fixture.
+runs on the three adapters and the tests' `InMemoryRepository`, and so does each service test that
+uses the shared `service` fixture.

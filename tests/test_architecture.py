@@ -2,9 +2,10 @@
 
 The application layer orchestrates the domain through the repository port and knows no concrete
 adapter and no integration. Resolving a repository from ``taxomesh.toml`` lives outside it, in
-``taxomesh._config``, which the service reaches only when it is given no repository. Every public
-abstract interface, a ``Protocol`` or an ``ABC``, is named with the ``Base`` suffix, as the port
-``TaxomeshRepositoryBase`` is.
+``taxomesh._config``, which the service reaches only when it is given no repository. The domain
+imports neither the application nor anything outside it. Every public abstract interface, a
+``Protocol`` or an ``ABC``, is named with the ``Base`` suffix, as the port ``TaxomeshRepositoryBase``
+is.
 """
 
 import ast
@@ -15,30 +16,54 @@ from pathlib import Path
 from typing import Final
 
 PACKAGE: Final[Path] = Path(__file__).resolve().parent.parent / "taxomesh"
-OUTER_LAYERS: Final[tuple[str, ...]] = ("taxomesh.adapters", "taxomesh.contrib")
+# The adapters and the integrations, and ``taxomesh.repositories``, which re-exports the adapters.
+OUTER_LAYERS: Final[tuple[str, ...]] = ("taxomesh.adapters", "taxomesh.contrib", "taxomesh.repositories")
+
+
+def _package_of(path: Path) -> str:
+    """Return the dotted name of the package that holds the module at *path*."""
+    parts = path.relative_to(PACKAGE.parent).with_suffix("").parts
+    return ".".join(parts[:-1])
 
 
 def _imported_modules(path: Path) -> Iterator[tuple[int, str]]:
-    """Yield the line and the name of every module this file imports, at any depth.
+    """Yield the line and the absolute name of every module this file imports, at any depth.
 
     An import inside a function body counts as much as one at the top: a lazy import is still a
-    dependency, only a deferred one.
+    dependency, only a deferred one. A relative import is resolved against the file's package, and
+    ``from package import name`` also yields ``package.name``, since the name may be a module.
     """
+    package = _package_of(path)
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 yield node.lineno, alias.name
-        elif isinstance(node, ast.ImportFrom) and node.module is not None and node.level == 0:
-            yield node.lineno, node.module
+        elif isinstance(node, ast.ImportFrom):
+            base = package.rsplit(".", node.level - 1)[0] if node.level else ""
+            module = ".".join(part for part in (base, node.module) if part)
+            yield node.lineno, module
+            for alias in node.names:
+                yield node.lineno, f"{module}.{alias.name}"
+
+
+def _reaching_out(layer: str, outward: tuple[str, ...]) -> list[str]:
+    """Return one ``path:line imports module`` entry for each import under *layer* of a module in *outward*."""
+    return [
+        f"{path.relative_to(PACKAGE.parent)}:{line} imports {module}"
+        for path in sorted((PACKAGE / layer).rglob("*.py"))
+        for line, module in _imported_modules(path)
+        if any(module == name or module.startswith(f"{name}.") for name in outward)
+    ]
 
 
 def test_the_application_layer_imports_no_adapter_and_no_integration() -> None:
-    reaching_out = [
-        f"{path.relative_to(PACKAGE.parent)}:{line} imports {module}"
-        for path in sorted((PACKAGE / "application").rglob("*.py"))
-        for line, module in _imported_modules(path)
-        if module.startswith(OUTER_LAYERS)
-    ]
+    reaching_out = _reaching_out("application", OUTER_LAYERS)
+
+    assert not reaching_out, "\n".join(reaching_out)
+
+
+def test_the_domain_imports_no_layer_outside_it() -> None:
+    reaching_out = _reaching_out("domain", ("taxomesh.application", "taxomesh._config", *OUTER_LAYERS))
 
     assert not reaching_out, "\n".join(reaching_out)
 

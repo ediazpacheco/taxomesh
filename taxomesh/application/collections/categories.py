@@ -1014,8 +1014,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 self._require_stored(parent_id)
             existing = {
                 lnk.category_id: lnk
-                for lnk in self._service.repository.list_category_parent_links()
-                if lnk.parent_category_id == scope
+                for lnk in self._service.repository.list_category_parent_links(parent_category_ids=[scope])
             }
             for uid in category_ids:
                 if uid not in existing:

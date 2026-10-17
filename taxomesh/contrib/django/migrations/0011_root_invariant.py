@@ -2,9 +2,9 @@
 
 A category holds a link to the implicit root exactly when it holds no other parent link, and no item
 is placed in the root. This deletes a root link held beside another parent, gives a category holding
-no parent link a root link at sort index 0, as ``create`` makes it, and deletes every item placement
-in the root. A store that already holds the invariant is not changed. It changes the database being
-migrated, as ``migrate --database`` names it.
+no parent link a root link at sort index 0, and deletes every item placement in the root. A store
+that already holds the invariant is not changed. It changes the database being migrated, as
+``migrate --database`` names it.
 
 Reverse: a no-op. The schema is unchanged, so migrating back needs no data restored.
 """

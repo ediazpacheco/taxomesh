@@ -90,9 +90,9 @@ class CategoryNode:
     def ancestors(self) -> Sequence[CategoryNode]:
         """Return every category above this one: its parents, their parents, and so on up.
 
-        Depth-first in stored order: the first parent, then every ancestor of that parent, then the
-        next parent. Each category comes once, however many paths reach it. The node itself is
-        left out, and a cycle in stored data that leads back to it ends the walk there.
+        Depth-first, the parents in identifier order: the first parent, then every ancestor of that
+        parent, then the next parent. Each category comes once, however many paths reach it. The
+        node itself is left out, and a cycle in stored data that leads back to it ends the walk there.
 
         In a graph limited by ``root``, these are the ancestors that the graph holds: a parent
         outside the subtree is not a node of this graph.

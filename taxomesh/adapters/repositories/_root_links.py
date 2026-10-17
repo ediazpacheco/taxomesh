@@ -16,9 +16,8 @@ def normalise_root_links(
 
     A category holds a link to the implicit root exactly when it holds no other parent link, and no
     item is placed in the root. So a root link held beside another parent is dropped, a category
-    holding no parent link gains a root link at sort index 0, as ``create`` makes it, and an item
-    placement in the root is dropped. Links that already keep the invariant come back equal, in
-    their order.
+    holding no parent link gains a root link at sort index 0, and an item placement in the root is
+    dropped. Links that already keep the invariant come back equal, in their order.
 
     Args:
         categories: Every stored category, the root included, keyed by identifier.

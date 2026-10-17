@@ -102,7 +102,25 @@ TOP_LEVEL_FIELD: Final[str] = "at_top_level"
 TOP_LEVEL_PARENT: Final[str] = ""
 
 
-def _parent_from_payload(raw: str) -> UUID | None:
+def _uuid_from_payload(raw: object) -> UUID:
+    """Read an identifier that the graph's drag-and-drop sends as text.
+
+    Args:
+        raw: The identifier as the payload carries it.
+
+    Returns:
+        The identifier.
+
+    Raises:
+        ValueError: If it is text that is not a UUID.
+        TypeError: If it is not a string.
+    """
+    if not isinstance(raw, str):
+        raise TypeError(f"Expected a UUID as a string, not {type(raw).__name__}")
+    return UUID(raw)
+
+
+def _parent_from_payload(raw: object) -> UUID | None:
     """Read a parent the graph's drag-and-drop sends: the empty string is the top level.
 
     Args:
@@ -115,7 +133,7 @@ def _parent_from_payload(raw: str) -> UUID | None:
         ValueError: If it is neither empty nor a UUID.
         TypeError: If it is not a string.
     """
-    return None if raw == TOP_LEVEL_PARENT else UUID(raw)
+    return None if raw == TOP_LEVEL_PARENT else _uuid_from_payload(raw)
 
 
 def _graph_view_error(exc: Exception) -> JsonResponse:
@@ -1018,13 +1036,12 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
 
         try:
             parent_uuid = _parent_from_payload(body["parent_uuid"])
-            ordered_uuids = [UUID(u) for u in body["ordered_uuids"]]
+            ordered_uuids = [_uuid_from_payload(u) for u in body["ordered_uuids"]]
         except (ValueError, TypeError):
             return JsonResponse({"error": "Invalid UUID format"}, status=400)
 
-        repo = DjangoRepository()
-        svc = TaxomeshService(repository=repo)
         try:
+            svc = TaxomeshService(repository=DjangoRepository())
             if kind == DRAG_KIND_ITEM:
                 if parent_uuid is None:
                     return JsonResponse({"error": "Items have no top level"}, status=400)
@@ -1048,23 +1065,21 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         kind = body["kind"]
 
         try:
-            node_uuid = UUID(body["node_uuid"])
+            node_uuid = _uuid_from_payload(body["node_uuid"])
             old_parent_uuid = _parent_from_payload(body["old_parent_uuid"])
             new_parent_uuid = _parent_from_payload(body["new_parent_uuid"])
             raw_insert = body["insert_before_uuid"]
-            insert_before_uuid: UUID | None = UUID(raw_insert) if raw_insert is not None else None
+            insert_before_uuid = _uuid_from_payload(raw_insert) if raw_insert is not None else None
         except (ValueError, TypeError):
             return JsonResponse({"error": "Invalid UUID format"}, status=400)
 
-        repo = DjangoRepository()
-        svc = TaxomeshService(repository=repo)
-
-        root_cats = [c for c in repo.list_categories(enabled=None) if c.name == ROOT_CATEGORY_NAME]
-        root_uuid = root_cats[0].category_id if root_cats else None
-        if root_uuid is not None and node_uuid == root_uuid:
-            return JsonResponse({"error": "The implicit root cannot be moved"}, status=400)
-
         try:
+            repo = DjangoRepository()
+            svc = TaxomeshService(repository=repo)
+            root_cats = [c for c in repo.list_categories(enabled=None) if c.name == ROOT_CATEGORY_NAME]
+            root_uuid = root_cats[0].category_id if root_cats else None
+            if root_uuid is not None and node_uuid == root_uuid:
+                return JsonResponse({"error": "The implicit root cannot be moved"}, status=400)
             if kind == DRAG_KIND_ITEM:
                 if old_parent_uuid is None or new_parent_uuid is None:
                     return JsonResponse({"error": "Items have no top level"}, status=400)

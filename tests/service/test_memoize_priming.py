@@ -116,6 +116,23 @@ class TestPrimingFromCategoryReads:
             assert svc.categories[category.category_id] == category
         assert counting_service.reads.total == 0
 
+    def test_fetching_a_category_of_the_unfiltered_listing_costs_nothing(
+        self, counting_service: CountedService
+    ) -> None:
+        svc = counting_service.service
+        parent = svc.categories.create("P")
+        kid = svc.categories.create("K")
+        svc.categories.add_parent(kid.category_id, parent.category_id)
+
+        counting_service.cold()
+        listed = svc.categories.list()
+        counting_service.reads.reset()
+
+        assert {category.name for category in listed} == {"P", "K"}
+        for category in listed:
+            assert svc.categories[category.category_id] == category
+        assert counting_service.reads.total == 0
+
     def test_the_primed_value_is_the_real_row(self, counting_service: CountedService) -> None:
         svc = counting_service.service
         parent = svc.categories.create("P")

@@ -1,11 +1,12 @@
 """Tests for TaxomeshService config_path parameter and repository property."""
 
+import ast
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from taxomesh import TaxomeshService
+from taxomesh import TaxomeshService, _config
 from taxomesh.adapters.repositories.django_repository import DjangoRepository
 from taxomesh.exceptions import TaxomeshConfigError
 
@@ -15,6 +16,42 @@ def test_no_args_no_config_file_falls_back_to_yaml_repo(tmp_path: Path, monkeypa
     monkeypatch.chdir(tmp_path)
     TaxomeshService()
     assert (tmp_path / "data" / "taxomesh.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    ("toml", "adapter"),
+    [
+        (None, "YamlRepository"),
+        ('[repository]\ntype = "yaml"\n', "YamlRepository"),
+        ('[repository]\ntype = "json"\n', "JsonRepository"),
+    ],
+    ids=["no file", "yaml, no path", "json, no path"],
+)
+def test_a_file_backend_named_without_a_path_is_built_with_no_argument(
+    toml: str | None, adapter: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_config.py`` passes no path, so the adapter applies its own default path."""
+    monkeypatch.chdir(tmp_path)
+    if toml is not None:
+        (tmp_path / "taxomesh.toml").write_text(toml, encoding="utf-8")
+    built = MagicMock()
+    monkeypatch.setattr(_config, adapter, built)
+
+    _config.resolve_repository(None)
+
+    built.assert_called_once_with()
+
+
+def test_the_config_module_writes_no_default_path_of_its_own() -> None:
+    """The default file paths are the adapters' constants; ``_config.py`` repeats none of their values."""
+    source = Path(_config.__file__).read_text(encoding="utf-8")
+    literals = [
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+
+    assert not [text for text in literals if text.endswith((".yaml", ".json"))]
 
 
 def test_auto_discovers_toml_from_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

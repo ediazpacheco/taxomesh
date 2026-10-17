@@ -24,10 +24,13 @@ arguments are typed as its member's are, so parse what arrives as text: a query 
 only, `query` is at most `MAX_SEARCH_QUERY_LENGTH` characters (`taxomesh.domain.constants`).
 
 ```python
-from taxomesh import TaxomeshService, TaxomeshVersionConflictError
-from taxomesh.exceptions import TaxomeshError
+from pathlib import Path
 
-service = TaxomeshService()  # auto-discovers taxomesh.toml, else a YAML file in ./data/
+from taxomesh import TaxomeshError, TaxomeshService, TaxomeshVersionConflictError
+from taxomesh.repositories import YamlRepository
+
+Path("example.yaml").unlink(missing_ok=True)  # each run starts with an empty store
+service = TaxomeshService(YamlRepository("example.yaml"))
 
 music = handlers.categories_create(service, body=schemas.CreateCategoryRequest(name="Music", external_id="cat-music"))
 jazz = handlers.categories_create(service, body=schemas.CreateCategoryRequest(name="Jazz"))
@@ -95,12 +98,11 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from taxomesh import TaxomeshService
+from taxomesh import TaxomeshError, TaxomeshService
 from taxomesh.contrib.api import errors, handlers, schemas, serializers
-from taxomesh.exceptions import TaxomeshError
 
 app = FastAPI()
-service = TaxomeshService()
+service = TaxomeshService()  # taxomesh.toml in the working directory, else data/taxomesh.yaml
 
 
 @app.exception_handler(TaxomeshError)

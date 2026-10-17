@@ -8,6 +8,29 @@ The alpha series before 1.0.0, `0.1.0a1` to `0.1.0a50`, is described on the
 [GitHub releases page](https://github.com/ediazpacheco/taxomesh/releases), one release per git tag.
 The full entries of that series are in
 [`CHANGELOG.md` at the tag `v0.1.0a50`](https://github.com/ediazpacheco/taxomesh/blob/v0.1.0a50/CHANGELOG.md).
+The changes of 1.0.0 were first dated as 0.2.0 in this file, on 2026-10-12; that version was never
+tagged or published.
+
+## [1.0.1] — 2026-10-17
+
+1.0.1 fixes what a move or a reorder reads, two error answers of the admin graph's moves, and the
+opening examples of three documentation pages. No public name or signature changes.
+
+### Fixed
+
+- `items.move` and `items.reorder` read the placements of the one category that they order, and
+  `categories.reorder` the parent links of one parent or of the top level, as `items.place_in` does.
+  In 1.0.0 they read every link of the store: with 100,000 placements on SQLite, a move took 0.8 s;
+  it now takes 3 ms.
+- In the admin graph's reorder and reparent views, an identifier that is not text, such as a
+  number, answers 400 "Invalid UUID format" in JSON, as text that is not a UUID does. A storage
+  failure before the move answers the JSON 500 with the generic text, as a failure of the move does.
+  Both answered Django's HTML 500.
+- The opening examples of `docs/python-api.md`, `docs/http-api-integration.md` and `docs/design.md`
+  run again in the same folder: each first empties a store of its own, as the README's quick start
+  does. With the default store, a second run raised.
+- The documentation says that `node.ancestors()` takes the parents in identifier order, and that
+  `categories.list()` with no filter returns every enabled category, at every level.
 
 ## [1.0.0] — 2026-10-15
 
@@ -26,8 +49,8 @@ other breaking changes.
 - `categories.get_by_slug` and `items.get_by_slug` return `None` on a miss, where
   `get_category_by_slug` and `get_item_by_slug` raised not-found. A loop waiting for the raise never
   ends.
-- `categories.list()` with no filter returns every category. `list_categories()` returned the top
-  level, which is `categories.roots()` now.
+- `categories.list()` with no filter returns every enabled category, at every level.
+  `list_categories()` returned the top level, which is `categories.roots()` now.
 - `svc.categories`, `svc.items` and `svc.tags` are attributes, not methods. A lookup such as
   `getattr(svc, "get_category_by_slug", None)`, or a proxy that wraps only callables, finds nothing
   and raises no error.

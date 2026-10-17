@@ -23,12 +23,17 @@ annotations. Every example on this page runs, in order, in the test suite.
 
 ## The worked example
 
-Every example below runs against the taxonomy built here.
+Every example below uses this taxonomy. With no argument, `TaxomeshService()` reads `taxomesh.toml`
+in the working directory, and without one keeps its store in `data/taxomesh.yaml`, between runs.
 
 ```python
-from taxomesh import TaxomeshService
+from pathlib import Path
 
-svc = TaxomeshService()  # the taxomesh.toml in the working directory, else a YAML file in ./data/
+from taxomesh import TaxomeshService
+from taxomesh.repositories import YamlRepository
+
+Path("example.yaml").unlink(missing_ok=True)  # each run starts with an empty store
+svc = TaxomeshService(YamlRepository("example.yaml"))
 
 music = svc.categories.create(name="Music", slug="music", external_id="cat:music")
 jazz = svc.categories.create(name="Jazz", slug="jazz", external_id="cat:jazz")
@@ -228,7 +233,7 @@ assert [n.category.name for n in svc.graph().roots] == ["Music"]
 | `get_by_external_id(external_id, /)` | `Category \| None` | The category with that external id |
 | `get_many(categories, /, *, enabled=None)` | `Mapping[UUID, Category]` | The categories found, in one read |
 | `get_many_by_external_id(external_ids, /, *, enabled=None)` | `Mapping[str, Category]` | The same, keyed by stored external id |
-| `list(*, parent=None, item=None, enabled=True)` | `Sequence[Category]` | Every category; or a parent's children; or an item's categories |
+| `list(*, parent=None, item=None, enabled=True)` | `Sequence[Category]` | Every enabled category, at every level; or a parent's children; or an item's categories |
 | `roots(*, enabled=True)` | `Sequence[Category]` | The top level |
 | `search(query, *, limit=20, parent=None, enabled=True, fuzzy=True)` | `Sequence[Category]` | Ranked matches: see [Search](#search) |
 | `add_parent(category, parent, *, sort_index=None)` | `CategoryParentLink` | Adds a parent, keeping the others |
@@ -567,7 +572,7 @@ that category and its descendants; `include_items=False` reads no items at all.
 | `node.category` | the `Category` row |
 | `node.children` · `node.parents` | `Sequence[CategoryNode]`, one level: children by sort index, parents by identifier |
 | `node.items` | `Sequence[Item]`, by sort index; `()` in a graph built with `include_items=False` |
-| `node.descendants()` · `node.ancestors()` | `Sequence[CategoryNode]`, every level down or up, depth-first in stored order, each once, the node left out |
+| `node.descendants()` · `node.ancestors()` | `Sequence[CategoryNode]`, every level down or up, depth-first in the order of `children` or `parents`, each once, the node left out |
 
 `walk()` is the graph's only enumerator: it yields every node once, a category no top-level
 category reaches included. It and both node walks end on a cycle in stored data. The graph itself

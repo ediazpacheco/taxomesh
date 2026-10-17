@@ -1,9 +1,10 @@
 """The admin graph's two write views, and the view of a category's children, answer an error as the HTTP edge does.
 
-A library error that the caller can correct answers 400 with its message. A storage failure, and
-any other exception, answers 500 with one generic text and a log record, since their own text can
-name a table, a constraint or a path. Every answer is JSON with the key ``error``, which the graph
-page shows.
+A library error that the caller can correct answers 400 with its message, and so does an identifier
+that is not a UUID in text. A storage failure, and any other exception, answers 500 with one generic
+text and a log record, since their own text can name a table, a constraint or a path, whether it
+happens as the view builds its service or as it moves. Every answer is JSON with the key ``error``,
+which the graph page shows.
 """
 
 import json
@@ -19,8 +20,9 @@ django = pytest.importorskip("django", reason="Django is not installed")
 from django.test import Client  # noqa: E402
 from django.urls import reverse  # noqa: E402
 
-from taxomesh import TaxomeshCategoryNotFoundError, TaxomeshRepositoryError  # noqa: E402
+from taxomesh import Category, TaxomeshCategoryNotFoundError, TaxomeshRepositoryError, TaxomeshService  # noqa: E402
 from taxomesh.contrib.api.errors import GENERIC_SERVER_ERROR_DETAIL  # noqa: E402
+from taxomesh.repositories import DjangoRepository  # noqa: E402
 
 pytestmark = pytest.mark.django_db
 
@@ -128,3 +130,89 @@ def test_a_move_whose_body_is_not_a_json_object_answers_400(admin_client: Client
     response = admin_client.post(reverse(url), data="5", content_type="application/json")
 
     assert (response.status_code, json.loads(response.content)) == (400, {"error": "Invalid JSON"})
+
+
+REORDER = "admin:taxomesh_contrib_django_graph_reorder"
+REPARENT = "admin:taxomesh_contrib_django_graph_reparent"
+
+
+def _post(client: Client, url: str, payload: dict[str, object]) -> tuple[int, dict[str, str]]:
+    response = client.post(reverse(url), data=json.dumps(payload), content_type="application/json")
+    return response.status_code, json.loads(response.content)
+
+
+@pytest.fixture
+def stored() -> tuple[TaxomeshService, Category, Category]:
+    """Two top-level categories, A then B, in the database that the admin reads."""
+    svc = TaxomeshService(DjangoRepository(), cache_ttl=0)
+    return svc, svc.categories.create(name="A"), svc.categories.create(name="B")
+
+
+def _move(url: str, a: Category, b: Category) -> dict[str, object]:
+    """A valid body: B before A at the top level, or B moved under A."""
+    if url == REORDER:
+        return {"kind": "category", "parent_uuid": "", "ordered_uuids": [str(b.category_id), str(a.category_id)]}
+    return {
+        "kind": "category",
+        "node_uuid": str(b.category_id),
+        "old_parent_uuid": "",
+        "new_parent_uuid": str(a.category_id),
+        "insert_before_uuid": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("url", "field"),
+    [
+        (REORDER, "parent_uuid"),
+        (REORDER, "ordered_uuids"),
+        (REPARENT, "node_uuid"),
+        (REPARENT, "old_parent_uuid"),
+        (REPARENT, "new_parent_uuid"),
+        (REPARENT, "insert_before_uuid"),
+    ],
+)
+def test_an_identifier_given_as_a_number_answers_400_and_moves_nothing(
+    admin_client: Client, stored: tuple[TaxomeshService, Category, Category], url: str, field: str
+) -> None:
+    svc, a, b = stored
+    payload = _move(url, a, b)
+    payload[field] = [123] if field == "ordered_uuids" else 123
+
+    assert _post(admin_client, url, payload) == (400, {"error": "Invalid UUID format"})
+    assert [c.name for c in svc.categories.roots()] == ["A", "B"]
+
+
+@pytest.mark.parametrize("url", [REORDER, REPARENT])
+def test_a_storage_failure_as_the_view_builds_its_service_answers_500_in_json(
+    admin_client: Client,
+    stored: tuple[TaxomeshService, Category, Category],
+    url: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    svc, a, b = stored
+    with (
+        caplog.at_level(logging.ERROR, logger="taxomesh"),
+        patch(_PATCH_SERVICE, side_effect=TaxomeshRepositoryError(SECRET)),
+    ):
+        answer = _post(admin_client, url, _move(url, a, b))
+
+    assert answer == (500, {"error": GENERIC_SERVER_ERROR_DETAIL})
+    assert [record.levelno for record in caplog.records if record.name.startswith("taxomesh")] == [logging.ERROR]
+    assert [c.name for c in svc.categories.roots()] == ["A", "B"]
+
+
+def test_a_storage_failure_as_the_move_reads_the_implicit_root_answers_500_in_json(
+    admin_client: Client, stored: tuple[TaxomeshService, Category, Category], caplog: pytest.LogCaptureFixture
+) -> None:
+    svc, a, b = stored
+    with (
+        caplog.at_level(logging.ERROR, logger="taxomesh"),
+        patch(_PATCH_SERVICE, return_value=MagicMock()),
+        patch.object(DjangoRepository, "list_categories", side_effect=TaxomeshRepositoryError(SECRET)),
+    ):
+        answer = _post(admin_client, REPARENT, _move(REPARENT, a, b))
+
+    assert answer == (500, {"error": GENERIC_SERVER_ERROR_DETAIL})
+    assert [record.levelno for record in caplog.records if record.name.startswith("taxomesh")] == [logging.ERROR]
+    assert [c.name for c in svc.categories.roots()] == ["A", "B"]

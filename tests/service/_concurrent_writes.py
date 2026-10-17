@@ -161,9 +161,15 @@ class Outcome(TypedDict):
 
 type Write = Callable[[TaxomeshService, Scene], object]
 
-# A call of the port, by member name and positional arguments, that a write makes. ``mock.ANY`` stands
-# for an argument that the schedule cannot name before the race, such as the row that a create saves.
-type Read = tuple[str, tuple[object, ...]]
+# A call of the port, by member name, positional arguments and keyword arguments, that a write makes.
+# ``mock.ANY`` stands for an argument that the schedule cannot name before the race, such as the row
+# that a create saves.
+type Read = tuple[str, tuple[object, ...], Mapping[str, object]]
+
+
+def _call(name: str, *args: object, **kwargs: object) -> Read:
+    """Name one call of the port, as a write makes it."""
+    return name, args, kwargs
 
 
 @dataclass(frozen=True)
@@ -191,11 +197,7 @@ def _ended(*, second: str = RETURNED, added: tuple[str, ...] = (), removed: tupl
 
 
 def _every_parent_link(scene: Scene) -> Read:
-    return ("list_category_parent_links", ())
-
-
-def _every_placement(scene: Scene) -> Read:
-    return ("list_item_parent_links", ())
+    return _call("list_category_parent_links")
 
 
 # The first write makes A a child of B, so the second write, which would make B a child of A, is a
@@ -234,42 +236,42 @@ SCHEDULES: Final[tuple[Schedule, ...]] = (
     Schedule(
         name="categories.reorder/remove_parent",
         first=lambda svc, s: svc.categories.reorder(s.p, [s.d, s.c]),
-        after=_every_parent_link,
+        after=lambda s: _call("list_category_parent_links", parent_category_ids=[s.p]),
         second=lambda svc, s: svc.categories.remove_parent(s.c, s.p),
         expected=_ended(added=("C -> __root__",), removed=("C -> P",)),
     ),
     Schedule(
         name="items.move/remove_from",
         first=lambda svc, s: svc.items.move(s.i, from_category=s.x, to_category=s.y),
-        after=_every_placement,
+        after=lambda s: _call("list_item_parent_links", category_ids=[s.y]),
         second=lambda svc, s: svc.items.remove_from(s.j, s.y),
         expected=_ended(added=("I in Y",), removed=("I in X", "J in Y")),
     ),
     Schedule(
         name="items.reorder/remove_from",
         first=lambda svc, s: svc.items.reorder(s.y, [s.k, s.j]),
-        after=_every_placement,
+        after=lambda s: _call("list_item_parent_links", category_ids=[s.y]),
         second=lambda svc, s: svc.items.remove_from(s.j, s.y),
         expected=_ended(removed=("J in Y",)),
     ),
     Schedule(
         name="place_in/categories.delete",
         first=lambda svc, s: svc.items.place_in(s.i, s.z),
-        after=lambda s: ("find_category", (s.z,)),
+        after=lambda s: _call("find_category", s.z),
         second=lambda svc, s: svc.categories.delete(s.z),
         expected=_ended(removed=("Z = 'Z'", "Z -> __root__")),
     ),
     Schedule(
         name="relate/items.delete",
         first=lambda svc, s: svc.items.relate(s.i, s.j, "covers"),
-        after=lambda s: ("find_item", (s.j,)),
+        after=lambda s: _call("find_item", s.j),
         second=lambda svc, s: svc.items.delete(s.j),
         expected=_ended(removed=("J = 'J'", "J in Y")),
     ),
     Schedule(
         name="tag/items.delete",
         first=lambda svc, s: svc.items.tag(s.i, s.t),
-        after=lambda s: ("find_item", (s.i,)),
+        after=lambda s: _call("find_item", s.i),
         second=lambda svc, s: svc.items.delete(s.i),
         expected=_ended(removed=("I = 'I'", "I in X")),
     ),
@@ -278,35 +280,35 @@ SCHEDULES: Final[tuple[Schedule, ...]] = (
     Schedule(
         name="items.update/items.delete",
         first=lambda svc, s: svc.items.update(s.i, slug="s"),
-        after=lambda s: ("find_item", (s.i,)),
+        after=lambda s: _call("find_item", s.i),
         second=lambda svc, s: svc.items.delete(s.i),
         expected=_ended(removed=("I = 'I'", "I in X")),
     ),
     Schedule(
         name="categories.update/categories.delete",
         first=lambda svc, s: svc.categories.update(s.a, slug="s"),
-        after=lambda s: ("find_category", (s.a,)),
+        after=lambda s: _call("find_category", s.a),
         second=lambda svc, s: svc.categories.delete(s.a),
         expected=_ended(removed=("A = 'A'", "A -> __root__")),
     ),
     Schedule(
         name="tags.update/tags.delete",
         first=lambda svc, s: svc.tags.update(s.t, name="T2"),
-        after=lambda s: ("find_tag", (s.t,)),
+        after=lambda s: _call("find_tag", s.t),
         second=lambda svc, s: svc.tags.delete(s.t),
         expected=_ended(removed=("T = 'T'",)),
     ),
     Schedule(
         name="items.update/items.update",
         first=lambda svc, s: svc.items.update(s.i, slug="s"),
-        after=lambda s: ("find_item", (s.i,)),
+        after=lambda s: _call("find_item", s.i),
         second=lambda svc, s: svc.items.update(s.i, name="I2"),
         expected=_ended(added=("I = 'I2' slug='s'",), removed=("I = 'I'",)),
     ),
     Schedule(
         name="categories.update/categories.update",
         first=lambda svc, s: svc.categories.update(s.a, slug="s"),
-        after=lambda s: ("find_category", (s.a,)),
+        after=lambda s: _call("find_category", s.a),
         second=lambda svc, s: svc.categories.update(s.a, name="A2"),
         expected=_ended(added=("A = 'A2' slug='s'",), removed=("A = 'A'",)),
     ),
@@ -315,42 +317,42 @@ SCHEDULES: Final[tuple[Schedule, ...]] = (
     Schedule(
         name="items.create/items.create, one slug",
         first=lambda svc, s: svc.items.create("N1", slug="s"),
-        after=lambda s: ("find_item_by_slug", ("s",)),
+        after=lambda s: _call("find_item_by_slug", "s"),
         second=lambda svc, s: svc.items.create("N2", slug="s"),
         expected=_ended(second="TaxomeshDuplicateSlugError", added=("N1 = 'N1' slug='s'",)),
     ),
     Schedule(
         name="categories.create/categories.create, one slug",
         first=lambda svc, s: svc.categories.create("N1", slug="s"),
-        after=lambda s: ("find_category_by_slug", ("s",)),
+        after=lambda s: _call("find_category_by_slug", "s"),
         second=lambda svc, s: svc.categories.create("N2", slug="s"),
         expected=_ended(second="TaxomeshDuplicateSlugError", added=("N1 = 'N1' slug='s'", "N1 -> __root__")),
     ),
     Schedule(
         name="items.update/items.update, one slug",
         first=lambda svc, s: svc.items.update(s.i, slug="s"),
-        after=lambda s: ("find_item_by_slug", ("s",)),
+        after=lambda s: _call("find_item_by_slug", "s"),
         second=lambda svc, s: svc.items.update(s.j, slug="s"),
         expected=_ended(second="TaxomeshDuplicateSlugError", added=("I = 'I' slug='s'",), removed=("I = 'I'",)),
     ),
     Schedule(
         name="categories.update/categories.update, one slug",
         first=lambda svc, s: svc.categories.update(s.a, slug="s"),
-        after=lambda s: ("find_category_by_slug", ("s",)),
+        after=lambda s: _call("find_category_by_slug", "s"),
         second=lambda svc, s: svc.categories.update(s.b, slug="s"),
         expected=_ended(second="TaxomeshDuplicateSlugError", added=("A = 'A' slug='s'",), removed=("A = 'A'",)),
     ),
     Schedule(
         name="items.create/items.create, one external id",
         first=lambda svc, s: svc.items.create("N1", external_id="e"),
-        after=lambda s: ("save_item", (mock.ANY,)),
+        after=lambda s: _call("save_item", mock.ANY),
         second=lambda svc, s: svc.items.create("N2", external_id="e"),
         expected=_ended(second="TaxomeshExternalIdConflictError", added=("N1 = 'N1' external_id='e'",)),
     ),
     Schedule(
         name="categories.create/categories.create, one external id",
         first=lambda svc, s: svc.categories.create("N1", external_id="e"),
-        after=lambda s: ("save_category", (mock.ANY,)),
+        after=lambda s: _call("save_category", mock.ANY),
         second=lambda svc, s: svc.categories.create("N2", external_id="e"),
         expected=_ended(
             second="TaxomeshExternalIdConflictError", added=("N1 = 'N1' external_id='e'", "N1 -> __root__")
@@ -359,7 +361,7 @@ SCHEDULES: Final[tuple[Schedule, ...]] = (
     Schedule(
         name="items.update/items.update, one external id",
         first=lambda svc, s: svc.items.update(s.i, external_id="e"),
-        after=lambda s: ("find_item_by_external_id", ("e",)),
+        after=lambda s: _call("find_item_by_external_id", "e"),
         second=lambda svc, s: svc.items.update(s.j, external_id="e"),
         expected=_ended(
             second="TaxomeshExternalIdConflictError", added=("I = 'I' external_id='e'",), removed=("I = 'I'",)
@@ -368,7 +370,7 @@ SCHEDULES: Final[tuple[Schedule, ...]] = (
     Schedule(
         name="categories.update/categories.update, one external id",
         first=lambda svc, s: svc.categories.update(s.a, external_id="e"),
-        after=lambda s: ("find_category_by_external_id", ("e",)),
+        after=lambda s: _call("find_category_by_external_id", "e"),
         second=lambda svc, s: svc.categories.update(s.b, external_id="e"),
         expected=_ended(
             second="TaxomeshExternalIdConflictError", added=("A = 'A' external_id='e'",), removed=("A = 'A'",)
@@ -426,12 +428,12 @@ def run(
 
     first_thread = thread("first", lambda: schedule.first(first, scene))
     second_thread = thread("second", lambda: schedule.second(second, scene))
-    name, arguments = schedule.after(scene)
+    name, arguments, keywords = schedule.after(scene)
     read: Callable[..., object] = getattr(repository, name)
 
     def watched(*args: object, **kwargs: object) -> object:
         result = read(*args, **kwargs)
-        if threading.current_thread() is first_thread and not blocked and args == arguments and not kwargs:
+        if threading.current_thread() is first_thread and not blocked and args == arguments and kwargs == keywords:
             second_thread.start()
             second_thread.join(BLOCKED_FOR)
             blocked.append(second_thread.is_alive())
