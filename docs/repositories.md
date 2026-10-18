@@ -37,7 +37,9 @@ A class implementing `TaxomeshRepositoryBase` is a backend: it can keep the taxo
 behind a remote API or in memory, if it keeps the contract below. The port is a `typing.Protocol`,
 declared in `taxomesh/ports/repository.py` and exported from `taxomesh`, so nothing is inherited.
 Each of its 38 members states its contract in its docstring: its arguments, what it returns, and,
-for a lookup or a delete, what absence looks like.
+for a lookup or a delete, what absence looks like. The service raises `TypeError` for a repository
+that lacks one. It checks with `isinstance`, which misses a member that `__getattr__` gives: pass
+such a class to `TaxomeshRepositoryBase.register`.
 
 | Group | Members |
 |---|---|
@@ -72,9 +74,11 @@ every shipped backend:
   time uses may do nothing. Entering a block may wait, and raises only `TaxomeshRepositoryError`.
   `in_transaction` is `True` only while this thread is in a transaction.
 - **`relation_types` is a collection.** The two relation listings raise `TypeError` for a `str`.
-- **The port stores the links it is given.** The service keeps the root invariant: a category holds
-  a link to the implicit root exactly when it holds no other parent link. A custom backend holding a
-  store written without it brings the store to it; the shipped file backends do so as they load a
-  file, and Django's migrations `0011` and `0012` do it once.
+- **The port stores the links it is given.** The implicit root is a `Category` row named `__root__`,
+  which the service stores when none is stored. A category holds a link to it exactly when it holds
+  no other parent link. One with no link is not at the top level, and nothing raises, so a custom
+  backend that loads a store written without these links first stores the root and links each such
+  category to it. The file backends link them as they load a file that holds the root, and Django's
+  migrations `0011` and `0012` do it once.
 
 ← [Back to README](../README.md)

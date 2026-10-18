@@ -39,6 +39,7 @@ from tests.service.conftest import InMemoryRepository
 # ---------------------------------------------------------------------------
 
 
+@TaxomeshRepositoryBase.register
 class FailingRepository:
     """Wrap a real backend and raise on the Nth call to a targeted write method.
 
@@ -48,6 +49,9 @@ class FailingRepository:
     the supplied exception **instance** (the port's ``TaxomeshRepositoryError``
     or another ``TaxomeshError`` subclass), allowing a failure to occur *after* an earlier
     write has already been performed — exercising Django savepoint nesting.
+
+    The service checks a repository with ``isinstance``, which does not see the members that
+    ``__getattr__`` gives, so the class is registered with the port.
     """
 
     def __init__(self, wrapped: TaxomeshRepositoryBase) -> None:

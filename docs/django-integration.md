@@ -27,19 +27,33 @@ and `TagModel`), with autocomplete foreign keys and a JSON editor for `metadata`
 from the jsDelivr CDN: without access to it, as under a strict Content Security Policy, the admin
 shows no editor. The admin also adds:
 
-- **A graph view** of the whole taxonomy, reached from the admin index, open to every staff user:
-  drag and drop reorders the categories and items under a parent and moves them to another, for a
-  user with the permission to change that kind, and children load as a branch is opened. To add a
-  sort mode, subclass `CategoryModelAdmin` and extend its `sort_modes`, a list of
-  `(key, label, function)`. The function takes a list of `GraphEntry`
-  (`taxomesh.contrib.django.graph_types`) and returns it in the order to show. taxomesh registers
-  `CategoryModelAdmin`, which serves the graph view, so call `admin.site.unregister(CategoryModel)`,
-  then `admin.site.register(CategoryModel, YourAdmin)`.
+- **A graph view** of the whole taxonomy: drag and drop reorders the categories and items under a
+  parent and moves them to another, and children load as a branch is opened. To add a sort mode,
+  subclass `CategoryModelAdmin` and extend its `sort_modes`, a list of `(key, label, function)`. The
+  function takes a list of `GraphEntry` (`taxomesh.contrib.django.graph_types`) and returns it in
+  the order to show. taxomesh registers `CategoryModelAdmin`, which serves the graph view, so call
+  `admin.site.unregister(CategoryModel)`, then `admin.site.register(CategoryModel, YourAdmin)`.
 - **A debug page** of taxomesh's diagnostic information.
 - **Two mixins for your own `ModelAdmin`s**, in `taxomesh.contrib.django.admin`:
   `TaxomeshLinkedFKMixin` renders every foreign key to `ItemModel` or `CategoryModel` as an
-  autocomplete with a link to its taxomesh page, and `ItemCategoryAssignmentMixin` adds a
-  *categories* field to a model whose primary key is an item's external id.
+  autocomplete with a link to its taxomesh page. `ItemCategoryAssignmentMixin` adds a *categories*
+  field, which offers the enabled categories, to a model whose primary key is an item's external id.
+  The page shows the field last, or where your `fields` or `fieldsets` name it. A save changes
+  placements only when the page shows the field, and never in a category that the field does not
+  offer, such as a disabled one.
+
+**Permissions and URLs.** The app label is `taxomesh_contrib_django`. Under the admin's URL, the
+graph is at `taxomesh_contrib_django/categorymodel/graph/` and the debug page at
+`taxomesh_contrib_django/taxomeshdebugproxy/`. Every staff user can view both. A move on the graph
+needs `taxomesh_contrib_django.change_categorymodel` for a category, and
+`taxomesh_contrib_django.change_itemmodel` for an item. The admin index shows the app, and its graph
+link, to a staff user who has a permission of the app.
+
+**Settings.** `TAXOMESH_LINKED_MODEL` names the model of your records, as `"app_label.ModelName"`,
+and the admin must register that model. A page then links a category or an item to the admin page of
+the record whose primary key is its external id. `TAXOMESH_CATEGORY_LINKED_MODEL` names a model for
+categories; while it is not set, categories use `TAXOMESH_LINKED_MODEL`. A page shows no link while
+no setting applies to its rows.
 
 ## Integrate with your app models
 

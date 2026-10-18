@@ -2,12 +2,13 @@
 
 ``TaxomeshRepositoryBase`` is a ``typing.Protocol``. A class that has every member below, with
 compatible signatures, is a repository, and it does not need to inherit from the port. mypy checks
-that a class has the members of the port.
+that a class has the members of the port, and ``TaxomeshService`` checks, with ``isinstance``, that
+the repository it is given has them.
 """
 
 from collections.abc import Collection, Mapping, Sequence
 from contextlib import AbstractContextManager
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from taxomesh.domain.info import RepositoryInfo
@@ -22,11 +23,24 @@ from taxomesh.domain.models import (
 )
 
 
+@runtime_checkable
 class TaxomeshRepositoryBase(Protocol):
     """The members that every storage backend implements: the contract of a repository.
 
     The names and the signatures below are the contract. Implement them in any class, with no
-    inheritance, and give an instance to ``TaxomeshService`` when you build it.
+    inheritance, and give an instance to ``TaxomeshService`` when you build it. Given an object that
+    lacks one of them, the service raises ``TypeError``. It checks with ``isinstance``, which does
+    not see a member that ``__getattr__`` gives, so a class that forwards the port that way calls
+    ``TaxomeshRepositoryBase.register`` on itself.
+
+    A store holds the implicit root: a ``Category`` row named ``__root__``. Its identifier can be
+    any ``UUID``, because the service finds the row by its name. When the service is built over a
+    store that holds no such row, it stores one. Each top-level category holds a parent link to the
+    implicit root, and the service writes these links. A category that holds no parent link is not
+    at the top level: ``svc.categories.roots()`` and ``svc.graph().roots`` leave it out, and nothing
+    raises. So a backend that loads a store written without these links first stores the implicit
+    root, when the store holds none, and links each category that holds no parent link to it. The
+    file repositories link them when they load a file that holds the implicit root.
     """
 
     # --- Atomicity boundary ---
@@ -284,7 +298,7 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def map_tags_by_id(self, tag_ids: Collection[UUID]) -> Mapping[UUID, Tag]:
-        """Return the tags whose ``tag_id`` is in ``tag_ids``, in one read.
+        """Return the tags whose ``tag_id`` is in ``tag_ids``.
 
         A tag has no ``enabled`` field, so this member takes no ``enabled`` filter.
 
@@ -539,10 +553,6 @@ class TaxomeshRepositoryBase(Protocol):
         The caller, such as ``TaxomeshService``, removes the duplicates before the call. The
         repository must not change the input further.
 
-        The repository passes the collection to its storage as one request, and must not split it.
-        When the storage has a limit for each query, that limit is the library's limit, and a
-        request over it raises ``TaxomeshRepositoryError``, as any other storage failure does.
-
         Args:
             category_ids: The identifiers of the categories to look up, with no duplicates. An
                 empty collection returns an empty mapping, and storage is not read.
@@ -756,11 +766,13 @@ class TaxomeshRepositoryBase(Protocol):
         relation_types: Collection[str] | None = None,
         direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> Sequence[ItemRelationLink]:
-        """Return the relations of many items in one query, by direction.
+        """Return the relations of many items, by direction.
 
         One call replaces a loop of :meth:`list_item_relation_links` calls, one for each item: the
-        N+1 query pattern. One query reads every given item, whatever the *direction*: ``"both"``
-        also uses one ``source OR target`` query, and not two.
+        N+1 query pattern. The repository reads every given item in one query, whatever the
+        *direction*: ``"both"`` also uses one ``source OR target`` query, and not two. When its
+        storage limits the number of parameters in one query, the repository may cut ``item_ids``
+        into parts that fit, and read each part in one such query, as ``DjangoRepository`` does.
 
         What each direction selects, and its fixed order:
 

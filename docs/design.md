@@ -53,7 +53,8 @@ resolves to. It never repeats their values. `tests/service/test_service_config.p
 backend gets no path argument and that `_config.py` writes no file path.
 
 **The port reports absence and the service raises.** The port, `TaxomeshRepositoryBase`, is a
-`typing.Protocol`: a backend inherits nothing, and mypy checks that it has the port's members
+`typing.Protocol`: a backend inherits nothing, mypy checks that it has the port's members, and the
+service checks them with `isinstance` when it is built
 ([Custom backends](repositories.md#custom-backends)). A port lookup is `find_*` and returns `None`
 on a miss, a keyed batch read is `map_*`, and a listing is `list_*`. No name means one thing on the
 port and another on the service. The port's `save_category` and `save_item` return the stored

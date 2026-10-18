@@ -112,9 +112,10 @@ The collections do not iterate ([why](https://github.com/ediazpacheco/taxomesh/b
   or your own backend implementing `TaxomeshRepositoryBase`. One contract suite holds every shipped
   backend to that port.
 - **Errors**: a member raises a `TaxomeshError`, a not-found one also a `KeyError` and a validation
-  one also a `ValueError`, or a `TypeError` for an argument of the wrong type, except that the flags
-  `recursive`, `fuzzy` and `include_items` are read as `if flag:`. Log records go to the `taxomesh`
-  logger, which has only a `NullHandler` of its own.
+  one also a `ValueError`, or a `TypeError` for an argument of the wrong type. Two exceptions: the
+  flags `recursive`, `fuzzy` and `include_items` are read as `if flag:`, and a model's field takes
+  what pydantic's lax mode takes, so `sort_index="5"` is 5. Log records go to the `taxomesh` logger,
+  which has only a `NullHandler` of its own.
 
 ## Documentation
 
