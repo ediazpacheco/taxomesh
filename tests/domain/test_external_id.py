@@ -7,24 +7,22 @@ consumer write ``str(pk)`` at every call.
 
 The cost is contained, and asserted here:
 
-* the conversion happens in **one** place, shared by writes, lookups and the models' own
-  coercers, so a value written can always be found again;
+* the conversion happens in **one** place, shared by writes, lookups and the ``external_id``
+  field of the models, so a value written can always be found again;
 * ``None`` is preserved, never stringified into ``"None"``;
 * values sharing a string form are the **same row**, which collides under the one-row-per-value
   uniqueness of external ids.
 """
 
 import numbers
-from types import ModuleType
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import BeforeValidator
 
 from taxomesh.domain.models import Category, Item
-from taxomesh.domain.models import category as category_module
-from taxomesh.domain.models import item as item_module
-from taxomesh.domain.types import ExternalId, normalise_external_id
+from taxomesh.domain.types import normalise_external_id
 
 
 class TestNoneIsPreserved:
@@ -146,26 +144,16 @@ class TestTheRuleIsOneRule:
             once = normalise_external_id(value)
             assert normalise_external_id(once) == once
 
-    @pytest.mark.parametrize(
-        ("module", "model"),
-        [(item_module, Item), (category_module, Category)],
-        ids=["Item", "Category"],
-    )
-    def test_the_models_convert_through_the_rule(
-        self, monkeypatch: pytest.MonkeyPatch, module: ModuleType, model: type[Item] | type[Category]
-    ) -> None:
+    @pytest.mark.parametrize("model", [Item, Category], ids=["Item", "Category"])
+    def test_the_models_convert_through_the_rule(self, model: type[Item] | type[Category]) -> None:
         """A model built with an ``int`` external id converts it through the one rule.
 
         Every row loaded from storage and every model a caller constructs passes through the
-        model's own coercer, which calls the one rule rather than repeating its body.
+        validator of the model's ``external_id`` field, which is the one rule itself rather than a
+        copy of its body.
         """
-        seen: list[object] = []
+        field = model.model_fields["external_id"]
+        validators = [entry.func for entry in field.metadata if isinstance(entry, BeforeValidator)]
 
-        def spy(value: ExternalId) -> str | None:
-            seen.append(value)
-            return normalise_external_id(value)
-
-        monkeypatch.setattr(module, "normalise_external_id", spy, raising=False)
-
+        assert validators == [normalise_external_id]
         assert model.model_validate({"name": "Named", "external_id": 42}).external_id == "42"
-        assert seen == [42]

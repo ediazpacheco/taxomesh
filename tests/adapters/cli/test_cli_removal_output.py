@@ -23,7 +23,6 @@ runner = typer.testing.CliRunner()
 def _run(repo: InMemoryRepository, arguments: list[str]) -> tuple[int, str]:
     result_of_build = BuildResult(
         service=TaxomeshService(repository=repo),
-        repository=repo,
         config_file_path=Path("/fake/taxomesh.toml"),
         config_file_exists=False,
     )

@@ -14,8 +14,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Final
 
-from taxomesh.adapters.repositories.django_repository import _USING_DEFAULT as DJANGO_USING_DEFAULT
-from taxomesh.adapters.repositories.django_repository import DJANGO_REPO_TYPE, DjangoRepository
+from taxomesh.adapters.repositories.django_repository import DEFAULT_DJANGO_USING, DJANGO_REPO_TYPE, DjangoRepository
 from taxomesh.adapters.repositories.json_repository import DEFAULT_JSON_PATH, JSON_REPO_TYPE, JsonRepository
 from taxomesh.adapters.repositories.yaml_repository import DEFAULT_YAML_PATH, YAML_REPO_TYPE, YamlRepository
 from taxomesh.exceptions import TaxomeshConfigError
@@ -29,7 +28,7 @@ CONFIG_FILENAME: Final[str] = "taxomesh.toml"
 _BUILDERS: Final[Mapping[str, Callable[[Mapping[str, Any]], TaxomeshRepositoryBase]]] = {
     YAML_REPO_TYPE: lambda section: YamlRepository(Path(section["path"])) if "path" in section else YamlRepository(),
     JSON_REPO_TYPE: lambda section: JsonRepository(Path(section["path"])) if "path" in section else JsonRepository(),
-    DJANGO_REPO_TYPE: lambda section: DjangoRepository(using=section.get("using", DJANGO_USING_DEFAULT)),
+    DJANGO_REPO_TYPE: lambda section: DjangoRepository(using=section.get("using", DEFAULT_DJANGO_USING)),
 }
 
 SUPPORTED_REPO_TYPES: Final[tuple[str, ...]] = tuple(_BUILDERS)
@@ -165,7 +164,7 @@ def effective_config(config_path: Path | str | None) -> tuple[str, str, str | No
     section, repo_type = _repository_section(document, path)
     name = _name(document, path)
     if repo_type == DJANGO_REPO_TYPE:
-        return repo_type, str(section.get("using", DJANGO_USING_DEFAULT)), name
+        return repo_type, str(section.get("using", DEFAULT_DJANGO_USING)), name
     if "path" in section:
         return repo_type, str(section["path"]), name
     return repo_type, str(DEFAULT_JSON_PATH if repo_type == JSON_REPO_TYPE else DEFAULT_YAML_PATH), name

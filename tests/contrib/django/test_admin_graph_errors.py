@@ -208,8 +208,7 @@ def test_a_storage_failure_as_the_move_reads_the_implicit_root_answers_500_in_js
     svc, a, b = stored
     with (
         caplog.at_level(logging.ERROR, logger="taxomesh"),
-        patch(_PATCH_SERVICE, return_value=MagicMock()),
-        patch.object(DjangoRepository, "list_categories", side_effect=TaxomeshRepositoryError(SECRET)),
+        patch.object(DjangoRepository, "find_category", side_effect=TaxomeshRepositoryError(SECRET)),
     ):
         answer = _post(admin_client, REPARENT, _move(REPARENT, a, b))
 

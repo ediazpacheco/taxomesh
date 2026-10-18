@@ -15,8 +15,18 @@ Every handler takes its arguments in the same way: ``service`` and the **subject
 operation are the only positional parameters, and every other parameter is keyword-only. So two
 identifiers of the same type cannot change places without an error: ``items_tag(service, item_id,
 tag_id=...)`` fails the type check with its arguments in the other order, and two bare ``UUID``
-positionals would pass it. HTTP names a row by its identifier, so the parameters keep their ``_id``
-names, and each one is passed to the member's parameter that the noun names.
+positionals would pass it. The subject is an entity of the collection that has the member: the item
+comes first in ``items_tag``, as in ``service.items.tag``. HTTP names a row by its identifier, so the
+parameters keep their ``_id`` names, and each one is passed to the member's parameter that the noun
+names.
+
+A handler that takes a validated request names it ``body``. A search handler names it ``params``,
+because a search serves a GET endpoint, which has no body.
+
+An update handler passes on only the fields that the caller set. Its request schema says what an
+omitted field, a null and ``expected_version`` mean. Each field is passed under its own keyword,
+and not unpacked from a model dump, so a service parameter with another name is a type error here,
+and not a ``TypeError`` at run time.
 """
 
 from collections.abc import Sequence
@@ -153,17 +163,7 @@ def categories_create(service: TaxomeshService, *, body: CreateCategoryRequest) 
 
 
 def categories_update(service: TaxomeshService, category_id: UUID, *, body: UpdateCategoryRequest) -> Category:
-    """Update a category.
-
-    Only the fields that the caller set are passed on: an omitted field carries no instruction and
-    keeps the stored value. A present field is assigned its value. ``external_id`` is the one
-    stored field that accepts null, so a null ``external_id`` clears the stored external id. The
-    request validation refuses a null in any other stored field, ``enabled`` included, before this
-    handler runs. ``expected_version`` is passed on as it is: omitted or null, the update compares
-    no version.
-
-    Each field is passed under its own keyword, and not unpacked from a model dump, so a service
-    parameter with another name is a type error here, and not a ``TypeError`` at run time.
+    """Update a category, as :class:`~taxomesh.contrib.api.schemas.UpdateCategoryRequest` describes.
 
     Args:
         service: The service to call.
@@ -250,9 +250,6 @@ def categories_remove_parent(service: TaxomeshService, category_id: UUID, *, par
 
 def categories_search(service: TaxomeshService, *, params: SearchCategoriesRequest) -> Sequence[Category]:
     """Search the categories with every parameter of ``SearchCategoriesRequest``.
-
-    The request object is named ``params`` and not ``body``: it serves a GET endpoint, which has
-    no body.
 
     Args:
         service: The service to call.
@@ -373,16 +370,7 @@ def items_create(service: TaxomeshService, *, body: CreateItemRequest) -> Item:
 
 
 def items_update(service: TaxomeshService, item_id: UUID, *, body: UpdateItemRequest) -> Item:
-    """Update an item.
-
-    Only the fields that the caller set are passed on: an omitted field carries no instruction and
-    keeps the stored value. A present field is assigned its value. ``external_id`` is the one
-    stored field that accepts null, so a null ``external_id`` clears the stored external id. The
-    request validation refuses a null in any other stored field before this handler runs.
-    ``expected_version`` is passed on as it is: omitted or null, the update compares no version.
-
-    Each field is passed under its own keyword, and not unpacked from a model dump, so a service
-    parameter with another name is a type error here, and not a ``TypeError`` at run time.
+    """Update an item, as :class:`~taxomesh.contrib.api.schemas.UpdateItemRequest` describes.
 
     Args:
         service: The service to call.
@@ -469,10 +457,6 @@ def items_remove_from(service: TaxomeshService, item_id: UUID, *, category_id: U
 def items_tag(service: TaxomeshService, item_id: UUID, *, tag_id: UUID) -> ItemTagLink:
     """Tag an item. Tagging it again with the same tag changes nothing.
 
-    The item comes first, as in ``service.items.tag``: the member is on the collection of the
-    entity that it changes. Both parameters are ``UUID``s, so ``tag_id`` is keyword-only, and the two
-    cannot change places.
-
     Args:
         service: The service to call.
         item_id: The identifier of the item.
@@ -491,10 +475,6 @@ def items_tag(service: TaxomeshService, item_id: UUID, *, tag_id: UUID) -> ItemT
 def items_untag(service: TaxomeshService, item_id: UUID, *, tag_id: UUID) -> None:
     """Remove a tag from an item. Removing a tag that it does not have does nothing.
 
-    The item comes first, as in ``service.items.untag``: the member is on the collection of the
-    entity that it changes. Both parameters are ``UUID``s, so ``tag_id`` is keyword-only, and the two
-    cannot change places.
-
     Args:
         service: The service to call.
         item_id: The identifier of the item.
@@ -509,9 +489,6 @@ def items_untag(service: TaxomeshService, item_id: UUID, *, tag_id: UUID) -> Non
 
 def items_search(service: TaxomeshService, *, params: SearchItemsRequest) -> Sequence[Item]:
     """Search the items with every parameter of ``SearchItemsRequest``.
-
-    The request object is named ``params`` and not ``body``: it serves a GET endpoint, which has
-    no body.
 
     Args:
         service: The service to call.
@@ -583,15 +560,7 @@ def tags_create(service: TaxomeshService, *, body: CreateTagRequest) -> Tag:
 
 
 def tags_update(service: TaxomeshService, tag_id: UUID, *, body: UpdateTagRequest) -> Tag:
-    """Update a tag.
-
-    Only the fields that the caller set are passed on: an omitted field carries no instruction and
-    keeps the stored value. Neither field accepts null, so the request validation refuses a null
-    before this handler runs. A present ``metadata`` replaces the stored one, as in the item and
-    category updates.
-
-    Each field is passed under its own keyword, and not unpacked from a model dump, so a service
-    parameter with another name is a type error here, and not a ``TypeError`` at run time.
+    """Update a tag, as :class:`~taxomesh.contrib.api.schemas.UpdateTagRequest` describes.
 
     Args:
         service: The service to call.

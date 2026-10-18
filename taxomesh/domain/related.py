@@ -6,6 +6,7 @@ from types import MappingProxyType
 from uuid import UUID
 
 from taxomesh.domain.models import Item
+from taxomesh.domain.types import normalise_relation_type
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +48,7 @@ class RelatedItems:
         Returns:
             That type's items in resolution order, empty when there are none of that type.
         """
-        return self.by_type.get(relation_type.strip().lower(), ())
+        return self.by_type.get(normalise_relation_type(relation_type), ())
 
     @property
     def relation_types(self) -> Sequence[str]:

@@ -7,7 +7,7 @@ from pydantic import Field, field_validator, model_validator
 
 from taxomesh.domain.constants import RELATION_TYPE_MAX_LENGTH
 from taxomesh.domain.models.base import MetadataModelBase
-from taxomesh.domain.types import FrozenDict, Metadata
+from taxomesh.domain.types import FrozenDict, Metadata, normalise_relation_type
 from taxomesh.exceptions import TaxomeshRelationError
 
 
@@ -58,7 +58,7 @@ class ItemRelationLink(MetadataModelBase):
         """
         if not isinstance(v, str):
             raise TypeError(f"relation_type must be a str, not {type(v).__name__}")
-        normalised = v.strip().lower()
+        normalised = normalise_relation_type(v)
         if not normalised:
             raise TaxomeshRelationError("relation_type must not be empty or whitespace-only")
         return normalised

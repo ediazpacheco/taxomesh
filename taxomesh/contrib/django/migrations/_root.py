@@ -5,12 +5,14 @@ Migrations ``0011`` and ``0012`` call :func:`normalise_root_links`; a change her
 on a database that has not run them yet.
 """
 
+from typing import Final
+
 from django.apps.registry import Apps
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 
-APP_LABEL = "taxomesh_contrib_django"
+APP_LABEL: Final[str] = "taxomesh_contrib_django"
 
 
 def normalise_root_links(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:

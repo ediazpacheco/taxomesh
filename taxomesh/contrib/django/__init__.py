@@ -10,14 +10,14 @@ To use it in a Django project, add ``"taxomesh.contrib.django"`` to ``INSTALLED_
 
 from typing import TYPE_CHECKING
 
-from taxomesh.adapters.repositories.django_repository import _USING_DEFAULT
+from taxomesh.adapters.repositories.django_repository import DEFAULT_DJANGO_USING
 
 if TYPE_CHECKING:
     from taxomesh.application.service import TaxomeshService
 
 
 def get_taxomesh_service_with_django(
-    using: str = _USING_DEFAULT,
+    using: str = DEFAULT_DJANGO_USING,
 ) -> "TaxomeshService":
     """Return a new ``TaxomeshService`` whose repository is a ``DjangoRepository``.
 

@@ -115,28 +115,16 @@ def depth_first(seeds: Iterable[UUID], neighbours: Mapping[UUID, Sequence[UUID]]
 
 
 def collect_subtree(root_id: UUID, children_map: Mapping[UUID, Sequence[UUID]]) -> list[UUID]:
-    """Return ``root_id`` and every category below it, each exactly once.
+    """Return ``root_id`` and every category below it, each exactly once, in walk order.
 
-    The traversal of ``svc.graph(root=…)`` and of a recursive item listing: :func:`depth_first`
-    from one seed, over the children.
-
-    Returns a **list, not a set**, because the caller needs the order. The caller builds its node
-    map from this list. With a set, the key order of that map would depend on the stored
-    identifiers, and would be the same from one run to the next only by chance.
+    The result is a list and not a set, because the caller builds its node map in this order.
 
     Args:
-        root_id: The category to go down from. It is in the result, so a leaf yields ``[leaf]``.
-            This function does not check it: the caller checks whether it is stored, and whether
-            the snapshot holds it, and that check costs the caller a read.
-        children_map: Child identifiers per category. A category with no children may be absent
-            rather than mapped to an empty sequence.
+        root_id: The category to go down from. It is the first identifier of the result. This
+            function does not check that it is stored: the caller does.
+        children_map: Child identifiers per category. A category with no children may be absent.
 
     Returns:
         The subtree's identifiers, depth-first, children in their stored order.
-
-    Example::
-
-        collect_subtree(alpha, {alpha: [gamma], gamma: [delta]})
-        # [alpha, gamma, delta]
     """
     return list(depth_first([root_id], children_map))

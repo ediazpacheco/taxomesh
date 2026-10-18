@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import builtins
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import UUID, uuid4
@@ -12,6 +12,7 @@ from taxomesh.application.collections.base import (
     _as_validation_error,
     _changed,
     _given,
+    _in_order,
     _normalise_external_ids,
     _position_among,
     _require_collection,
@@ -21,14 +22,14 @@ from taxomesh.application.collections.base import (
     _require_sequence,
     _require_text,
     _require_version,
+    _selects,
     _UniqueKeysCollection,
 )
 from taxomesh.application.search import (
     DEFAULT_SEARCH_LIMIT,
-    SearchCandidate,
     SearchCorpus,
+    candidate_of,
     normalize,
-    score_and_rank,
     score_corpus,
 )
 from taxomesh.domain.constants import DEFAULT_CATEGORY_EXTERNAL_ID, ROOT_CATEGORY_NAME
@@ -80,51 +81,20 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         self._corpus = corpus
 
     def _is_root(self, category_id: UUID, /) -> bool:
-        """Return whether this identifier is the identifier of the implicit root.
-
-        No member returns the implicit root, and no member places an item in it: every member of this
-        collection and of the item collection that takes a category treats this identifier as that
-        of a category that is not stored. Subscript, :meth:`_require_stored` and every member that
-        returns a category call this method. The graph's assembler (``TaxomeshService.graph``)
-        makes its own comparison.
-
-        Args:
-            category_id: The identifier to test.
-
-        Returns:
-            ``True`` when this is the implicit root.
-        """
+        """Return whether this is the identifier of the implicit root, which every member treats as not stored."""
         return category_id == self._root_id
 
     def _holder_of_slug(self, slug: str) -> UUID | None:
-        found = self._service.repository.find_category_by_slug(slug)
+        found = self._repo.find_category_by_slug(slug)
         return None if found is None else found.category_id
 
     def _holder_of_external_id(self, external_id: str) -> UUID | None:
-        found = self._service.repository.find_category_by_external_id(external_id)
+        found = self._repo.find_category_by_external_id(external_id)
         return None if found is None else found.category_id
 
-    def _require_stored(self, category_id: UUID, /) -> Category:
-        """Return the stored category a write names, refusing the implicit root.
-
-        Reads storage directly, and not through the cache, because a write checks, and builds on,
-        what it is about to change: a row that another service changed or deleted after this
-        service read it is seen as it is stored.
-
-        Args:
-            category_id: The identifier that a write names.
-
-        Returns:
-            The stored ``Category``.
-
-        Raises:
-            TaxomeshCategoryNotFoundError: If no category with this identifier is stored, or if
-                it is the identifier of the implicit root, which is not a row in this container.
-        """
-        found = None if self._is_root(category_id) else self._service.repository.find_category(category_id)
-        if found is None:
-            raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
-        return found
+    def _find(self, category_id: UUID, /) -> Category | None:
+        """Return the stored category, or ``None``, which it also returns for the implicit root."""
+        return None if self._is_root(category_id) else self._repo.find_category(category_id)
 
     @staticmethod
     def _require_unreserved(name: str, /) -> None:
@@ -161,31 +131,25 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """
         category_id = category_id_of(key)
         if self._is_root(category_id):
-            raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
+            raise self._missing(category_id)
         return self._lookup(category_id)
 
     @memoize
     def _lookup(self, category_id: UUID, /) -> Category:
         """Read one category through the cache: the entry that every listing primes.
 
-        The one cached read of a single row behind subscript, ``get`` and ``in``, and the one that
-        :meth:`_resolve_categories` reads and primes. It is positional-only on purpose: ``memoize``
-        builds the key from the arguments as the call passes them, so a keyword call would build
-        a different key and miss every primed entry.
+        The one cached read of a single row behind subscript, ``get`` and ``in``. It is
+        positional-only on purpose: ``memoize`` builds the key from the arguments as the call
+        passes them, so a keyword call would build a different key and miss every primed entry.
 
-        Args:
-            category_id: The identifier of the category.
-
-        Returns:
-            The stored ``Category``.
+        A listing primes this entry with each row that it reads, before it applies its ``enabled``
+        filter. So the cached row is the stored row, and a category that the filter left out is
+        still found by its identifier.
 
         Raises:
             TaxomeshCategoryNotFoundError: If no category with this identifier is stored.
         """
-        result = self._service.repository.find_category(category_id)
-        if result is None:
-            raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
-        return result
+        return self._require_stored(category_id)
 
     def _all(self) -> Sequence[Category]:
         """Return every stored category except the implicit root: the rows that ``len`` counts.
@@ -194,9 +158,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         one row that it does not count, because it is the one stored row for which ``in`` answers
         ``False``.
         """
-        return tuple(
-            row for row in self._service.repository.list_categories(enabled=None) if not self._is_root(row.category_id)
-        )
+        return tuple(row for row in self._repo.list_categories(enabled=None) if not self._is_root(row.category_id))
 
     def get_many(
         self,
@@ -236,7 +198,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     @memoize
     def _fetch(self, category_ids: frozenset[UUID], enabled: bool | None, /) -> dict[UUID, Category]:
         """The cached read behind :meth:`get_many`, keyed by the set of identifiers."""
-        return dict(self._service.repository.map_categories_by_id(category_ids, enabled=enabled))
+        return dict(self._repo.map_categories_by_id(category_ids, enabled=enabled))
 
     def _top_level_links(self, category_ids: Sequence[UUID], /) -> list[CategoryParentLink]:
         """Return the links that put these categories at the top level, after its last category, in this order.
@@ -245,7 +207,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         stores one, and every write that takes a category's last parent stores it again. The method
         reads the top level's links, so the caller calls it inside its block.
         """
-        top_level = self._service.repository.list_category_parent_links(parent_category_ids=[self._root_id])
+        top_level = self._repo.list_category_parent_links(parent_category_ids=[self._root_id])
         start = _position_among(top_level)
         return [
             CategoryParentLink(category_id=category_id, parent_category_id=self._root_id, sort_index=start + n)
@@ -269,21 +231,20 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """
         category_id = category_id_of(key)
         if self._is_root(category_id):
-            raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
-        repository = self._service.repository
+            raise self._missing(category_id)
         with self._atomic(then=self._corpus.invalidate):
             # Read before the delete, which deletes these links too.
             children = [
-                lnk.category_id for lnk in repository.list_category_parent_links(parent_category_ids=[category_id])
+                lnk.category_id for lnk in self._repo.list_category_parent_links(parent_category_ids=[category_id])
             ]
-            if not repository.delete_category(category_id):
-                raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
+            if not self._repo.delete_category(category_id):
+                raise self._missing(category_id)
             if children:
-                parented = {lnk.category_id for lnk in repository.list_category_parent_links(category_ids=children)}
+                parented = {lnk.category_id for lnk in self._repo.list_category_parent_links(category_ids=children)}
                 orphans = [child_id for child_id in children if child_id not in parented]
                 if orphans:
                     for link in self._top_level_links(orphans):
-                        repository.save_category_parent_link(link)
+                        self._repo.save_category_parent_link(link)
 
     def get_by_slug(self, slug: str, /) -> Category | None:
         """Return the category with this slug, or ``None``.
@@ -307,7 +268,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     @memoize
     def _by_slug(self, slug: str, /) -> Category | None:
         """The cached read behind :meth:`get_by_slug`, for a slug that is not empty."""
-        result = self._service.repository.find_category_by_slug(slug)
+        result = self._repo.find_category_by_slug(slug)
         if result is None or self._is_root(result.category_id):
             return None
         return result
@@ -338,7 +299,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     @memoize
     def _by_external_id(self, external_id: str, /) -> Category | None:
         """The cached read behind :meth:`get_by_external_id`, keyed by the stored form."""
-        found = self._service.repository.find_category_by_external_id(external_id)
+        found = self._repo.find_category_by_external_id(external_id)
         if found is None or self._is_root(found.category_id):
             return None
         return found
@@ -377,18 +338,13 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         normalised = _normalise_external_ids(external_ids)
         if not normalised:
             return {}
-        found = self._fetch_by_external_ids(normalised, enabled=enabled)
+        found = self._fetch_by_external_ids(normalised, enabled)
         return {k: v for k, v in found.items() if not self._is_root(v.category_id)}
 
     @memoize
-    def _fetch_by_external_ids(
-        self,
-        external_ids: frozenset[str],
-        *,
-        enabled: bool | None = None,
-    ) -> dict[str, Category]:
+    def _fetch_by_external_ids(self, external_ids: frozenset[str], enabled: bool | None, /) -> dict[str, Category]:
         """The cached read behind :meth:`get_many_by_external_id`, keyed by the set of stored external ids."""
-        return dict(self._service.repository.map_categories_by_external_id(external_ids, enabled=enabled))
+        return dict(self._repo.map_categories_by_external_id(external_ids, enabled=enabled))
 
     def list(
         self,
@@ -450,10 +406,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             # The links of one item come ordered by category_id. This STABLE sort by sort_index
             # gives the order that callers see: sort_index, then category_id. Without it, the
             # order of the ties would change, and no error would show it.
-            placements = sorted(
-                self._service.repository.list_item_parent_links(item_ids=[item_id]),
-                key=lambda lnk: lnk.sort_index,
-            )
+            placements = sorted(self._repo.list_item_parent_links(item_ids=[item_id]), key=lambda lnk: lnk.sort_index)
             # Stored data can place an item in the implicit root, and that placement is not a
             # category that the caller placed it in. It is left out before the rows are read, so
             # it is not primed either.
@@ -463,7 +416,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             ordered_ids = self._child_ids(parent_id)
         else:
             return self._every_category(enabled=enabled)
-        return self._in_order(ordered_ids, enabled=enabled)
+        return _in_order(ordered_ids, self._resolve_categories(ordered_ids), enabled, self._missing)
 
     def _child_ids(self, parent_id: UUID, /) -> builtins.list[UUID]:
         """Return the identifiers of a parent's children, ordered by sort index.
@@ -472,45 +425,16 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         implicit root, which the check refuses.
         """
         children = sorted(
-            self._service.repository.list_category_parent_links(parent_category_ids=[parent_id]),
-            key=lambda lnk: lnk.sort_index,
+            self._repo.list_category_parent_links(parent_category_ids=[parent_id]), key=lambda lnk: lnk.sort_index
         )
         return [lnk.category_id for lnk in children]
-
-    def _in_order(self, ordered_ids: builtins.list[UUID], /, *, enabled: bool | None) -> Sequence[Category]:
-        """Read the row of each identifier, keep their order, and apply the ``enabled`` filter.
-
-        The rows come from the cache of single rows, and the rows that the cache does not hold
-        come from one batch read. They are primed before the ``enabled`` filter, so the cached row
-        is the stored row: a caller that later asks by identifier for a category that the filter
-        left out still gets it.
-
-        Raises:
-            TaxomeshCategoryNotFoundError: If an identifier names no stored row.
-        """
-        if not ordered_ids:
-            return ()
-        category_map = self._resolve_categories(set(ordered_ids))
-        cats: builtins.list[Category] = []
-        for category_id in ordered_ids:
-            found = category_map.get(category_id)
-            if found is None:
-                raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
-            cats.append(found)
-        return tuple(c for c in cats if enabled is None or c.enabled == enabled)
 
     def _every_category(self, *, enabled: bool | None) -> Sequence[Category]:
         """Return every stored category except the implicit root, priming each row it returns.
 
-        The unfiltered path of :meth:`list`. It makes one read, which returns whole rows, so they
-        are primed into the cache of :meth:`_lookup` as the filtered paths prime the rows that
-        they read. The read has no filter, and the ``enabled`` filter is applied here, not in the
-        read: a primed row must be the stored row, so that a caller that later asks by identifier
-        for a category that the filter left out still gets it. :meth:`_resolve_categories` keeps
-        the same rule. The cost is that a SQL backend cannot apply the filter in its query.
-
-        Args:
-            enabled: ``True`` enabled only, ``False`` disabled only, ``None`` all.
+        The unfiltered path of :meth:`list`. It reads every row with no filter and primes it, as
+        :meth:`_lookup` says, and then applies the ``enabled`` filter. The cost is that a SQL
+        backend cannot apply the filter in its query.
 
         Returns:
             Every category except the implicit root, after the ``enabled`` filter, in the order
@@ -520,9 +444,9 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         accessor = self._lookup
         for row in rows:
             accessor.prime(row, row.category_id)
-        return tuple(row for row in rows if enabled is None or row.enabled == enabled)
+        return tuple(row for row in rows if _selects(enabled, row))
 
-    def _resolve_categories(self, category_ids: set[UUID]) -> dict[UUID, Category]:
+    def _resolve_categories(self, category_ids: Iterable[UUID]) -> dict[UUID, Category]:
         """Read category rows through the cache of :meth:`_lookup`, and read from storage only the misses.
 
         The port's batch read is not memoized, so this method gives it the two things that a
@@ -536,26 +460,9 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
           *argument*. A tree walk depends on this: each child becomes the ``parent`` of the next
           call.
 
-        Only the rows that the batch read returns are primed. A row served from the cache keeps
-        its first timestamp, so repeated reads cannot extend the lifetime of an entry; the lifetime
-        stays measured from the read. The entries written here are the same as those that
-        :meth:`_lookup` would write itself, and every write clears both.
-
-        This method and the method that it primes use the same cache: this collection's, which is
-        its service's. The code depends on it: primed into another cache, each entry would be
-        written where the lookup never reads, so priming would save no read, and no test that
-        checks values would fail.
-
-        It is for categories only: the cache has no size bound and item rows are large, so the
-        item listings neither read through the cache nor prime it.
-
-        Args:
-            category_ids: The identifiers to read.
-
         Returns:
-            The rows found, keyed by identifier, with no ``enabled`` filter: a disabled row must
-            stay different from a deleted one, because the callers raise for an absent key. An
-            identifier with no stored row is not in the result.
+            The rows found, keyed by identifier, with no ``enabled`` filter. An identifier with no
+            stored row is not in the result.
         """
         accessor = self._lookup
         found: dict[UUID, Category] = {}
@@ -567,7 +474,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             else:
                 found[category_id] = hit
         if missing:
-            fetched = self._service.repository.map_categories_by_id(missing, enabled=None)
+            fetched = self._repo.map_categories_by_id(missing, enabled=None)
             for category_id, category in fetched.items():
                 accessor.prime(category, category_id)
             found.update(fetched)
@@ -600,7 +507,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     @memoize
     def _roots(self, enabled: bool | None, /) -> Sequence[Category]:
         """The cached read behind :meth:`roots`, called after the filter is checked."""
-        return self._in_order(self._child_ids(self._root_id), enabled=enabled)
+        top_level = self._child_ids(self._root_id)
+        return _in_order(top_level, self._resolve_categories(top_level), enabled, self._missing)
 
     def search(
         self,
@@ -649,49 +557,12 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 self[parent_id]
             return ()
 
-        norm_q = normalize(query)
         if parent_id is None:
-            corpus = self._get_category_corpus()
-            filtered = [sc for sc in corpus if enabled is None or sc.obj.enabled == enabled]
-            return score_corpus(norm_q, filtered, fuzzy=fuzzy, limit=limit)
-        candidates = self._listing(parent_id, None, enabled)
-        return score_and_rank(
-            norm_q,
-            candidates,
-            get_name=lambda c: c.name,
-            get_slug=lambda c: c.slug,
-            get_ext=lambda c: c.external_id,
-            fuzzy=fuzzy,
-            limit=limit,
-        )
-
-    def _get_category_corpus(self) -> builtins.list[SearchCandidate[Category]]:
-        """Build and hold the search candidates of every category, with their fields normalized.
-
-        Returns the held corpus while it is held. Otherwise it reads every category from the
-        repository, leaves out the implicit root, normalizes the fields of each candidate once,
-        gives the result to the corpus that the service holds, and returns it. The corpus keeps
-        it for the cache's lifetime; a create, update or delete of a category here drops it
-        sooner.
-
-        Returns:
-            One ``SearchCandidate`` for each category except the implicit root.
-        """
-        held = self._corpus.candidates
-        if held is not None:
-            return held
-        return self._corpus.hold(
-            [
-                SearchCandidate(
-                    obj=cat,
-                    norm_name=normalize(cat.name),
-                    norm_slug=normalize(cat.slug),
-                    norm_ext=(normalize(cat.external_id) if cat.external_id is not None else ""),
-                )
-                for cat in self._service.repository.list_categories(enabled=None)
-                if not self._is_root(cat.category_id)
-            ]
-        )
+            corpus = self._corpus.held_or(lambda: [candidate_of(row) for row in self._all()])
+            pool = [candidate for candidate in corpus if _selects(enabled, candidate.obj)]
+        else:
+            pool = [candidate_of(row) for row in self._listing(parent_id, None, enabled)]
+        return score_corpus(normalize(query), pool, fuzzy=fuzzy, limit=limit)
 
     def create(
         self,
@@ -750,9 +621,9 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         self._require_unreserved(category.name)
         with self._atomic(then=self._corpus.invalidate):
             self._require_free_slug(category.slug)
-            stored = self._service.repository.save_category(category)
+            stored = self._repo.save_category(category)
             (link,) = self._top_level_links([category.category_id])
-            self._service.repository.save_category_parent_link(link)
+            self._repo.save_category_parent_link(link)
         return stored
 
     def update(
@@ -832,7 +703,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             if slug is not UNSET:
                 self._require_free_slug(row.slug, category_id)
             self._require_free_external_id(normalised, category_id)
-            stored = self._service.repository.save_category(row, expected_version=expected_version)
+            stored = self._repo.save_category(row, expected_version=expected_version)
         return stored
 
     def add_parent(
@@ -871,13 +742,12 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 sort_index=0 if sort_index is None else sort_index,
             )
         if self._is_root(category_id):
-            raise TaxomeshCategoryNotFoundError(f"Category not found: {category_id}")
+            raise self._missing(category_id)
         check_not_own_parent(category_id, parent_id)
-        repository = self._service.repository
         with self._atomic():
             child = self._require_stored(category_id)
             joined = self._require_stored(parent_id)
-            links = repository.list_category_parent_links()
+            links = self._repo.list_category_parent_links()
             check_no_cycle(category_id, parent_id, links, {category_id: child.name, parent_id: joined.name})
             if sort_index is None:
                 position = _position_among(
@@ -885,8 +755,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                     stored=lambda lnk: lnk.category_id == category_id,
                 )
                 link = link.model_copy(update={"sort_index": position})
-            repository.save_category_parent_link(link)
-            repository.delete_category_parent_link(category_id, self._root_id)
+            self._repo.save_category_parent_link(link)
+            self._repo.delete_category_parent_link(category_id, self._root_id)
         return link
 
     def remove_parent(self, category: CategoryRef, parent: CategoryRef) -> None:
@@ -906,14 +776,13 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """
         category_id = category_id_of(category)
         parent_id = category_id_of(parent)
-        repository = self._service.repository
         with self._atomic():
             self._require_stored(category_id)
             self._require_stored(parent_id)
-            removed = repository.delete_category_parent_link(category_id, parent_id)
-            if removed and not repository.list_category_parent_links(category_ids=[category_id]):
+            removed = self._repo.delete_category_parent_link(category_id, parent_id)
+            if removed and not self._repo.list_category_parent_links(category_ids=[category_id]):
                 (link,) = self._top_level_links([category_id])
-                repository.save_category_parent_link(link)
+                self._repo.save_category_parent_link(link)
 
     def move(
         self,
@@ -966,7 +835,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 if parent_id is not None:
                     names[parent_id] = self._require_stored(parent_id).name
 
-            links = self._service.repository.list_category_parent_links()
+            links = self._repo.list_category_parent_links()
             if to_parent_id is None:
                 kept = {lnk.parent_category_id for lnk in links if lnk.category_id == category_id}
                 if kept - {leaving, self._root_id}:
@@ -989,11 +858,11 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 CategoryParentLink(category_id=category_id, parent_category_id=joining, sort_index=insert_pos),
             )
 
-            self._service.repository.delete_category_parent_link(category_id, leaving)
+            self._repo.delete_category_parent_link(category_id, leaving)
             if from_parent_id is not None and to_parent_id is not None:
-                self._service.repository.delete_category_parent_link(category_id, self._root_id)
+                self._repo.delete_category_parent_link(category_id, self._root_id)
             for i, lnk in enumerate(siblings):
-                self._service.repository.save_category_parent_link(lnk.model_copy(update={"sort_index": i}))
+                self._repo.save_category_parent_link(lnk.model_copy(update={"sort_index": i}))
 
     def _position_before(
         self, before_id: UUID, category_id: UUID, parent_id: UUID | None, siblings: Sequence[CategoryParentLink]
@@ -1053,8 +922,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             if parent_id is not None:
                 self._require_stored(parent_id)
             existing = {
-                lnk.category_id: lnk
-                for lnk in self._service.repository.list_category_parent_links(parent_category_ids=[scope])
+                lnk.category_id: lnk for lnk in self._repo.list_category_parent_links(parent_category_ids=[scope])
             }
             for uid in category_ids:
                 if uid not in existing:
@@ -1062,4 +930,4 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                     raise TaxomeshValidationError(f"Category {uid} is not {where}")
             for sort_index, uid in enumerate(category_ids):
                 link = existing[uid].model_copy(update={"sort_index": sort_index})
-                self._service.repository.save_category_parent_link(link)
+                self._repo.save_category_parent_link(link)

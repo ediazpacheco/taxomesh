@@ -265,54 +265,40 @@ class TestGraphAdminView:
 
 
 class TestFlattenGraph:
-    """Unit tests for the _build_child_entries helper."""
+    """Unit tests for the _item_entry and _category_entry builders of the graph entries."""
 
     def test_entry_schema_has_no_slug_or_indent_keys(self) -> None:
-        """_build_child_entries entries carry no slug or indent_em key; external_id is a field."""
+        """The entries carry no slug or indent_em key; external_id is a field."""
         from uuid import uuid4  # noqa: PLC0415
 
-        from taxomesh.contrib.django.admin import _build_child_entries  # noqa: PLC0415
+        from taxomesh.contrib.django.admin import _category_entry, _item_entry  # noqa: PLC0415
         from taxomesh.domain.models import Category, Item  # noqa: PLC0415
 
-        parent_uuid = uuid4()
+        parent_uuid = str(uuid4())
         cat = Category(name="TestCat", slug="test-cat", external_id="ext-1")
         item = Item(name="TestItem", slug="test-item", external_id="EXT-1")
-        entries = _build_child_entries(
-            child_cats=[cat],
-            items=[item],
-            depth=1,
-            parent_uuid_str=str(parent_uuid),
-            cats_with_children=set(),
-            cats_with_items=set(),
-            cat_sort_map={},
-            item_sort_map={},
-        )
+        entries = [
+            _item_entry(item, depth=1, parent_uuid=parent_uuid, sort_index=0),
+            _category_entry(cat, depth=1, parent_uuid=parent_uuid, has_descendants=False, sort_index=0),
+        ]
         forbidden_keys = {"slug", "indent_em"}
         for entry in entries:
             assert not forbidden_keys & entry.keys(), f"Unexpected keys in entry: {entry.keys()}"
 
     def test_entry_name_equals_str_of_domain_object(self) -> None:
-        """_build_child_entries entry 'name' must equal str(category) or str(item)."""
+        """The entry 'name' must equal str(category) or str(item)."""
         from uuid import uuid4  # noqa: PLC0415
 
-        from taxomesh.contrib.django.admin import _build_child_entries  # noqa: PLC0415
+        from taxomesh.contrib.django.admin import _category_entry, _item_entry  # noqa: PLC0415
         from taxomesh.domain.models import Category, Item  # noqa: PLC0415
 
-        parent_uuid = uuid4()
+        parent_uuid = str(uuid4())
         cat = Category(name="Rock", slug="rock", external_id="genre-rock")
         item = Item(name="Song", external_id="EXT-2")
-        entries = _build_child_entries(
-            child_cats=[cat],
-            items=[item],
-            depth=1,
-            parent_uuid_str=str(parent_uuid),
-            cats_with_children=set(),
-            cats_with_items=set(),
-            cat_sort_map={},
-            item_sort_map={},
-        )
-        cat_entry = next(e for e in entries if e["kind"] == "category")
-        item_entry = next(e for e in entries if e["kind"] == "item")
+        cat_entry = _category_entry(cat, depth=1, parent_uuid=parent_uuid, has_descendants=False, sort_index=0)
+        item_entry = _item_entry(item, depth=1, parent_uuid=parent_uuid, sort_index=0)
+        assert cat_entry["kind"] == "category"
+        assert item_entry["kind"] == "item"
         assert cat_entry["name"] == str(cat)
         assert item_entry["name"] == str(item)
 

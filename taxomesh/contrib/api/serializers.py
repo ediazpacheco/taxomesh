@@ -75,7 +75,7 @@ def graph_to_dict(graph: TaxomeshGraph) -> dict[str, Any]:
         visit.outer.append(
             {
                 "category": visit.node.category.model_dump(mode="json"),
-                "items": [item.model_dump(mode="json") for item in visit.node.items],
+                "items": items_to_list(visit.node.items),
                 "children": children,
             }
         )

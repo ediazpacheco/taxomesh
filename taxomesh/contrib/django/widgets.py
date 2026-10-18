@@ -177,10 +177,8 @@ class TaxomeshLinkedFKWidget(AutocompleteSelect):
         if not value:
             return output
         try:
-            target_model = self.field.remote_field.model
-            app_label = target_model._meta.app_label
-            model_name = target_model._meta.model_name
-            url = reverse(f"admin:{app_label}_{model_name}_change", args=[value])
+            opts = self.field.remote_field.model._meta
+            url = reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[value])
             link = format_html(
                 ' <a href="{}" title="View in admin" style="margin-left:4px">&#8599;</a>',
                 url,

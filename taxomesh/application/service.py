@@ -24,7 +24,7 @@ from taxomesh.domain.graph import TaxomeshGraph
 from taxomesh.domain.info import TaxomeshInfo
 from taxomesh.domain.models import Category, CategoryParentLink, Item, ItemParentLink
 from taxomesh.domain.refs import CategoryRef, category_id_of
-from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshValidationError
+from taxomesh.exceptions import TaxomeshValidationError
 from taxomesh.ports.repository import TaxomeshRepositoryBase
 from taxomesh.utils.memoize import ReadCache, memoize
 
@@ -38,9 +38,7 @@ DEFAULT_CACHE_TTL: Final[float] = 5.0
 class _GraphRows:
     """The flat rows and links that one graph is assembled from.
 
-    The service caches these, and not the assembled graph. A graph limited by ``root`` is assembled
-    again from the same rows, so the cache holds one copy of the taxonomy, and not one snapshot for
-    each category that a caller asks for.
+    The service caches these, and not the assembled graph, as :meth:`TaxomeshService.graph` says.
 
     Every field is declared ``Sequence``, not ``list``, and the code depends on it. Every assembly
     within one cache lifetime reads the same instance, so an assembler that sorted or filtered a
@@ -315,62 +313,52 @@ class TaxomeshService:
             # this read is first in the ordered list of calls that the read-count tests compare.
             self.categories[root_id]
         rows = self._load_graph_rows(enabled=enabled, include_items=include_items)
-        all_cats = {c.category_id: c for c in rows.categories if c.category_id != self._root_id}
-        all_links = rows.category_links
+        categories = {c.category_id: c for c in rows.categories if c.category_id != self._root_id}
 
-        # Keep the links between two categories that the snapshot holds, after the enabled filter.
-        # The links to the implicit root are kept apart, below.
-        explicit_links = [
-            lnk
-            for lnk in all_links
-            if lnk.parent_category_id != self._root_id
-            and lnk.category_id in all_cats
-            and lnk.parent_category_id in all_cats
-        ]
-        root_child_links = [
-            lnk for lnk in all_links if lnk.parent_category_id == self._root_id and lnk.category_id in all_cats
-        ]
-        # The top level is what ``categories.roots()`` lists: the categories linked to the implicit root.
-        root_sort = {lnk.category_id: lnk.sort_index for lnk in root_child_links}
-
-        children_by_parent: dict[UUID, list[tuple[int, UUID]]] = {}
-        for lnk in explicit_links:
-            children_by_parent.setdefault(lnk.parent_category_id, []).append((lnk.sort_index, lnk.category_id))
-        for bucket in children_by_parent.values():
-            bucket.sort(key=lambda t: t[0])
-
-        items_map = {i.item_id: i for i in rows.items}
-        items_pairs_by_cat: dict[UUID, list[tuple[int, Item]]] = {}
-        for ilnk in rows.item_links:
-            if ilnk.item_id in items_map:
-                items_pairs_by_cat.setdefault(ilnk.category_id, []).append((ilnk.sort_index, items_map[ilnk.item_id]))
-        sorted_items_by_cat: dict[UUID, list[Item]] = {
-            cid: [item for _, item in sorted(pairs, key=lambda t: t[0])] for cid, pairs in items_pairs_by_cat.items()
+        # A link is kept only when the snapshot holds both of its categories, so every identifier
+        # in these maps names a node: when the enabled filter leaves out a category, it leaves out
+        # its links too. The links to the implicit root give the top level, which is what
+        # ``categories.roots()`` lists.
+        top_level: dict[UUID, int] = {}
+        child_links: dict[UUID, list[CategoryParentLink]] = {}
+        parents: dict[UUID, list[UUID]] = {}
+        for link in rows.category_links:
+            if link.category_id not in categories:
+                continue
+            if link.parent_category_id == self._root_id:
+                top_level[link.category_id] = link.sort_index
+            elif link.parent_category_id in categories:
+                child_links.setdefault(link.parent_category_id, []).append(link)
+                parents.setdefault(link.category_id, []).append(link.parent_category_id)
+        children = {
+            parent_id: [lnk.category_id for lnk in sorted(group, key=lambda lnk: lnk.sort_index)]
+            for parent_id, group in child_links.items()
         }
 
-        # Both adjacency maps are built from ``explicit_links``, which keeps a link only when the
-        # snapshot holds both of its categories. So every identifier here names a node: when the
-        # enabled filter leaves out a parent, it leaves out the link to its child too, and no child
-        # names a category that the snapshot does not hold.
-        children_by_id = {parent_id: [cid for _, cid in bucket] for parent_id, bucket in children_by_parent.items()}
-        parents_by_id: dict[UUID, list[UUID]] = {}
-        for lnk in explicit_links:
-            parents_by_id.setdefault(lnk.category_id, []).append(lnk.parent_category_id)
+        items_by_id = {item.item_id: item for item in rows.items}
+        placements: dict[UUID, list[ItemParentLink]] = {}
+        for placement in rows.item_links:
+            if placement.item_id in items_by_id:
+                placements.setdefault(placement.category_id, []).append(placement)
+        items = {
+            category_id: [items_by_id[p.item_id] for p in sorted(group, key=lambda p: p.sort_index)]
+            for category_id, group in placements.items()
+        }
 
         if root_id is not None:
-            return self._subtree_graph(root_id, all_cats, children_by_id, parents_by_id, sorted_items_by_cat)
+            return self._subtree_graph(root_id, categories, children, parents, items)
 
         return TaxomeshGraph(
-            categories=all_cats,
-            children=children_by_id,
-            parents=parents_by_id,
-            items=sorted_items_by_cat,
+            categories=categories,
+            children=children,
+            parents=parents,
+            items=items,
             # The identifier breaks a tie: ``create`` puts each new category after the last, but a
             # position given by hand, or a top level that a migration or a file load normalised at
             # 0, can tie. With the identifier, the order does not depend on the order in which the
             # repository lists the links: it is the port's ``(parent, sort_index, category_id)``
             # order, which ``categories.roots()`` also gives.
-            roots=sorted(root_sort, key=lambda cid: (root_sort[cid], str(cid))),
+            roots=sorted(top_level, key=lambda cid: (top_level[cid], str(cid))),
         )
 
     def _subtree_graph(
@@ -404,29 +392,21 @@ class TaxomeshService:
         Raises:
             TaxomeshCategoryNotFoundError: If the ``enabled`` filter left out ``root_id``.
         """
-        # The second of two checks, and a necessary one. The first, subscript before the loader,
-        # reads the stored row and applies no ``enabled`` filter, so a disabled category passes it
-        # and is then absent from these rows. Without this check, the caller would get a bare
-        # ``KeyError`` that names a UUID: a built-in error, which a caller that catches
-        # ``TaxomeshError`` does not catch. The check reads nothing.
+        # The subscript in ``graph`` applies no ``enabled`` filter, so the category that it found
+        # can be absent from these rows. Without this check, the caller would get a bare
+        # ``KeyError``, which a caller that catches ``TaxomeshError`` does not catch.
         if root_id not in categories:
-            raise TaxomeshCategoryNotFoundError(f"Category not found: {root_id}")
+            raise self.categories._missing(root_id)
 
         subtree = collect_subtree(root_id, children)
         kept = set(subtree)
         return TaxomeshGraph(
             categories={cid: categories[cid] for cid in subtree},
-            # Copied, never shared: every assembly within one cache lifetime reads the same
-            # ``_GraphRows``, and each assembly builds these maps from it again.
-            children={cid: list(children.get(cid, ())) for cid in subtree},
-            # The parents are filtered and the children are not, and the difference is needed. A
-            # child of a category in the subtree is always in the subtree, by the definition of a
-            # subtree, so the children are copied without a filter. A parent can be outside the
-            # subtree: a category in the subtree can have a parent that is not in it, and that
-            # identifier is not a node here. If it stayed, the assembly would not fail, but the
-            # first read of ``node.parents`` would raise a bare ``KeyError``. Keep this filter,
-            # although the children have none.
+            children={cid: children.get(cid, ()) for cid in subtree},
+            # Every child of a category in the subtree is in the subtree, but a parent can be outside
+            # it. Such a parent is not a node here, and ``node.parents`` would raise a bare
+            # ``KeyError`` for it, so only the parents are filtered.
             parents={cid: [pid for pid in parents.get(cid, ()) if pid in kept] for cid in subtree},
-            items={cid: list(items[cid]) for cid in subtree if cid in items},
+            items={cid: items[cid] for cid in subtree if cid in items},
             roots=[root_id],
         )

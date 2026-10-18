@@ -33,7 +33,6 @@ def _build_result(repo: InMemoryRepository, *, config_file_exists: bool = False)
     svc = TaxomeshService(repository=repo)
     return BuildResult(
         service=svc,
-        repository=repo,
         config_file_path=Path("/fake/taxomesh.toml"),
         config_file_exists=config_file_exists,
     )
@@ -602,7 +601,6 @@ def _verbose_build_result(repo: InMemoryRepository, *, config_file_exists: bool 
     svc = TaxomeshService(repository=repo)
     return BuildResult(
         service=svc,
-        repository=repo,
         config_file_path=Path("/test/taxomesh.toml"),
         config_file_exists=config_file_exists,
     )
@@ -659,7 +657,6 @@ def test_verbose_block_appears_before_list_header() -> None:
     svc.categories.create(name="Alpha")
     br = BuildResult(
         service=svc,
-        repository=repo,
         config_file_path=Path("/test/taxomesh.toml"),
         config_file_exists=False,
     )
@@ -898,7 +895,7 @@ def test_build_result_has_repository(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     monkeypatch.chdir(tmp_path)
     result = build(None)
-    assert result.repository is not None
+    assert result.service.repository is not None
 
 
 def test_build_result_config_file_path_is_absolute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

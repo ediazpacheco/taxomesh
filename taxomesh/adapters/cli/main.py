@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Final, NoReturn
+from typing import Final, NoReturn
 from uuid import UUID
 
 import typer
@@ -41,6 +42,8 @@ CYCLE_MARK: Final[str] = "↻ cycle"
 DIRECTION_HELP: Final[str] = "Which relations to read: outgoing (default), incoming, or both"
 EXTERNAL_ID_HELP: Final[str] = "External id, stored as written; optional"
 ENABLED_HELP: Final[str] = "Enable or disable; when both are omitted, the state stays"
+RELATION_TYPE_HELP: Final[str] = "Only this relation type; repeat the option for several"
+CATEGORY_STATE_HELP: Final[str] = "Which categories to list: enabled (default), disabled, or all"
 
 
 class EnabledState(StrEnum):
@@ -83,40 +86,37 @@ app.add_typer(item_app, name="item")
 app.add_typer(tag_app, name="tag")
 
 
-def _verbose(ctx: typer.Context) -> bool:
-    """Extract the verbose flag from the Typer context object."""
-    obj: dict[str, Any] = ctx.obj  # Any: ctx.obj is a typed dict accessed only via _verbose()/_config_path() helpers
-    return bool(obj.get("verbose", False))
+@dataclass(frozen=True, slots=True)
+class _GlobalOptions:
+    """The options given before the command, which ``main`` keeps as the Typer context object."""
+
+    config_path: Path | None = None
+    verbose: bool = False
 
 
-def _config_path(ctx: typer.Context) -> Path | None:
-    """Extract the config file path from the Typer context object."""
-    obj: dict[str, Any] = ctx.obj  # Any: ctx.obj is a typed dict accessed only via _verbose()/_config_path() helpers
-    value = obj.get("config_path")
-    return Path(value) if value is not None else None
-
-
-def _print_verbose(result: BuildResult, verbose: bool) -> None:
-    """Print the repository block to stdout when ``verbose`` is ``True``.
+def _print_verbose(result: BuildResult) -> None:
+    """Print the repository block to stdout.
 
     The block is three aligned lines: the class of the repository, its ``config_summary``, and
     the path of the config file, with ``[not found]`` after it when the file does not exist. Each
     command calls this before its own output, so the block comes first, also when the command
     fails after it.
     """
-    if verbose:
-        config_file = str(result.config_file_path)
-        if not result.config_file_exists:
-            config_file += " [not found]"
-        typer.echo(f"Repository  : {type(result.repository).__name__}")
-        typer.echo(f"Config      : {result.repository.config_summary}")
-        typer.echo(f"Config file : {config_file}")
+    repository = result.service.repository
+    config_file = str(result.config_file_path)
+    if not result.config_file_exists:
+        config_file += " [not found]"
+    typer.echo(f"Repository  : {type(repository).__name__}")
+    typer.echo(f"Config      : {repository.config_summary}")
+    typer.echo(f"Config file : {config_file}")
 
 
 def _service(ctx: typer.Context) -> taxomesh.TaxomeshService:
     """Build the service the command uses, and print the repository block first when ``--verbose`` is set."""
-    result = build(_config_path(ctx))
-    _print_verbose(result, _verbose(ctx))
+    options = ctx.ensure_object(_GlobalOptions)
+    result = build(options.config_path)
+    if options.verbose:
+        _print_verbose(result)
     return result.service
 
 
@@ -166,17 +166,14 @@ def main(
     ),
 ) -> None:
     """Read and change the categories, items and tags that taxomesh stores."""
-    ctx.ensure_object(dict)
-    # Any: ctx.obj is a typed dict accessed only via _verbose()/_config_path() helpers
-    ctx.obj = {"config_path": config, "verbose": verbose}
+    ctx.obj = _GlobalOptions(config_path=config, verbose=verbose)
     if show_config:
         try:
             repo_type, repo_path, config_name = effective_config(config)
-            typer.echo(dump_config(repo_type, repo_path, config_name), nl=False)
-            raise typer.Exit()
         except TaxomeshConfigError as exc:
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(code=1) from None
+            _err(str(exc))
+        typer.echo(dump_config(repo_type, repo_path, config_name), nl=False)
+        raise typer.Exit()
 
 
 # ---------------------------------------------------------------------------
@@ -189,9 +186,7 @@ def category_list(
     ctx: typer.Context,
     parent_id: UUID | None = typer.Option(None, "--parent-id", help="Only this parent's children"),
     item_id: UUID | None = typer.Option(None, "--item-id", help="Only the categories this item is placed in"),
-    state: EnabledState = typer.Option(
-        EnabledState.ENABLED, "--state", help="Which categories to list: enabled (default), disabled, or all"
-    ),
+    state: EnabledState = typer.Option(EnabledState.ENABLED, "--state", help=CATEGORY_STATE_HELP),
 ) -> None:
     """List categories: every one, the children of a parent, or the categories an item is placed in."""
     svc = _service(ctx)
@@ -203,9 +198,7 @@ def category_list(
 @category_app.command("roots")
 def category_roots(
     ctx: typer.Context,
-    state: EnabledState = typer.Option(
-        EnabledState.ENABLED, "--state", help="Which categories to list: enabled (default), disabled, or all"
-    ),
+    state: EnabledState = typer.Option(EnabledState.ENABLED, "--state", help=CATEGORY_STATE_HELP),
 ) -> None:
     """List the top level: the categories that have no parent."""
     svc = _service(ctx)
@@ -445,8 +438,7 @@ def _parse_metadata(raw: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for entry in raw:
         if "=" not in entry:
-            typer.echo(f"--metadata must be KEY=VALUE, not {entry!r}", err=True)
-            raise typer.Exit(code=1)
+            _err(f"--metadata must be KEY=VALUE, not {entry!r}")
         key, _, value = entry.partition("=")
         result[key] = value
     return result
@@ -491,9 +483,7 @@ def item_unrelate(
 def item_list_relations(
     ctx: typer.Context,
     item_id: UUID = typer.Argument(..., help="Item UUID"),
-    relation_types: list[str] | None = typer.Option(
-        None, "--relation-type", help="Only this relation type; repeat the option for several"
-    ),
+    relation_types: list[str] | None = typer.Option(None, "--relation-type", help=RELATION_TYPE_HELP),
     direction: Direction = typer.Option(Direction.OUTGOING, "--direction", help=DIRECTION_HELP),
 ) -> None:
     """List an item's relations."""
@@ -515,9 +505,7 @@ def item_list_relations(
 def item_list_related(
     ctx: typer.Context,
     item_id: UUID = typer.Argument(..., help="Item UUID"),
-    relation_types: list[str] | None = typer.Option(
-        None, "--relation-type", help="Only this relation type; repeat the option for several"
-    ),
+    relation_types: list[str] | None = typer.Option(None, "--relation-type", help=RELATION_TYPE_HELP),
     direction: Direction = typer.Option(Direction.OUTGOING, "--direction", help=DIRECTION_HELP),
     state: EnabledState = typer.Option(
         EnabledState.ENABLED, "--state", help="Which related items to list: enabled (default), disabled, or all"

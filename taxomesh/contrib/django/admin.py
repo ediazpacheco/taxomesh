@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Final
 from uuid import UUID
@@ -95,6 +96,7 @@ else:
 
 TAXOMESH_LINKED_MODEL_SETTING: Final[str] = "TAXOMESH_LINKED_MODEL"
 TAXOMESH_CATEGORY_LINKED_MODEL_SETTING: Final[str] = "TAXOMESH_CATEGORY_LINKED_MODEL"
+GRAPH_URL_NAME: Final[str] = "taxomesh_contrib_django_graph"
 GRAPH_REORDER_URL_NAME: Final[str] = "taxomesh_contrib_django_graph_reorder"
 GRAPH_REPARENT_URL_NAME: Final[str] = "taxomesh_contrib_django_graph_reparent"
 GRAPH_CHILDREN_URL_NAME: Final[str] = "taxomesh_contrib_django_graph_children"
@@ -113,6 +115,11 @@ _LINKED_OBJECT_FIELD: Final[str] = "linked_object_url"
 # that its widget renders beside it.
 _CATEGORIES_FIELD: Final[str] = "categories"
 _SHOWN_SUFFIX: Final[str] = "_shown"
+# The category and item pages edit a JSON field in the JSON editor.
+# Any: the field options of django-stubs' ModelAdmin.formfield_overrides, which are Any.
+_JSON_EDITOR_OVERRIDES: Final[Mapping[type[models.Field[Any, Any]], Mapping[str, Any]]] = {
+    models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}
+}
 
 
 def _uuid_from_payload(raw: object) -> UUID:
@@ -242,73 +249,47 @@ def _fields_with_link(fields: _FieldGroups, setting_name: str) -> _FieldGroups:
     ]
 
 
-def _build_child_entries(  # noqa: PLR0913
-    child_cats: Sequence[Category],
-    items: Sequence[Item],
-    depth: int,
-    parent_uuid_str: str,
-    cats_with_children: set[UUID],
-    cats_with_items: set[UUID],
-    cat_sort_map: dict[UUID, int],
-    item_sort_map: dict[UUID, int],
-) -> list[GraphEntry]:
-    """Build the graph entries of the direct children of a category: its items, then its child categories.
+def _item_entry(item: Item, *, depth: int, parent_uuid: str, sort_index: int) -> GraphEntry:
+    """Return the graph entry of an item that is placed in the category ``parent_uuid`` names."""
+    return GraphEntry(
+        depth=depth,
+        kind=DRAG_KIND_ITEM,
+        name=str(item),
+        uuid=str(item.item_id),
+        enabled=item.enabled,
+        external_id=item.external_id or "",
+        linked_url=_resolve_linked_url(item.external_id),
+        has_descendants=False,
+        depth_limited=False,
+        initially_collapsed=False,
+        sort_index=sort_index,
+        parent_uuid=parent_uuid,
+    )
 
-    Args:
-        child_cats: The rows of the child categories.
-        items: The rows of the items placed in the category.
-        depth: The depth on the page of every entry.
-        parent_uuid_str: The identifier of the category, as text.
-        cats_with_children: The identifiers of the categories that have a child category.
-        cats_with_items: The identifiers of the categories that have an item.
-        cat_sort_map: The ``sort_index`` of each child category under this category, by identifier.
-        item_sort_map: The ``sort_index`` of each item in this category, by identifier.
 
-    Returns:
-        The entries.
-    """
-    entries: list[GraphEntry] = []
+def _category_entry(
+    category: Category, *, depth: int, parent_uuid: str, has_descendants: bool, sort_index: int
+) -> GraphEntry:
+    """Return the graph entry of a category under ``parent_uuid``, which is ``TOP_LEVEL_PARENT`` at the top level."""
+    return GraphEntry(
+        depth=depth,
+        kind=DRAG_KIND_CATEGORY,
+        name=str(category),
+        uuid=str(category.category_id),
+        enabled=category.enabled,
+        external_id=category.external_id or "",
+        linked_url=_resolve_linked_url(category.external_id, _category_linked_model_setting()),
+        has_descendants=has_descendants,
+        depth_limited=False,
+        initially_collapsed=True,
+        sort_index=sort_index,
+        parent_uuid=parent_uuid,
+    )
 
-    for idx, item in enumerate(items):
-        item_uuid_str = str(item.item_id)
-        entries.append(
-            GraphEntry(
-                depth=depth,
-                kind=DRAG_KIND_ITEM,
-                name=str(item),
-                uuid=item_uuid_str,
-                enabled=item.enabled,
-                external_id=item.external_id or "",
-                linked_url=_resolve_linked_url(item.external_id or ""),
-                has_descendants=False,
-                depth_limited=False,
-                initially_collapsed=False,
-                sort_index=item_sort_map.get(item.item_id, idx),
-                parent_uuid=parent_uuid_str,
-            )
-        )
 
-    for idx, cat in enumerate(child_cats):
-        cat_uuid_str = str(cat.category_id)
-        has_descendants = cat.category_id in cats_with_children or cat.category_id in cats_with_items
-        entries.append(
-            GraphEntry(
-                depth=depth,
-                kind=DRAG_KIND_CATEGORY,
-                name=str(cat),
-                uuid=cat_uuid_str,
-                enabled=cat.enabled,
-                external_id=cat.external_id or "",
-                linked_url=_resolve_linked_url(cat.external_id or "", _category_linked_model_setting()),
-                has_descendants=has_descendants,
-                depth_limited=False,
-                initially_collapsed=True,
-                sort_index=cat_sort_map.get(cat.category_id, idx),
-                parent_uuid=parent_uuid_str,
-            )
-        )
-
-    return entries
+def _new_service() -> TaxomeshService:
+    """Build a new ``TaxomeshService`` over a new ``DjangoRepository``."""
+    return TaxomeshService(repository=DjangoRepository())
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +313,7 @@ class TaxomeshAdminMixin:
             A new service on each call. One request can make several calls, such as ``save_model``
             and then ``save_formset``.
         """
-        return TaxomeshService(repository=DjangoRepository())
+        return _new_service()
 
     def _linked_model_setting(self) -> str:
         """Return the setting that names the model of the records that the rows of this admin link to."""
@@ -381,22 +362,22 @@ class TaxomeshAdminMixin:
             )
         return external_id
 
-    sort_modes: list[SortMode] = list(DEFAULT_SORT_MODES)
 
-    def _resolve_sort_fn(self, sort_by: str) -> SortModeFn:
-        """Return the function of the sort mode that ``sort_by`` names, or of the first mode.
+class _ServiceAdminMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
+    """The base of the admins of taxomesh's own models, which write through the service."""
+
+    @contextmanager
+    def _reported(self, request: HttpRequest, errors: type[TaxomeshError] = TaxomeshError) -> Iterator[None]:
+        """Show an error of the block as an error message on the page, and continue after the block.
 
         Args:
-            sort_by: The key of the sort mode, from the query string.
-
-        Returns:
-            The function of the mode with that key, or of the first mode in ``sort_modes`` when no
-            mode has the key.
+            request: The current HTTP request.
+            errors: The error class that the block reports. An error of another class propagates.
         """
-        for key, _label, fn in self.sort_modes:
-            if key == sort_by:
-                return fn
-        return self.sort_modes[0][2]
+        try:
+            yield
+        except errors as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
 
 
 # ---------------------------------------------------------------------------
@@ -583,10 +564,7 @@ class TaxomeshCategoryListFilter(admin.SimpleListFilter):
         if not value:
             return queryset
         try:
-            cat_uuid = UUID(value)
-            repo = DjangoRepository()
-            svc = TaxomeshService(repository=repo)
-            items = svc.items.list(category=cat_uuid, enabled=None)
+            items = _new_service().items.list(category=UUID(value), enabled=None)
             external_ids = [str(item.external_id) for item in items if item.external_id]
             return queryset.filter(pk__in=external_ids)
         except Exception:
@@ -804,12 +782,37 @@ class _LinkInlineMixin(_LinkInlineMixinBase):
 # ---------------------------------------------------------------------------
 
 
-class CategoryParentLinkInline(_LinkInlineMixin, _CategoryParentLinkTabular):
-    """The inline of the parent links of a category, on the category page."""
+class _CategoryLinkInline(_LinkInlineMixin, _CategoryParentLinkTabular):
+    """The base of the two inlines of parent links on the category page: no select offers the implicit root."""
 
     model = CategoryParentLinkModel
-    form = CategoryParentLinkForm
     extra = 0
+
+    # Any: an override takes what django-stubs' ModelAdmin.formfield_for_foreignkey takes, which is Any.
+    def formfield_for_foreignkey(
+        self,
+        db_field: models.ForeignKey[Any, Any],
+        request: HttpRequest,
+        **kwargs: Any,
+    ) -> ModelChoiceField[Any] | None:
+        """Leave the implicit root out of the choices of both categories of the link.
+
+        Args:
+            db_field: The ForeignKey field descriptor.
+            request: The current HTTP request.
+            **kwargs: Passed through to super().
+
+        Returns:
+            The form field, whose choices are the stored categories without the implicit root.
+        """
+        kwargs["queryset"] = CategoryModel.objects.exclude(name=ROOT_CATEGORY_NAME)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+
+class CategoryParentLinkInline(_CategoryLinkInline):
+    """The inline of the parent links of a category, on the category page."""
+
+    form = CategoryParentLinkForm
     fk_name = "category"
     verbose_name = "Parent category"
     verbose_name_plural = "Parent categories"
@@ -832,58 +835,20 @@ class CategoryParentLinkInline(_LinkInlineMixin, _CategoryParentLinkTabular):
         """
         return super().get_queryset(request).exclude(parent_category__name=ROOT_CATEGORY_NAME)
 
-    # Any: an override takes what django-stubs' ModelAdmin.formfield_for_foreignkey takes, which is Any.
-    def formfield_for_foreignkey(
-        self,
-        db_field: models.ForeignKey[Any, Any],
-        request: HttpRequest,
-        **kwargs: Any,
-    ) -> ModelChoiceField[Any] | None:
-        """Leave the implicit root out of the choices of ``parent_category``.
-
-        Args:
-            db_field: The ForeignKey field descriptor.
-            request: The current HTTP request.
-            **kwargs: Passed through to super().
-        """
-        if db_field.name == "parent_category":
-            kwargs["queryset"] = CategoryModel.objects.exclude(name=ROOT_CATEGORY_NAME)
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
 
 # ---------------------------------------------------------------------------
 # CategoryChildLink Inline
 # ---------------------------------------------------------------------------
 
 
-class CategoryChildLinkInline(_LinkInlineMixin, _CategoryParentLinkTabular):
+class CategoryChildLinkInline(_CategoryLinkInline):
     """The inline of the child categories of a category: the links whose parent is the category of the page."""
 
-    model = CategoryParentLinkModel
     form = CategoryChildLinkForm
     fk_name = "parent_category"
-    extra = 0
     verbose_name = "Child category"
     verbose_name_plural = "Child categories"
     autocomplete_fields = ["category"]
-
-    # Any: an override takes what django-stubs' ModelAdmin.formfield_for_foreignkey takes, which is Any.
-    def formfield_for_foreignkey(
-        self,
-        db_field: models.ForeignKey[Any, Any],
-        request: HttpRequest,
-        **kwargs: Any,
-    ) -> ModelChoiceField[Any] | None:
-        """Leave the implicit root out of the choices of ``category``, the child.
-
-        Args:
-            db_field: The ForeignKey field descriptor.
-            request: The current HTTP request.
-            **kwargs: Passed through to super().
-        """
-        if db_field.name == "category":
-            kwargs["queryset"] = CategoryModel.objects.exclude(name=ROOT_CATEGORY_NAME)
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -931,38 +896,18 @@ class CategoryItemLinkInline(_LinkInlineMixin, _CategoryItemLinkTabular):
 # ---------------------------------------------------------------------------
 
 
-class HasSlugFilter(admin.SimpleListFilter):
-    """Filter the list by whether the slug is empty: 'Has slug' or 'No slug'."""
+class _FilledFilter(admin.SimpleListFilter):
+    """The base of a filter by whether a field is filled: "yes" keeps the rows where it is, and "no" the others.
 
-    title = "has slug"
-    parameter_name = "has_slug"
-
-    def lookups(self, request: HttpRequest, model_admin: object) -> list[tuple[str, str]]:
-        """Return the filter options."""
-        return [("yes", "Has slug"), ("no", "No slug")]
-
-    # Any: a list filter is handed a queryset of whichever model the admin lists, as django-stubs types it.
-    def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> models.QuerySet[Any]:
-        """Apply the filter to the queryset."""
-        if self.value() == "yes":
-            return queryset.exclude(slug="")
-        if self.value() == "no":
-            return queryset.filter(slug="")
-        return queryset
-
-
-class HasLinkedObjectListFilter(admin.SimpleListFilter):
-    """Filter the categories by whether they have an external id.
-
-    The service stores no external id as ``NULL``, and a row that another writer made can hold ``""``.
-    Both mean "No linked object".
+    A subclass sets ``labels``, the labels of the two choices, and ``empty``, the condition that an
+    empty field meets.
     """
 
-    title = "linked object"
-    parameter_name = "has_linked_object"
+    labels: tuple[str, str]
+    empty: models.Q
 
     def lookups(self, request: HttpRequest, model_admin: object) -> list[tuple[str, str]]:
-        """Return the filter choices.
+        """Return the two choices of the filter.
 
         Args:
             request: The current HTTP request.
@@ -971,11 +916,11 @@ class HasLinkedObjectListFilter(admin.SimpleListFilter):
         Returns:
             The ``(value, label)`` pairs.
         """
-        return [("yes", "Has linked object"), ("no", "No linked object")]
+        return [("yes", self.labels[0]), ("no", self.labels[1])]
 
     # Any: a list filter is handed a queryset of whichever model the admin lists, as django-stubs types it.
     def queryset(self, request: HttpRequest, queryset: models.QuerySet[Any]) -> models.QuerySet[Any]:
-        """Apply the filter to the queryset.
+        """Keep the rows of the selected choice.
 
         Args:
             request: The current HTTP request.
@@ -984,12 +929,33 @@ class HasLinkedObjectListFilter(admin.SimpleListFilter):
         Returns:
             The filtered queryset, or the queryset as it is when no value is selected.
         """
-        has_none = models.Q(external_id__isnull=True) | models.Q(external_id="")
         if self.value() == "yes":
-            return queryset.exclude(has_none)
+            return queryset.exclude(self.empty)
         if self.value() == "no":
-            return queryset.filter(has_none)
+            return queryset.filter(self.empty)
         return queryset
+
+
+class HasSlugFilter(_FilledFilter):
+    """Filter the list by whether the slug is empty: 'Has slug' or 'No slug'."""
+
+    title = "has slug"
+    parameter_name = "has_slug"
+    labels = ("Has slug", "No slug")
+    empty = models.Q(slug="")
+
+
+class HasLinkedObjectListFilter(_FilledFilter):
+    """Filter the categories by whether they have an external id.
+
+    The service stores no external id as ``NULL``, and a row that another writer made can hold ``""``.
+    Both mean "No linked object".
+    """
+
+    title = "linked object"
+    parameter_name = "has_linked_object"
+    labels = ("Has linked object", "No linked object")
+    empty = models.Q(external_id__isnull=True) | models.Q(external_id="")
 
 
 # ---------------------------------------------------------------------------
@@ -1032,7 +998,7 @@ class CategoryModelForm(_CategoryFormBase):
 
 
 @admin.register(CategoryModel)
-class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
+class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
     """The admin of ``CategoryModel``: the category pages, and the graph page with its views."""
 
     form = CategoryModelForm
@@ -1061,7 +1027,13 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
     )
     readonly_fields = (TOP_LEVEL_FIELD, _LINKED_OBJECT_FIELD, "created_at", "updated_at", "version")
     inlines = [CategoryParentLinkInline, CategoryChildLinkInline, CategoryItemLinkInline]
-    formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
+    formfield_overrides = _JSON_EDITOR_OVERRIDES
+    # The sort modes of the graph page. A subclass extends the list to add a mode.
+    sort_modes: list[SortMode] = list(DEFAULT_SORT_MODES)
+
+    def _resolve_sort_fn(self, sort_by: str) -> SortModeFn:
+        """Return the function of the sort mode that ``sort_by`` names, or of the first mode in ``sort_modes``."""
+        return next((fn for key, _label, fn in self.sort_modes if key == sort_by), self.sort_modes[0][2])
 
     def _linked_model_setting(self) -> str:
         """Return the setting that names the linked model of a category: see ``_category_linked_model_setting``."""
@@ -1091,7 +1063,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
             path(
                 "graph/",
                 self.admin_site.admin_view(self.graph_view),
-                name="taxomesh_contrib_django_graph",
+                name=GRAPH_URL_NAME,
             ),
             path(
                 GRAPH_REORDER_PATH,
@@ -1180,13 +1152,13 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
             parent_uuid = _parent_from_payload(body["parent_uuid"])
             ordered_uuids = [_uuid_from_payload(u) for u in body["ordered_uuids"]]
         except (ValueError, TypeError):
-            return JsonResponse({"error": "Invalid UUID format"}, status=400)
+            return JsonResponse({"error": "Invalid UUID format"}, status=HTTPStatus.BAD_REQUEST)
 
         try:
-            svc = TaxomeshService(repository=DjangoRepository())
+            svc = self._make_service()
             if kind == DRAG_KIND_ITEM:
                 if parent_uuid is None:
-                    return JsonResponse({"error": "Items have no top level"}, status=400)
+                    return JsonResponse({"error": "Items have no top level"}, status=HTTPStatus.BAD_REQUEST)
                 svc.items.reorder(parent_uuid, ordered_uuids)
             else:
                 svc.categories.reorder(parent_uuid, ordered_uuids)
@@ -1213,18 +1185,16 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
             raw_insert = body["insert_before_uuid"]
             insert_before_uuid = _uuid_from_payload(raw_insert) if raw_insert is not None else None
         except (ValueError, TypeError):
-            return JsonResponse({"error": "Invalid UUID format"}, status=400)
+            return JsonResponse({"error": "Invalid UUID format"}, status=HTTPStatus.BAD_REQUEST)
 
         try:
-            repo = DjangoRepository()
-            svc = TaxomeshService(repository=repo)
-            root_cats = [c for c in repo.list_categories(enabled=None) if c.name == ROOT_CATEGORY_NAME]
-            root_uuid = root_cats[0].category_id if root_cats else None
-            if root_uuid is not None and node_uuid == root_uuid:
-                return JsonResponse({"error": "The implicit root cannot be moved"}, status=400)
+            svc = self._make_service()
+            node = svc.repository.find_category(node_uuid)
+            if node is not None and node.name == ROOT_CATEGORY_NAME:
+                return JsonResponse({"error": "The implicit root cannot be moved"}, status=HTTPStatus.BAD_REQUEST)
             if kind == DRAG_KIND_ITEM:
                 if old_parent_uuid is None or new_parent_uuid is None:
-                    return JsonResponse({"error": "Items have no top level"}, status=400)
+                    return JsonResponse({"error": "Items have no top level"}, status=HTTPStatus.BAD_REQUEST)
                 svc.items.move(
                     node_uuid,
                     from_category=old_parent_uuid,
@@ -1239,7 +1209,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
                     before=insert_before_uuid,
                 )
         except TaxomeshCyclicDependencyError as exc:
-            return JsonResponse({"error": f"Cycle detected: {exc}"}, status=400)
+            return JsonResponse({"error": f"Cycle detected: {exc}"}, status=HTTPStatus.BAD_REQUEST)
         except Exception as exc:
             return _graph_view_error(exc)
 
@@ -1262,45 +1232,33 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
 
         error: str | None = None
         entries: list[GraphEntry] = []
-        has_entries = False
         sort_by = request.GET.get("sort_by", DEFAULT_SORT_MODE)
 
         try:
-            repo = DjangoRepository()
-            svc = TaxomeshService(repository=repo)
+            svc = self._make_service()
 
             # One snapshot answers both of the page's questions: which categories are at the top
             # level, and whether each has anything under it.
-            graph = svc.graph(enabled=None)
-            root_nodes = graph.roots
-            has_entries = bool(root_nodes)
+            root_nodes = svc.graph(enabled=None).roots
 
             # A top-level category has one link, its link to the implicit root, so this read of
             # those links gives the STORED sort_index values that these entries render. The
             # drag-and-drop payload names their parent as the top level, never by the identifier
             # of the implicit root.
             root_ids = [node.category.category_id for node in root_nodes]
-            root_links = repo.list_category_parent_links(category_ids=root_ids) if root_ids else []
-            root_sort_map: dict[UUID, int] = {lnk.category_id: lnk.sort_index for lnk in root_links}
+            root_links = svc.repository.list_category_parent_links(category_ids=root_ids) if root_ids else []
+            root_sort_map = {lnk.category_id: lnk.sort_index for lnk in root_links}
 
-            for idx, node in enumerate(root_nodes):
-                cat = node.category
-                entries.append(
-                    GraphEntry(
-                        depth=0,
-                        kind=DRAG_KIND_CATEGORY,
-                        name=str(cat),
-                        uuid=str(cat.category_id),
-                        enabled=cat.enabled,
-                        external_id=cat.external_id or "",
-                        linked_url=_resolve_linked_url(cat.external_id or "", self._linked_model_setting()),
-                        has_descendants=bool(node.children or node.items),
-                        depth_limited=False,
-                        initially_collapsed=True,
-                        sort_index=root_sort_map.get(cat.category_id, idx),
-                        parent_uuid=TOP_LEVEL_PARENT,
-                    )
+            entries = [
+                _category_entry(
+                    node.category,
+                    depth=0,
+                    parent_uuid=TOP_LEVEL_PARENT,
+                    has_descendants=bool(node.children or node.items),
+                    sort_index=root_sort_map.get(node.category.category_id, idx),
                 )
+                for idx, node in enumerate(root_nodes)
+            ]
         except TaxomeshError as exc:
             error = str(exc)
 
@@ -1311,9 +1269,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
             **self.admin_site.each_context(request),
             "title": "Taxonomy Graph",
             "entries": entries,
-            "has_entries": has_entries,
             "error": error,
-            "item_relations": {},
             "children_url": children_url,
             "sort_by": sort_by,
             "sort_mode_options": [{"key": k, "label": lbl} for k, lbl, _ in self.sort_modes],
@@ -1335,8 +1291,7 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
             return JsonResponse({"error": "Missing or invalid parent_uuid or depth"}, status=HTTPStatus.BAD_REQUEST)
 
         try:
-            repo = DjangoRepository()
-            svc = TaxomeshService(repository=repo)
+            svc = self._make_service()
 
             child_cats = svc.categories.list(parent=parent_uuid, enabled=None)
             items = svc.items.list(category=parent_uuid, enabled=None)
@@ -1346,57 +1301,54 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
             # anything under it. Reading both link tables whole, each time the page opens a
             # category, would cost more.
             scope_ids = [parent_uuid, *(cat.category_id for cat in child_cats)]
-            cat_links = repo.list_category_parent_links(parent_category_ids=scope_ids)
-            item_links = repo.list_item_parent_links(category_ids=scope_ids)
-            cats_with_children = {lnk.parent_category_id for lnk in cat_links}
-            cats_with_items = {lnk.category_id for lnk in item_links}
-
+            cat_links = svc.repository.list_category_parent_links(parent_category_ids=scope_ids)
+            item_links = svc.repository.list_item_parent_links(category_ids=scope_ids)
+            not_empty = {lnk.parent_category_id for lnk in cat_links} | {lnk.category_id for lnk in item_links}
             cat_sort_map = {
                 lnk.category_id: lnk.sort_index for lnk in cat_links if lnk.parent_category_id == parent_uuid
             }
             item_sort_map = {lnk.item_id: lnk.sort_index for lnk in item_links if lnk.category_id == parent_uuid}
 
-            parent_uuid_str = str(parent_uuid)
-            entries = _build_child_entries(
-                child_cats=child_cats,
-                items=items,
-                depth=depth,
-                parent_uuid_str=parent_uuid_str,
-                cats_with_children=cats_with_children,
-                cats_with_items=cats_with_items,
-                cat_sort_map=cat_sort_map,
-                item_sort_map=item_sort_map,
-            )
+            # The items first, then the child categories.
+            parent = str(parent_uuid)
+            entries = [
+                _item_entry(item, depth=depth, parent_uuid=parent, sort_index=item_sort_map.get(item.item_id, idx))
+                for idx, item in enumerate(items)
+            ] + [
+                _category_entry(
+                    cat,
+                    depth=depth,
+                    parent_uuid=parent,
+                    has_descendants=cat.category_id in not_empty,
+                    sort_index=cat_sort_map.get(cat.category_id, idx),
+                )
+                for idx, cat in enumerate(child_cats)
+            ]
 
             # The relations of every rendered item in one batch read, one query for the links and
             # one for the items, and not a query for each item and a subscript for each relation.
             # The read itself logs and skips a relation whose other end is not stored, so this
-            # view hides no failure.
+            # view hides no failure. An item with no relation is not a key of ``related``.
             related = svc.items.get_many_related([item.item_id for item in items])
-            item_relations: dict[str, list[RelationEntry]] = {}
-            for item in items:
-                found = related.get(item.item_id)
-                if found is None:
-                    continue
-                item_relations[str(item.item_id)] = [
+            item_relations = {
+                str(item_id): [
                     RelationEntry(
-                        relation_type=relation_type,
-                        target_name=target.name,
-                        target_uuid=str(target.item_id),
+                        relation_type=relation_type, target_name=target.name, target_uuid=str(target.item_id)
                     )
                     for relation_type in found.relation_types
                     for target in found.of_type(relation_type)
                 ]
+                for item_id, found in related.items()
+            }
 
         except Exception as exc:
             return _graph_view_error(exc)
 
         entries = self._resolve_sort_fn(sort_by)(entries)
 
-        children_url = reverse(f"admin:{GRAPH_CHILDREN_URL_NAME}")
         html = render_to_string(
             "admin/taxomesh_contrib_django/_graph_entry_list.html",
-            {"entries": entries, "item_relations": item_relations, "children_url": children_url},
+            {"entries": entries, "item_relations": item_relations},
             request=request,
         )
         return HttpResponse(html, content_type="text/html")
@@ -1418,7 +1370,9 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         """
 
         svc = self._make_service()
-        try:
+        # CategoryModelForm refuses the reserved name of the implicit root before this runs; the
+        # message reports a refused save that does not go through that form.
+        with self._reported(request, TaxomeshValidationError):
             if not change:
                 domain_cat = svc.categories.create(
                     name=obj.name,
@@ -1446,10 +1400,6 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
                     external_id=obj.external_id,
                     enabled=obj.enabled,
                 )
-        except TaxomeshValidationError as exc:
-            # CategoryModelForm refuses the reserved name of the implicit root before this runs;
-            # this branch reports a save that does not go through that form.
-            self.message_user(request, str(exc), level=messages.ERROR)
 
     # Any: an override takes what django-stubs' ModelAdmin.save_formset takes, which is Any.
     def save_formset(
@@ -1485,19 +1435,15 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         svc = self._make_service()
         links = formset.save(commit=False)
         for link in formset.deleted_objects:
-            try:
+            with self._reported(request):
                 svc.categories.remove_parent(link.category_id, link.parent_category_id)
-            except TaxomeshError as exc:
-                self.message_user(request, str(exc), level=messages.ERROR)
         for link in links:
-            try:
+            with self._reported(request):
                 svc.categories.add_parent(link.category_id, link.parent_category_id, sort_index=link.sort_index)
                 if link.pk is not None:
                     stored = CategoryParentLinkModel.objects.get(pk=link.pk)
                     if (stored.category_id, stored.parent_category_id) != (link.category_id, link.parent_category_id):
                         svc.categories.remove_parent(stored.category_id, stored.parent_category_id)
-            except TaxomeshError as exc:
-                self.message_user(request, str(exc), level=messages.ERROR)
 
     @admin.display(boolean=True, description="At the top level")
     def at_top_level(self, obj: CategoryModel | None) -> bool | None:
@@ -1527,10 +1473,8 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
         """
 
         svc = self._make_service()
-        try:
+        with self._reported(request):
             svc.categories.delete(obj.category_id)
-        except TaxomeshError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
 
     def delete_queryset(self, request: HttpRequest, queryset: models.QuerySet[CategoryModel]) -> None:
         """Delete each selected category through the service.
@@ -1542,10 +1486,8 @@ class CategoryModelAdmin(TaxomeshAdminMixin, _CategoryAdminBase):
 
         svc = self._make_service()
         for obj in queryset:
-            try:
+            with self._reported(request):
                 svc.categories.delete(obj.category_id)
-            except TaxomeshError as exc:
-                self.message_user(request, str(exc), level=messages.ERROR)
 
 
 # ---------------------------------------------------------------------------
@@ -1593,21 +1535,6 @@ class _ItemRelationInlineBase(_LinkInlineMixin, _ItemRelationLinkTabular):
     extra = 0
 
 
-def _page_object_id(request: HttpRequest) -> UUID | None:
-    """Return the identifier of the item a change page shows, from its resolved URL.
-
-    Args:
-        request: The current HTTP request.
-
-    Returns:
-        The ``object_id`` the admin URL captured, or ``None`` on the add page, whose URL captures
-        none.
-    """
-    match = request.resolver_match
-    object_id = None if match is None else match.kwargs.get("object_id")
-    return None if object_id is None else UUID(object_id)
-
-
 class OutgoingRelationInline(_ItemRelationInlineBase):
     """The inline of the relations from the item of the page: those whose ``source_item`` is that item."""
 
@@ -1615,9 +1542,6 @@ class OutgoingRelationInline(_ItemRelationInlineBase):
     verbose_name_plural = "Relations from this item"
     fk_name = "source_item"
     autocomplete_fields = ["target_item"]
-
-    def get_queryset(self, request: HttpRequest) -> models.QuerySet[ItemRelationLinkModel]:
-        return super().get_queryset(request).filter(source_item_id=_page_object_id(request))
 
 
 class IncomingRelationInline(_ItemRelationInlineBase):
@@ -1628,9 +1552,6 @@ class IncomingRelationInline(_ItemRelationInlineBase):
     fk_name = "target_item"
     autocomplete_fields = ["source_item"]
 
-    def get_queryset(self, request: HttpRequest) -> models.QuerySet[ItemRelationLinkModel]:
-        return super().get_queryset(request).filter(target_item_id=_page_object_id(request))
-
 
 # ---------------------------------------------------------------------------
 # ItemModelAdmin
@@ -1638,7 +1559,7 @@ class IncomingRelationInline(_ItemRelationInlineBase):
 
 
 @admin.register(ItemModel)
-class ItemModelAdmin(TaxomeshAdminMixin, _ItemAdminBase):
+class ItemModelAdmin(_ServiceAdminMixin, _ItemAdminBase):
     """The admin of ``ItemModel``: the item pages."""
 
     list_display = ("name", "external_id_with_link", "slug", "enabled", "version", "created_at", "updated_at")
@@ -1654,7 +1575,7 @@ class ItemModelAdmin(TaxomeshAdminMixin, _ItemAdminBase):
     )
     readonly_fields = (_LINKED_OBJECT_FIELD, "created_at", "updated_at", "version")
     inlines = [ItemParentLinkInline, OutgoingRelationInline, IncomingRelationInline, ItemTagLinkInline]
-    formfield_overrides = {models.JSONField: {"widget": JsonEditorWidget, "form_class": JsonEditorFormField}}
+    formfield_overrides = _JSON_EDITOR_OVERRIDES
 
     def get_fields(self, request: HttpRequest, obj: ItemModel | None = None) -> _FieldGroups:
         """Return the fields of the page, without the ↗ link while ``TAXOMESH_LINKED_MODEL`` is not set.
@@ -1682,7 +1603,7 @@ class ItemModelAdmin(TaxomeshAdminMixin, _ItemAdminBase):
         """
 
         svc = self._make_service()
-        try:
+        with self._reported(request, TaxomeshValidationError):
             if not change:
                 domain_item = svc.items.create(
                     name=obj.name,
@@ -1706,8 +1627,6 @@ class ItemModelAdmin(TaxomeshAdminMixin, _ItemAdminBase):
                     metadata=obj.metadata,
                     external_id=obj.external_id,
                 )
-        except TaxomeshValidationError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
 
     def delete_model(self, request: HttpRequest, obj: ItemModel) -> None:
         """Delete the item through the service.
@@ -1718,10 +1637,8 @@ class ItemModelAdmin(TaxomeshAdminMixin, _ItemAdminBase):
         """
 
         svc = self._make_service()
-        try:
+        with self._reported(request):
             svc.items.delete(obj.item_id)
-        except TaxomeshError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
 
     def delete_queryset(self, request: HttpRequest, queryset: models.QuerySet[ItemModel]) -> None:
         """Delete each selected item through the service.
@@ -1733,10 +1650,8 @@ class ItemModelAdmin(TaxomeshAdminMixin, _ItemAdminBase):
 
         svc = self._make_service()
         for obj in queryset:
-            try:
+            with self._reported(request):
                 svc.items.delete(obj.item_id)
-            except TaxomeshError as exc:
-                self.message_user(request, str(exc), level=messages.ERROR)
 
     # Any: an override takes what django-stubs' ModelAdmin.save_formset takes, which is Any.
     def save_formset(self, request: HttpRequest, form: Any, formset: Any, change: bool) -> None:
@@ -1760,35 +1675,30 @@ class ItemModelAdmin(TaxomeshAdminMixin, _ItemAdminBase):
             change: ``True`` when the page edits a stored item; ``False`` when it adds one.
         """
 
-        fk_name = getattr(getattr(formset, "fk", None), "name", None)
-        if formset.model is ItemRelationLinkModel and fk_name in ("source_item", "target_item"):
-            svc = self._make_service()
-            instances = formset.save(commit=False)
-            for obj in formset.deleted_objects:
-                try:
-                    svc.items.unrelate(obj.source_item_id, obj.target_item_id, obj.relation_type)
-                except TaxomeshError as exc:
-                    self.message_user(request, str(exc), level=messages.ERROR)
-            for obj in instances:
-                original = None if obj.pk is None else ItemRelationLinkModel.objects.filter(pk=obj.pk).first()
-                try:
-                    link = svc.items.relate(
-                        obj.source_item_id,
-                        obj.target_item_id,
-                        obj.relation_type,
-                        sort_index=obj.sort_index,
-                        metadata=obj.metadata or {},
-                    )
-                    if original is not None and (
-                        original.source_item_id,
-                        original.target_item_id,
-                        original.relation_type,
-                    ) != (link.source_item_id, link.target_item_id, link.relation_type):
-                        svc.items.unrelate(original.source_item_id, original.target_item_id, original.relation_type)
-                except TaxomeshError as exc:
-                    self.message_user(request, str(exc), level=messages.ERROR)
-        else:
+        if formset.model is not ItemRelationLinkModel:
             super().save_formset(request, form, formset, change)
+            return
+        svc = self._make_service()
+        instances = formset.save(commit=False)
+        for obj in formset.deleted_objects:
+            with self._reported(request):
+                svc.items.unrelate(obj.source_item_id, obj.target_item_id, obj.relation_type)
+        for obj in instances:
+            original = None if obj.pk is None else ItemRelationLinkModel.objects.filter(pk=obj.pk).first()
+            with self._reported(request):
+                link = svc.items.relate(
+                    obj.source_item_id,
+                    obj.target_item_id,
+                    obj.relation_type,
+                    sort_index=obj.sort_index,
+                    metadata=obj.metadata or {},
+                )
+                if original is not None and (
+                    original.source_item_id,
+                    original.target_item_id,
+                    original.relation_type,
+                ) != (link.source_item_id, link.target_item_id, link.relation_type):
+                    svc.items.unrelate(original.source_item_id, original.target_item_id, original.relation_type)
 
 
 # ---------------------------------------------------------------------------
@@ -1822,7 +1732,7 @@ class TagModelForm(_TagFormBase):
 
 
 @admin.register(TagModel)
-class TagModelAdmin(TaxomeshAdminMixin, _TagAdminBase):
+class TagModelAdmin(_ServiceAdminMixin, _TagAdminBase):
     """The admin of ``TagModel``: the tag pages.
 
     The pages take no identifier, as the category and item pages take none: the service assigns it
@@ -1851,7 +1761,7 @@ class TagModelAdmin(TaxomeshAdminMixin, _TagAdminBase):
         """
 
         svc = self._make_service()
-        try:
+        with self._reported(request, TaxomeshValidationError):
             if not change:
                 domain_tag = svc.tags.create(name=obj.name, metadata=obj.metadata)
                 # The service assigns the identifier. Give it to obj, so that the confirmation after
@@ -1859,8 +1769,6 @@ class TagModelAdmin(TaxomeshAdminMixin, _TagAdminBase):
                 obj.tag_id = domain_tag.tag_id
             else:
                 svc.tags.update(tag=obj.tag_id, name=obj.name, metadata=obj.metadata)
-        except TaxomeshValidationError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
 
     def delete_model(self, request: HttpRequest, obj: TagModel) -> None:
         """Delete the tag through the service.
@@ -1871,10 +1779,8 @@ class TagModelAdmin(TaxomeshAdminMixin, _TagAdminBase):
         """
 
         svc = self._make_service()
-        try:
+        with self._reported(request):
             svc.tags.delete(obj.tag_id)
-        except TaxomeshError as exc:
-            self.message_user(request, str(exc), level=messages.ERROR)
 
     def delete_queryset(self, request: HttpRequest, queryset: models.QuerySet[TagModel]) -> None:
         """Delete each selected tag through the service.
@@ -1886,10 +1792,8 @@ class TagModelAdmin(TaxomeshAdminMixin, _TagAdminBase):
 
         svc = self._make_service()
         for obj in queryset:
-            try:
+            with self._reported(request):
                 svc.tags.delete(obj.tag_id)
-            except TaxomeshError as exc:
-                self.message_user(request, str(exc), level=messages.ERROR)
 
 
 # ---------------------------------------------------------------------------
@@ -1897,30 +1801,34 @@ class TagModelAdmin(TaxomeshAdminMixin, _TagAdminBase):
 # ---------------------------------------------------------------------------
 
 
-@admin.register(CategoryGraphProxy)
-class CategoryGraphProxyAdmin(_GraphProxyAdminBase):
-    """The admin of the graph proxy: it shows the Graph entry on the admin index, which opens the graph page."""
+class _StaffPageMixin(_ModelAdminMixinBase):
+    """A mixin for the admin of a proxy that only shows a page: staff users may view it, and no user may write."""
 
     def has_add_permission(self, request: HttpRequest) -> bool:
-        """Refuse adding: this proxy is read-only."""
+        """Refuse adding: the page is read-only."""
         return False
 
     def has_change_permission(self, request: HttpRequest, obj: object = None) -> bool:
-        """Refuse changing: this proxy is read-only."""
+        """Refuse changing: the page is read-only."""
         return False
 
     def has_delete_permission(self, request: HttpRequest, obj: object = None) -> bool:
-        """Refuse deleting: this proxy is read-only."""
+        """Refuse deleting: the page is read-only."""
         return False
 
     def has_view_permission(self, request: HttpRequest, obj: object = None) -> bool:
         """Allow viewing for staff users."""
         return request.user.is_staff
 
+
+@admin.register(CategoryGraphProxy)
+class CategoryGraphProxyAdmin(_StaffPageMixin, _GraphProxyAdminBase):
+    """The admin of the graph proxy: it shows the Graph entry on the admin index, which opens the graph page."""
+
     def changelist_view(self, request: HttpRequest, extra_context: object = None) -> HttpResponse:
         """Redirect the change list to the graph page."""
 
-        return HttpResponseRedirect(reverse("admin:taxomesh_contrib_django_graph"))
+        return HttpResponseRedirect(reverse(f"admin:{GRAPH_URL_NAME}"))
 
 
 # ---------------------------------------------------------------------------
@@ -1929,24 +1837,8 @@ class CategoryGraphProxyAdmin(_GraphProxyAdminBase):
 
 
 @admin.register(TaxomeshDebugProxy)
-class TaxomeshDebugProxyAdmin(_DebugProxyAdminBase):
+class TaxomeshDebugProxyAdmin(_StaffPageMixin, _DebugProxyAdminBase):
     """The admin of the debug proxy: a page that shows what the service reports about itself."""
-
-    def has_add_permission(self, request: HttpRequest) -> bool:
-        """Refuse adding: the debug page is read-only."""
-        return False
-
-    def has_change_permission(self, request: HttpRequest, obj: TaxomeshDebugProxy | None = None) -> bool:
-        """Refuse changing: the debug page is read-only."""
-        return False
-
-    def has_delete_permission(self, request: HttpRequest, obj: TaxomeshDebugProxy | None = None) -> bool:
-        """Refuse deleting: the debug page is read-only."""
-        return False
-
-    def has_view_permission(self, request: HttpRequest, obj: TaxomeshDebugProxy | None = None) -> bool:
-        """Allow staff users to view the debug page."""
-        return request.user.is_staff
 
     # Any: an override takes what django-stubs' ModelAdmin.changelist_view takes, a context of any values.
     def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
@@ -1962,10 +1854,9 @@ class TaxomeshDebugProxyAdmin(_DebugProxyAdminBase):
         """
 
         # Any: template context, one row per key; its values are TaxomeshInfo's, of several types.
-        debug_info: dict[str, Any] = {}
+        debug_info: dict[str, Any]
         try:
-            svc = TaxomeshService(repository=DjangoRepository())
-            info = svc.info
+            info = _new_service().info
             # Flattened into the rows debug.html walks, one key per row, each named as the info
             # names it.
             debug_info = {

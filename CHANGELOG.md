@@ -11,6 +11,24 @@ The full entries of that series are in
 The changes of 1.0.0 were first dated as 0.2.0 in this file, on 2026-10-12; that version was never
 tagged or published.
 
+## [1.0.2] — 2026-10-18
+
+1.0.2 changes how the code is written, not what it does: each step that the code repeated is
+written once. No public name or signature changes.
+
+### Changed
+
+- The collections, the repositories, the Django admin, the command line and the HTTP request
+  schemas each write a repeated step once: one builder of a search candidate, one read of a row or
+  its not-found error, one versioned save and one query of each shape on Django, one upsert and one
+  removal for the four kinds of link in the file repositories, and one handler of a refused write in
+  the admin. The answers, the errors and their messages, the order of results, and the reads and
+  the number of queries that each member makes stay the same.
+- The admin's reparent view reads the one category that it moves to refuse the implicit root, not
+  every category, and the admin's version tag reads `taxomesh.__version__`.
+- `sort_modes` is an attribute of `CategoryModelAdmin`, where `docs/django-integration.md` documents
+  it, and no longer of `TaxomeshAdminMixin`, which every taxomesh admin shares.
+
 ## [1.0.1] — 2026-10-18
 
 1.0.1 fixes what a move or a reorder reads, the `before` of a move, the check of the service's

@@ -15,7 +15,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from stat import S_ISDIR
 from typing import Concatenate, Final, Literal, NamedTuple
 from uuid import UUID
 
@@ -88,6 +87,73 @@ def _writing[S: FileRepositoryBase, **P, R](method: Callable[Concatenate[S, P], 
     return locked
 
 
+# The key of each kind of link: the fields that name one link of the kind.
+def _tag_link_key(link: ItemTagLink) -> tuple[UUID, UUID]:
+    return link.item_id, link.tag_id
+
+
+def _parent_link_key(link: CategoryParentLink) -> tuple[UUID, UUID]:
+    return link.category_id, link.parent_category_id
+
+
+def _placement_key(link: ItemParentLink) -> tuple[UUID, UUID]:
+    return link.item_id, link.category_id
+
+
+def _relation_key(link: ItemRelationLink) -> tuple[UUID, UUID, str]:
+    return link.source_item_id, link.target_item_id, link.relation_type
+
+
+def _upsert[L](links: list[L], link: L, key: Callable[[L], object]) -> None:
+    """Put ``link`` in the place of the first link with its key, or append it when no link has its key."""
+    wanted = key(link)
+    for index, existing in enumerate(links):
+        if key(existing) == wanted:
+            links[index] = link
+            return
+    links.append(link)
+
+
+def _discard[L](links: list[L], key: Callable[[L], object], wanted: object) -> bool:
+    """Remove each link whose key is ``wanted``, and return whether one was there.
+
+    The list changes in place. The copy of memory that a write takes before it starts holds other
+    lists, so a failed write still puts back the links (see ``_writing``).
+    """
+    kept = [link for link in links if key(link) != wanted]
+    removed = len(kept) < len(links)
+    links[:] = kept
+    return removed
+
+
+def _rows_by_id[R: (Category, Item)](
+    rows: Mapping[UUID, R], row_ids: Collection[UUID], enabled: bool | None
+) -> dict[UUID, R]:
+    """Return the rows whose identifier is in ``row_ids``, by identifier.
+
+    ``enabled=None`` keeps every such row, and ``True`` or ``False`` keeps the rows with that value.
+    """
+    result: dict[UUID, R] = {}
+    for row_id in row_ids:
+        row = rows.get(row_id)
+        if row is not None and (enabled is None or row.enabled == enabled):
+            result[row_id] = row
+    return result
+
+
+# The order of the relations of one item, and of a batch read in both directions.
+def _relation_order(link: ItemRelationLink) -> tuple[int, str, str]:
+    return link.sort_index, str(link.source_item_id), str(link.target_item_id)
+
+
+# The order of a batch relation read, by direction.
+_BATCH_RELATION_ORDER: Final[dict[str, Callable[[ItemRelationLink], tuple[object, ...]]]] = {
+    "outgoing": lambda lnk: (str(lnk.source_item_id), lnk.relation_type, lnk.sort_index, str(lnk.target_item_id)),
+    "incoming": lambda lnk: (str(lnk.target_item_id), lnk.relation_type, lnk.sort_index, str(lnk.source_item_id)),
+    "both": _relation_order,
+}
+
+
 class _Contents(NamedTuple):
     """What a file store holds in memory: its rows and its links, as the file holds them."""
 
@@ -142,23 +208,22 @@ class FileRepositoryBase(ABC):
         self._categories: dict[UUID, Category] = {}
         self._items: dict[UUID, Item] = {}
         self._tags: dict[UUID, Tag] = {}
-        self._links: list[ItemTagLink] = []
+        self._item_tag_links: list[ItemTagLink] = []
         self._category_parent_links: list[CategoryParentLink] = []
         self._item_parent_links: list[ItemParentLink] = []
         self._item_relation_links: list[ItemRelationLink] = []
 
         status = self._stat()
-        if status is not None and S_ISDIR(status.st_mode):
-            raise TaxomeshRepositoryError(f"path is a directory, not a file: {self._path}")
-
-        if status is not None:
-            self._load()
-        else:
+        if status is None:
             try:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
                 raise TaxomeshRepositoryError(f"Could not write {self._path}: {exc}") from exc
             self._flush()
+        elif stat.S_ISDIR(status.st_mode):
+            raise TaxomeshRepositoryError(f"path is a directory, not a file: {self._path}")
+        else:
+            self._load()
 
     def __repr__(self) -> str:
         """Render as the constructor call that opens the same file."""
@@ -257,7 +322,7 @@ class FileRepositoryBase(ABC):
             categories=dict(self._categories),
             items=dict(self._items),
             tags=dict(self._tags),
-            item_tag_links=list(self._links),
+            item_tag_links=list(self._item_tag_links),
             category_parent_links=list(self._category_parent_links),
             item_parent_links=list(self._item_parent_links),
             item_relation_links=list(self._item_relation_links),
@@ -271,7 +336,7 @@ class FileRepositoryBase(ABC):
         them.
         """
         self._categories, self._items, self._tags = contents.categories, contents.items, contents.tags
-        self._links = contents.item_tag_links
+        self._item_tag_links = contents.item_tag_links
         self._category_parent_links = contents.category_parent_links
         self._item_parent_links = contents.item_parent_links
         self._item_relation_links = contents.item_relation_links
@@ -336,7 +401,9 @@ class FileRepositoryBase(ABC):
         names that row. Loading calls it too, so a store that holds such links loads without them
         and is written without them on the next save.
         """
-        self._links = [lnk for lnk in self._links if lnk.item_id in self._items and lnk.tag_id in self._tags]
+        self._item_tag_links = [
+            lnk for lnk in self._item_tag_links if lnk.item_id in self._items and lnk.tag_id in self._tags
+        ]
         self._category_parent_links = [
             lnk
             for lnk in self._category_parent_links
@@ -359,7 +426,7 @@ class FileRepositoryBase(ABC):
             "categories": {str(k): v.model_dump(mode="json") for k, v in self._categories.items()},
             "items": {str(k): v.model_dump(mode="json") for k, v in self._items.items()},
             "tags": {str(k): v.model_dump(mode="json") for k, v in self._tags.items()},
-            "item_tag_links": [lnk.model_dump(mode="json") for lnk in self._links],
+            "item_tag_links": [lnk.model_dump(mode="json") for lnk in self._item_tag_links],
             "category_parent_links": [lnk.model_dump(mode="json") for lnk in self._category_parent_links],
             "item_parent_links": [lnk.model_dump(mode="json") for lnk in self._item_parent_links],
             "item_relation_links": [lnk.model_dump(mode="json") for lnk in self._item_relation_links],
@@ -676,9 +743,9 @@ class FileRepositoryBase(ABC):
             TaxomeshRepositoryError: If another writer changed the file since this repository read
                 it, or the file cannot be written; nothing is written.
         """
-        already_linked = any(lnk.tag_id == tag_id and lnk.item_id == item_id for lnk in self._links)
+        already_linked = any(_tag_link_key(lnk) == (item_id, tag_id) for lnk in self._item_tag_links)
         if not already_linked:
-            self._links.append(ItemTagLink(tag_id=tag_id, item_id=item_id))
+            self._item_tag_links.append(ItemTagLink(tag_id=tag_id, item_id=item_id))
             self._flush()
 
     @_writing
@@ -696,12 +763,10 @@ class FileRepositoryBase(ABC):
             TaxomeshRepositoryError: If another writer changed the file since this repository read
                 it, or the file cannot be written; nothing is written.
         """
-        before = len(self._links)
-        self._links = [lnk for lnk in self._links if not (lnk.tag_id == tag_id and lnk.item_id == item_id)]
-        if len(self._links) < before:
-            self._flush()
-            return True
-        return False
+        if not _discard(self._item_tag_links, _tag_link_key, (item_id, tag_id)):
+            return False
+        self._flush()
+        return True
 
     @_reading
     def list_item_tag_links(
@@ -722,7 +787,7 @@ class FileRepositoryBase(ABC):
         Returns:
             The matching tag links, ordered by ``(item_id ASC, tag_id ASC)``.
         """
-        links: list[ItemTagLink] = self._links
+        links: list[ItemTagLink] = self._item_tag_links
         if item_ids is not None:
             wanted_items = set(item_ids)
             links = [lnk for lnk in links if lnk.item_id in wanted_items]
@@ -749,12 +814,7 @@ class FileRepositoryBase(ABC):
             TaxomeshRepositoryError: If another writer changed the file since this repository read
                 it, or the file cannot be written; nothing is written.
         """
-        for i, existing in enumerate(self._category_parent_links):
-            if existing.category_id == link.category_id and existing.parent_category_id == link.parent_category_id:
-                self._category_parent_links[i] = link
-                self._flush()
-                return
-        self._category_parent_links.append(link)
+        _upsert(self._category_parent_links, link, _parent_link_key)
         self._flush()
 
     @_reading
@@ -808,12 +868,7 @@ class FileRepositoryBase(ABC):
             TaxomeshRepositoryError: If another writer changed the file since this repository read
                 it, or the file cannot be written; nothing is written.
         """
-        for i, existing in enumerate(self._item_parent_links):
-            if existing.item_id == link.item_id and existing.category_id == link.category_id:
-                self._item_parent_links[i] = link
-                self._flush()
-                return
-        self._item_parent_links.append(link)
+        _upsert(self._item_parent_links, link, _placement_key)
         self._flush()
 
     @_reading
@@ -861,16 +916,10 @@ class FileRepositoryBase(ABC):
             TaxomeshRepositoryError: If another writer changed the file since this repository read
                 it, or the file cannot be written; nothing is written.
         """
-        before = len(self._category_parent_links)
-        self._category_parent_links = [
-            lnk
-            for lnk in self._category_parent_links
-            if not (lnk.category_id == category_id and lnk.parent_category_id == parent_category_id)
-        ]
-        if len(self._category_parent_links) < before:
-            self._flush()
-            return True
-        return False
+        if not _discard(self._category_parent_links, _parent_link_key, (category_id, parent_category_id)):
+            return False
+        self._flush()
+        return True
 
     @_writing
     def delete_item_parent_link(self, item_id: UUID, category_id: UUID) -> bool:
@@ -887,14 +936,10 @@ class FileRepositoryBase(ABC):
             TaxomeshRepositoryError: If another writer changed the file since this repository read
                 it, or the file cannot be written; nothing is written.
         """
-        before = len(self._item_parent_links)
-        self._item_parent_links = [
-            lnk for lnk in self._item_parent_links if not (lnk.item_id == item_id and lnk.category_id == category_id)
-        ]
-        if len(self._item_parent_links) < before:
-            self._flush()
-            return True
-        return False
+        if not _discard(self._item_parent_links, _placement_key, (item_id, category_id)):
+            return False
+        self._flush()
+        return True
 
     # ------------------------------------------------------------------
     # Item relation links
@@ -915,16 +960,7 @@ class FileRepositoryBase(ABC):
             TaxomeshRepositoryError: If another writer changed the file since this repository read
                 it, or the file cannot be written; nothing is written.
         """
-        for i, existing in enumerate(self._item_relation_links):
-            if (
-                existing.source_item_id == link.source_item_id
-                and existing.target_item_id == link.target_item_id
-                and existing.relation_type == link.relation_type
-            ):
-                self._item_relation_links[i] = link
-                self._flush()
-                return
-        self._item_relation_links.append(link)
+        _upsert(self._item_relation_links, link, _relation_key)
         self._flush()
 
     @_reading
@@ -949,17 +985,7 @@ class FileRepositoryBase(ABC):
             The matching relations, ordered by ``(sort_index ASC, source_item_id ASC,
             target_item_id ASC)``; empty when none match.
         """
-        require_relation_types(relation_types)
-        if direction == "outgoing":
-            result = [lnk for lnk in self._item_relation_links if lnk.source_item_id == item_id]
-        elif direction == "incoming":
-            result = [lnk for lnk in self._item_relation_links if lnk.target_item_id == item_id]
-        else:  # "both" — links where item_id is on either end, each link once
-            result = [lnk for lnk in self._item_relation_links if item_id in (lnk.source_item_id, lnk.target_item_id)]
-        if relation_types:
-            type_set = set(relation_types)
-            result = [lnk for lnk in result if lnk.relation_type in type_set]
-        return sorted(result, key=lambda lnk: (lnk.sort_index, str(lnk.source_item_id), str(lnk.target_item_id)))
+        return sorted(self._relations_of((item_id,), relation_types, direction), key=_relation_order)
 
     @_reading
     def list_item_relation_links_batch(
@@ -970,34 +996,43 @@ class FileRepositoryBase(ABC):
         direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[ItemRelationLink]:
         """Return the relations of many items in one pass over the stored relations, by direction."""
+        relations = self._relations_of(set(item_ids), relation_types, direction)
+        return sorted(relations, key=_BATCH_RELATION_ORDER[direction])
+
+    def _relations_of(
+        self,
+        item_ids: Collection[UUID],
+        relation_types: Collection[str] | None,
+        direction: Literal["outgoing", "incoming", "both"],
+    ) -> list[ItemRelationLink]:
+        """Return the stored relations that have one of ``item_ids`` at the end that ``direction`` names.
+
+        ``"both"`` matches either end, and returns each relation once.
+
+        Args:
+            item_ids: The identifiers of the items: a set for many items, or a tuple for one item. A
+                member test on a tuple of one is one comparison and no hash, so it costs less than
+                on a set.
+            relation_types: The relation types to keep. ``None`` or an empty collection is no filter.
+            direction: ``"outgoing"``, ``"incoming"`` or ``"both"``.
+
+        Raises:
+            TypeError: If ``relation_types`` is a ``str``, even when ``item_ids`` is empty.
+        """
         require_relation_types(relation_types)
-        id_set = set(item_ids)
-        if not id_set:
+        if not item_ids:
             return []
+        links = self._item_relation_links
         if direction == "outgoing":
-            result = [lnk for lnk in self._item_relation_links if lnk.source_item_id in id_set]
+            relations = [lnk for lnk in links if lnk.source_item_id in item_ids]
         elif direction == "incoming":
-            result = [lnk for lnk in self._item_relation_links if lnk.target_item_id in id_set]
+            relations = [lnk for lnk in links if lnk.target_item_id in item_ids]
         else:
-            result = [
-                lnk
-                for lnk in self._item_relation_links
-                if lnk.source_item_id in id_set or lnk.target_item_id in id_set
-            ]
+            relations = [lnk for lnk in links if lnk.source_item_id in item_ids or lnk.target_item_id in item_ids]
         if relation_types:
-            type_set = set(relation_types)
-            result = [lnk for lnk in result if lnk.relation_type in type_set]
-        if direction == "outgoing":
-            return sorted(
-                result,
-                key=lambda lnk: (str(lnk.source_item_id), lnk.relation_type, lnk.sort_index, str(lnk.target_item_id)),
-            )
-        if direction == "incoming":
-            return sorted(
-                result,
-                key=lambda lnk: (str(lnk.target_item_id), lnk.relation_type, lnk.sort_index, str(lnk.source_item_id)),
-            )
-        return sorted(result, key=lambda lnk: (lnk.sort_index, str(lnk.source_item_id), str(lnk.target_item_id)))
+            wanted_types = set(relation_types)
+            relations = [lnk for lnk in relations if lnk.relation_type in wanted_types]
+        return relations
 
     @_writing
     def delete_item_relation_link(
@@ -1020,20 +1055,10 @@ class FileRepositoryBase(ABC):
             TaxomeshRepositoryError: If another writer changed the file since this repository read
                 it, or the file cannot be written; nothing is written.
         """
-        before = len(self._item_relation_links)
-        self._item_relation_links = [
-            lnk
-            for lnk in self._item_relation_links
-            if not (
-                lnk.source_item_id == source_item_id
-                and lnk.target_item_id == target_item_id
-                and lnk.relation_type == relation_type
-            )
-        ]
-        if len(self._item_relation_links) < before:
-            self._flush()
-            return True
-        return False
+        if not _discard(self._item_relation_links, _relation_key, (source_item_id, target_item_id, relation_type)):
+            return False
+        self._flush()
+        return True
 
     # ------------------------------------------------------------------
     # External-ID lookup
@@ -1082,12 +1107,7 @@ class FileRepositoryBase(ABC):
             A dict from the identifier of each stored item to its row. An identifier that names no
             stored item is left out of the dict, and no error is raised.
         """
-        result: dict[UUID, Item] = {}
-        for item_id in item_ids:
-            item = self._items.get(item_id)
-            if item is not None and (enabled is None or item.enabled == enabled):
-                result[item_id] = item
-        return result
+        return _rows_by_id(self._items, item_ids, enabled)
 
     @_reading
     def map_categories_by_id(
@@ -1107,12 +1127,7 @@ class FileRepositoryBase(ABC):
             A dict from the identifier of each stored category to its row. An identifier that
             names no stored category is left out of the dict, and no error is raised.
         """
-        result: dict[UUID, Category] = {}
-        for category_id in category_ids:
-            category = self._categories.get(category_id)
-            if category is not None and (enabled is None or category.enabled == enabled):
-                result[category_id] = category
-        return result
+        return _rows_by_id(self._categories, category_ids, enabled)
 
     @_reading
     def map_items_by_external_id(
