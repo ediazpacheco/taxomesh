@@ -4,18 +4,17 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from taxomesh.domain.constants import (
     AUDIT_EPOCH,
     DEFAULT_ITEM_EXTERNAL_ID,
     DEFAULT_VERSION,
-    MAX_EXTERNAL_ID_STR_LENGTH,
     MAX_ITEM_NAME_LENGTH,
     MAX_SLUG_LENGTH,
 )
 from taxomesh.domain.models.base import MetadataModelBase, _build_str_repr
-from taxomesh.domain.types import ExternalId, FrozenDict, Metadata, normalise_external_id
+from taxomesh.domain.types import FrozenDict, Metadata, StoredExternalId
 
 
 class Item(MetadataModelBase):
@@ -40,19 +39,13 @@ class Item(MetadataModelBase):
 
     item_id: UUID = Field(default_factory=uuid4)
     name: Annotated[str, Field(max_length=MAX_ITEM_NAME_LENGTH)]
-    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = DEFAULT_ITEM_EXTERNAL_ID
+    external_id: StoredExternalId = DEFAULT_ITEM_EXTERNAL_ID
     slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
     enabled: bool = True
     metadata: Metadata = Field(default_factory=FrozenDict)
     created_at: datetime = Field(default=AUDIT_EPOCH)
     updated_at: datetime = Field(default=AUDIT_EPOCH)
     version: Annotated[int, Field(ge=0)] = DEFAULT_VERSION
-
-    @field_validator("external_id", mode="before")
-    @classmethod
-    def _coerce_external_id(cls, v: ExternalId) -> str | None:
-        """Convert the external id through the one rule, so a model built here and a lookup agree."""
-        return normalise_external_id(v)
 
     def __str__(self) -> str:
         return _build_str_repr(self.name, self.item_id, self.slug, self.external_id)

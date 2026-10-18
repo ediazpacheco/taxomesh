@@ -38,6 +38,7 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
 
     _not_found: ClassVar[type[TaxomeshNotFoundError]] = TaxomeshTagNotFoundError
     _namespace: ClassVar[str] = "tags"
+    _kind: ClassVar[str] = "tag"
 
     def __getitem__(self, key: TagRef, /) -> Tag:
         """Return the tag this names, or raise.
@@ -56,15 +57,14 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
             This calls the port's ``find_tag`` directly, with no cache, and turns its ``None`` into
             the error.
         """
-        tag_id = tag_id_of(key)
-        found = self._service.repository.find_tag(tag_id)
-        if found is None:
-            raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
-        return found
+        return self._require_stored(tag_id_of(key))
 
     def _all(self) -> Sequence[Tag]:
         """Return every stored tag — the set ``len`` counts."""
-        return tuple(self._service.repository.list_tags())
+        return tuple(self._repo.list_tags())
+
+    def _find(self, tag_id: UUID, /) -> Tag | None:
+        return self._repo.find_tag(tag_id)
 
     def get_many(self, tags: TagRef | Collection[TagRef], /) -> Mapping[UUID, Tag]:
         """Return the tags these name, keyed by identifier.
@@ -92,7 +92,7 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
     @memoize
     def _fetch(self, tag_ids: frozenset[UUID], /) -> dict[UUID, Tag]:
         """The cached read behind :meth:`get_many`, keyed by the set of identifiers."""
-        return dict(self._service.repository.map_tags_by_id(tag_ids))
+        return dict(self._repo.map_tags_by_id(tag_ids))
 
     def delete(self, key: TagRef, /) -> None:
         """Delete a tag, and remove it from every item that carries it.
@@ -106,8 +106,8 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
         """
         tag_id = tag_id_of(key)
         with self._atomic():
-            if not self._service.repository.delete_tag(tag_id):
-                raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
+            if not self._repo.delete_tag(tag_id):
+                raise self._missing(tag_id)
 
     def list(self, *, item: ItemRef | None = None) -> Sequence[Tag]:
         """Return tags — every one, or those an item carries.
@@ -137,15 +137,15 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
     def _listing(self, item_id: UUID | None, /) -> Sequence[Tag]:
         """The cached read behind :meth:`list`, keyed by the item's identifier."""
         if item_id is None:
-            return tuple(self._service.repository.list_tags())
+            return self._all()
         self._service.items[item_id]
-        links = self._service.repository.list_item_tag_links(item_ids=[item_id])
+        links = self._repo.list_item_tag_links(item_ids=[item_id])
         if not links:
             return ()
-        found = self._service.repository.map_tags_by_id({link.tag_id for link in links})
+        found = self._repo.map_tags_by_id({link.tag_id for link in links})
         missing = next((link.tag_id for link in links if link.tag_id not in found), None)
         if missing is not None:
-            raise TaxomeshTagNotFoundError(f"Tag not found: {missing}")
+            raise self._missing(missing)
         return tuple(sorted(found.values(), key=lambda tag: (tag.name, str(tag.tag_id))))
 
     # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
@@ -175,7 +175,7 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
                 metadata=metadata if metadata is not None else {},
             )
         with self._atomic():
-            self._service.repository.save_tag(tag)
+            self._repo.save_tag(tag)
         return tag
 
     # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
@@ -210,5 +210,5 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
         tag_id = tag_id_of(tag)
         with self._atomic():
             changed = _changed(self[tag_id], changes)
-            self._service.repository.save_tag(changed)
+            self._repo.save_tag(changed)
         return changed

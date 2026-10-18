@@ -6,13 +6,14 @@ import builtins
 import logging
 from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple
 from uuid import UUID
 
 from taxomesh.application.collections.base import (
     _as_validation_error,
     _changed,
     _given,
+    _in_order,
     _normalise_external_ids,
     _position_among,
     _require_collection,
@@ -22,14 +23,14 @@ from taxomesh.application.collections.base import (
     _require_sequence,
     _require_text,
     _require_version,
+    _selects,
     _UniqueKeysCollection,
 )
 from taxomesh.application.search import (
     DEFAULT_SEARCH_LIMIT,
-    SearchCandidate,
     SearchCorpus,
+    candidate_of,
     normalize,
-    score_and_rank,
     score_corpus,
 )
 from taxomesh.domain.constants import DEFAULT_ITEM_EXTERNAL_ID
@@ -37,13 +38,15 @@ from taxomesh.domain.dag import collect_subtree
 from taxomesh.domain.models import Item, ItemParentLink, ItemRelationLink, ItemTagLink
 from taxomesh.domain.refs import CategoryRef, ItemRef, TagRef, category_id_of, item_id_of, tag_id_of
 from taxomesh.domain.related import RelatedItems
-from taxomesh.domain.types import UNSET, Direction, ExternalId, UnsetType, normalise_external_id
-from taxomesh.exceptions import (
-    TaxomeshItemNotFoundError,
-    TaxomeshNotFoundError,
-    TaxomeshTagNotFoundError,
-    TaxomeshValidationError,
+from taxomesh.domain.types import (
+    UNSET,
+    Direction,
+    ExternalId,
+    UnsetType,
+    normalise_external_id,
+    normalise_relation_type,
 )
+from taxomesh.exceptions import TaxomeshItemNotFoundError, TaxomeshNotFoundError, TaxomeshValidationError
 from taxomesh.utils.memoize import ReadCache, memoize
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle broken for type checking only
@@ -104,52 +107,25 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         **Nothing primes this method**, unlike the category one: the cache has no size bound and
         item rows are large, so a listing does not keep every row that it read.
 
-        Args:
-            item_id: The identifier of the item.
-
-        Returns:
-            The stored ``Item``.
-
         Raises:
             TaxomeshItemNotFoundError: If no item with this identifier is stored.
         """
-        result = self._service.repository.find_item(item_id)
-        if result is None:
-            raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
-        return result
+        return self._require_stored(item_id)
 
     def _holder_of_slug(self, slug: str) -> UUID | None:
-        found = self._service.repository.find_item_by_slug(slug)
+        found = self._repo.find_item_by_slug(slug)
         return None if found is None else found.item_id
 
     def _holder_of_external_id(self, external_id: str) -> UUID | None:
-        found = self._service.repository.find_item_by_external_id(external_id)
+        found = self._repo.find_item_by_external_id(external_id)
         return None if found is None else found.item_id
 
-    def _require_stored(self, item_id: UUID, /) -> Item:
-        """Return the stored item that a write names.
-
-        Reads storage directly, and not through the cache, because a write checks, and builds on,
-        what it is about to change: a row that another service changed or deleted after this
-        service read it is seen as it is stored.
-
-        Args:
-            item_id: The identifier that a write names.
-
-        Returns:
-            The stored ``Item``.
-
-        Raises:
-            TaxomeshItemNotFoundError: If no item with this identifier is stored.
-        """
-        found = self._service.repository.find_item(item_id)
-        if found is None:
-            raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
-        return found
+    def _find(self, item_id: UUID, /) -> Item | None:
+        return self._repo.find_item(item_id)
 
     def _all(self) -> Sequence[Item]:
         """Return every stored item, with no filter: the rows that ``len`` counts."""
-        return tuple(self._service.repository.list_items(enabled=None))
+        return tuple(self._repo.list_items(enabled=None))
 
     def get_many(
         self,
@@ -187,7 +163,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     @memoize
     def _fetch(self, item_ids: frozenset[UUID], enabled: bool | None, /) -> dict[UUID, Item]:
         """The cached read behind :meth:`get_many`, keyed by the set of identifiers."""
-        return dict(self._service.repository.map_items_by_id(item_ids, enabled=enabled))
+        return dict(self._repo.map_items_by_id(item_ids, enabled=enabled))
 
     def delete(self, key: ItemRef, /) -> None:
         """Delete an item, with its placements, its tags and its relations in either direction.
@@ -203,8 +179,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         """
         item_id = item_id_of(key)
         with self._atomic(then=self._corpus.invalidate):
-            if not self._service.repository.delete_item(item_id):
-                raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
+            if not self._repo.delete_item(item_id):
+                raise self._missing(item_id)
 
     def get_by_slug(self, slug: str, /) -> Item | None:
         """Return the item with this slug, or ``None``.
@@ -228,7 +204,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     @memoize
     def _by_slug(self, slug: str, /) -> Item | None:
         """The cached read behind :meth:`get_by_slug`, for a slug that is not empty."""
-        return self._service.repository.find_item_by_slug(slug)
+        return self._repo.find_item_by_slug(slug)
 
     def get_by_external_id(self, external_id: ExternalId, /) -> Item | None:
         """Return the item with this external id, or ``None``.
@@ -256,7 +232,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     @memoize
     def _by_external_id(self, external_id: str, /) -> Item | None:
         """The cached read behind :meth:`get_by_external_id`, keyed by the stored form."""
-        return self._service.repository.find_item_by_external_id(external_id)
+        return self._repo.find_item_by_external_id(external_id)
 
     def get_many_by_external_id(
         self,
@@ -291,17 +267,12 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         normalised = _normalise_external_ids(external_ids)
         if not normalised:
             return {}
-        return dict(self._fetch_by_external_ids(normalised, enabled=enabled))
+        return dict(self._fetch_by_external_ids(normalised, enabled))
 
     @memoize
-    def _fetch_by_external_ids(
-        self,
-        external_ids: frozenset[str],
-        *,
-        enabled: bool | None = None,
-    ) -> dict[str, Item]:
+    def _fetch_by_external_ids(self, external_ids: frozenset[str], enabled: bool | None, /) -> dict[str, Item]:
         """The cached read behind :meth:`get_many_by_external_id`, keyed by the set of stored external ids."""
-        return dict(self._service.repository.map_items_by_external_id(external_ids, enabled=enabled))
+        return dict(self._repo.map_items_by_external_id(external_ids, enabled=enabled))
 
     def list(
         self,
@@ -362,8 +333,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         """The cached read behind :meth:`list`, keyed by identifiers."""
         if category_id is None:
             if tag_id is None:
-                return tuple(self._service.repository.list_items(enabled=enabled))
-            tagged = self._in_order(self._tagged_item_ids(tag_id), enabled=enabled)
+                return tuple(self._repo.list_items(enabled=enabled))
+            tagged = self._read_in_order(self._tagged_item_ids(tag_id), enabled)
             return tuple(sorted(tagged, key=lambda item: (item.name, str(item.item_id))))
         self._service.categories[category_id]
         ordered_ids: list[UUID]
@@ -371,14 +342,13 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             ordered_ids = self._ordered_subtree_item_ids(category_id)
         else:
             links = sorted(
-                self._service.repository.list_item_parent_links(category_ids=[category_id]),
-                key=lambda lnk: lnk.sort_index,
+                self._repo.list_item_parent_links(category_ids=[category_id]), key=lambda lnk: lnk.sort_index
             )
             ordered_ids = [lnk.item_id for lnk in links]
         if tag_id is not None:
             tagged_ids = set(self._tagged_item_ids(tag_id))
             ordered_ids = [item_id for item_id in ordered_ids if item_id in tagged_ids]
-        return self._in_order(ordered_ids, enabled=enabled)
+        return self._read_in_order(ordered_ids, enabled)
 
     def _tagged_item_ids(self, tag_id: UUID) -> builtins.list[UUID]:
         """Return the identifiers of the items that have this tag, in the port's link order.
@@ -387,26 +357,17 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             TaxomeshTagNotFoundError: If the tag is not stored.
         """
         self._service.tags[tag_id]
-        return [link.item_id for link in self._service.repository.list_item_tag_links(tag_ids=[tag_id])]
+        return [link.item_id for link in self._repo.list_item_tag_links(tag_ids=[tag_id])]
 
-    def _in_order(self, ordered_ids: builtins.list[UUID], *, enabled: bool | None) -> tuple[Item, ...]:
-        """Read the row of each identifier, in the order given, then apply the ``enabled`` filter.
+    def _read_in_order(self, item_ids: builtins.list[UUID], enabled: bool | None, /) -> tuple[Item, ...]:
+        """Read these items in one batch with no filter, and return them in this order after the ``enabled`` filter.
 
         Raises:
             TaxomeshItemNotFoundError: If an identifier names no stored item.
         """
-        if not ordered_ids:
+        if not item_ids:
             return ()
-        # Read in ONE batch, with no filter: a disabled item must stay different from a deleted
-        # one, because an absent key raises below.
-        item_map = self._service.repository.map_items_by_id(set(ordered_ids), enabled=None)
-        items: list[Item] = []
-        for item_id in ordered_ids:
-            found = item_map.get(item_id)
-            if found is None:
-                raise TaxomeshItemNotFoundError(f"Item not found: {item_id}")
-            items.append(found)
-        return tuple(i for i in items if enabled is None or i.enabled == enabled)
+        return _in_order(item_ids, self._repo.map_items_by_id(set(item_ids), enabled=None), enabled, self._missing)
 
     def search(
         self,
@@ -459,47 +420,13 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
                 self._service.categories[category_id]
             return ()
 
-        norm_q = normalize(query)
         if category_id is None:
-            corpus = self._get_item_corpus()
-            filtered = [sc for sc in corpus if enabled is None or sc.obj.enabled == enabled]
-            return score_corpus(norm_q, filtered, fuzzy=fuzzy, limit=limit)
-        candidates = self._load_item_candidates(category_id=category_id, recursive=recursive, enabled=enabled)
-        return score_and_rank(
-            norm_q,
-            candidates,
-            get_name=lambda i: i.name,
-            get_slug=lambda i: i.slug,
-            get_ext=lambda i: i.external_id,
-            fuzzy=fuzzy,
-            limit=limit,
-        )
-
-    def _get_item_corpus(self) -> builtins.list[SearchCandidate[Item]]:
-        """Build and hold the search candidates of every item, with their fields normalized.
-
-        Returns the held corpus while it is held. Otherwise it reads every item from the
-        repository, normalizes the fields of each candidate once, gives the result to the corpus
-        that the service holds, and returns it. The corpus keeps it for the cache's lifetime; a
-        create, update or delete of an item here drops it sooner.
-
-        Returns:
-            One ``SearchCandidate`` for each item.
-        """
-        held = self._corpus.candidates
-        if held is not None:
-            return held
-        return self._corpus.hold(
-            [
-                SearchCandidate(
-                    obj=item,
-                    norm_name=normalize(item.name),
-                    norm_slug=normalize(item.slug),
-                    norm_ext=(normalize(item.external_id) if item.external_id is not None else ""),
-                )
-                for item in self._service.repository.list_items(enabled=None)
-            ]
-        )
+            corpus = self._corpus.held_or(lambda: [candidate_of(row) for row in self._all()])
+            pool = [candidate for candidate in corpus if _selects(enabled, candidate.obj)]
+        else:
+            rows = self._load_item_candidates(category_id=category_id, recursive=recursive, enabled=enabled)
+            pool = [candidate_of(row) for row in rows]
+        return score_corpus(normalize(query), pool, fuzzy=fuzzy, limit=limit)
 
     def _ordered_subtree_item_ids(self, category_id: UUID) -> builtins.list[UUID]:
         """Return the identifiers of the items placed in this category or in a descendant, each once.
@@ -524,13 +451,13 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             The item identifiers, in listing order.
         """
         children: dict[UUID, list[UUID]] = {}
-        for parent_link in self._service.repository.list_category_parent_links():
+        for parent_link in self._repo.list_category_parent_links():
             children.setdefault(parent_link.parent_category_id, []).append(parent_link.category_id)
         # The same traversal as a graph limited by ``root``, not a second one: so there is one
         # answer about cycles and one about order.
         subtree = collect_subtree(category_id, children)
         placements: dict[UUID, list[ItemParentLink]] = {}
-        for placement in self._service.repository.list_item_parent_links(category_ids=subtree):
+        for placement in self._repo.list_item_parent_links(category_ids=subtree):
             placements.setdefault(placement.category_id, []).append(placement)
         # ``dict.fromkeys`` keeps the insertion order, so each item keeps its first placement.
         return list(
@@ -574,7 +501,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         # Unlike ``list``, an identifier that names no stored item is SKIPPED and does not raise:
         # these are search candidates, and one placement of an item that is not stored must not
         # take every result from the caller.
-        item_map = self._service.repository.map_items_by_id(matched_ids, enabled=enabled)
+        item_map = self._repo.map_items_by_id(matched_ids, enabled=enabled)
         return [item_map[item_id] for item_id in matched_ids if item_id in item_map]
 
     def create(
@@ -624,7 +551,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             )
         with self._atomic(then=self._corpus.invalidate):
             self._require_free_slug(item.slug)
-            stored = self._service.repository.save_item(item)
+            stored = self._repo.save_item(item)
         return stored
 
     def update(
@@ -695,7 +622,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             if slug is not UNSET:
                 self._require_free_slug(row.slug, item_id)
             self._require_free_external_id(normalised, item_id)
-            stored = self._service.repository.save_item(row, expected_version=expected_version)
+            stored = self._repo.save_item(row, expected_version=expected_version)
         return stored
 
     def place_in(self, item: ItemRef, category: CategoryRef, *, sort_index: int | None = None) -> ItemParentLink:
@@ -737,11 +664,11 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             self._service.categories._require_stored(category_id)
             if sort_index is None:
                 position = _position_among(
-                    self._service.repository.list_item_parent_links(category_ids=[category_id]),
+                    self._repo.list_item_parent_links(category_ids=[category_id]),
                     stored=lambda lnk: lnk.item_id == item_id,
                 )
                 link = link.model_copy(update={"sort_index": position})
-            self._service.repository.save_item_parent_link(link)
+            self._repo.save_item_parent_link(link)
         return link
 
     def remove_from(self, item: ItemRef, category: CategoryRef) -> None:
@@ -764,7 +691,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         with self._atomic():
             self._require_stored(item_id)
             self._service.categories._require_stored(category_id)
-            self._service.repository.delete_item_parent_link(item_id, category_id)
+            self._repo.delete_item_parent_link(item_id, category_id)
 
     def move(
         self,
@@ -806,7 +733,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             existing_siblings = sorted(
                 [
                     lnk
-                    for lnk in self._service.repository.list_item_parent_links(category_ids=[to_category_id])
+                    for lnk in self._repo.list_item_parent_links(category_ids=[to_category_id])
                     if lnk.item_id != item_id
                 ],
                 key=lambda lnk: lnk.sort_index,
@@ -823,9 +750,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             new_link = ItemParentLink(item_id=item_id, category_id=to_category_id, sort_index=insert_pos)
             existing_siblings.insert(insert_pos, new_link)
 
-            self._service.repository.delete_item_parent_link(item_id, from_category_id)
+            self._repo.delete_item_parent_link(item_id, from_category_id)
             for i, lnk in enumerate(existing_siblings):
-                self._service.repository.save_item_parent_link(lnk.model_copy(update={"sort_index": i}))
+                self._repo.save_item_parent_link(lnk.model_copy(update={"sort_index": i}))
 
         return new_link
 
@@ -850,15 +777,13 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         item_ids = [item_id_of(item) for item in items]
         with self._atomic():
             self._service.categories._require_stored(category_id)
-            existing = {
-                lnk.item_id: lnk for lnk in self._service.repository.list_item_parent_links(category_ids=[category_id])
-            }
+            existing = {lnk.item_id: lnk for lnk in self._repo.list_item_parent_links(category_ids=[category_id])}
             for uid in item_ids:
                 if uid not in existing:
                     raise TaxomeshValidationError(f"Item {uid} is not placed in category {category_id}")
             for sort_index, uid in enumerate(item_ids):
                 link = existing[uid].model_copy(update={"sort_index": sort_index})
-                self._service.repository.save_item_parent_link(link)
+                self._repo.save_item_parent_link(link)
 
     def tag(self, item: ItemRef, tag: TagRef) -> ItemTagLink:
         """Tag an item. Idempotent.
@@ -882,10 +807,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         item_id = item_id_of(item)
         tag_id = tag_id_of(tag)
         with self._atomic():
-            if self._service.repository.find_tag(tag_id) is None:
-                raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
+            self._service.tags._require_stored(tag_id)
             self._require_stored(item_id)
-            self._service.repository.add_item_tag_link(item_id, tag_id)
+            self._repo.add_item_tag_link(item_id, tag_id)
         return ItemTagLink(item_id=item_id, tag_id=tag_id)
 
     def untag(self, item: ItemRef, tag: TagRef) -> None:
@@ -904,10 +828,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         item_id = item_id_of(item)
         tag_id = tag_id_of(tag)
         with self._atomic():
-            if self._service.repository.find_tag(tag_id) is None:
-                raise TaxomeshTagNotFoundError(f"Tag not found: {tag_id}")
+            self._service.tags._require_stored(tag_id)
             self._require_stored(item_id)
-            self._service.repository.delete_item_tag_link(item_id, tag_id)
+            self._repo.delete_item_tag_link(item_id, tag_id)
 
     def relate(
         self,
@@ -965,11 +888,11 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             if sort_index is None:
                 kind = link.relation_type
                 position = _position_among(
-                    self._service.repository.list_item_relation_links(source_item_id),
+                    self._repo.list_item_relation_links(source_item_id),
                     stored=lambda lnk: lnk.target_item_id == target_item_id and lnk.relation_type == kind,
                 )
                 link = link.model_copy(update={"sort_index": position})
-            self._service.repository.save_item_relation_link(link)
+            self._repo.save_item_relation_link(link)
         return link
 
     def unrelate(self, source: ItemRef, target: ItemRef, relation_type: str) -> None:
@@ -991,9 +914,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         source_item_id = item_id_of(source)
         target_item_id = item_id_of(target)
         _require_text("relation_type", relation_type)
-        normalised = relation_type.strip().lower()
+        normalised = normalise_relation_type(relation_type)
         with self._atomic():
-            if self._service.repository.delete_item_relation_link(source_item_id, target_item_id, normalised):
+            if self._repo.delete_item_relation_link(source_item_id, target_item_id, normalised):
                 return
             # A stored link names only stored items, so the two items are looked up only when no
             # link was deleted.
@@ -1048,11 +971,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         Raises:
             TaxomeshItemNotFoundError: If the item is not stored.
         """
-        links = tuple(
-            self._service.repository.list_item_relation_links(
-                item_id, relation_types=relation_types, direction=direction
-            )
-        )
+        links = tuple(self._repo.list_item_relation_links(item_id, relation_types=relation_types, direction=direction))
         if not links:
             self[item_id]
         return links
@@ -1117,15 +1036,13 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             far.append((lnk.target_item_id if is_target else lnk.source_item_id, is_target, lnk.relation_type))
         # Read in ONE batch, with no filter, and with the queried item, so that a warning can name
         # it: a disabled row must stay different from a row that is not stored.
-        item_map = self._service.repository.map_items_by_id({end for end, _, _ in far} | {item_id}, enabled=None)
+        item_map = self._repo.map_items_by_id({end for end, _, _ in far} | {item_id}, enabled=None)
         result: list[Item] = []
         for related_id, is_target, relation_type in far:
             found = item_map.get(related_id)
             if found is None:
-                if logger.isEnabledFor(logging.WARNING):
-                    _log_absent_end("list_related", item_map, item_id, related_id, relation_type, is_target)
-                continue
-            if enabled is None or found.enabled == enabled:
+                _log_absent_end("list_related", item_map, item_id, related_id, relation_type, is_target)
+            elif _selects(enabled, found):
                 result.append(found)
         return tuple(result)
 
@@ -1215,49 +1132,60 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
 
         Reads every direction with **one** batch read of the links
         (:meth:`list_item_relation_links_batch`) and one batch read of the items: two repository
-        calls in all, ``"both"`` included. Each entry is
-        ``(group_key_id, related_id, relation_type, sort_index, related_is_target)``, where
-        ``group_key_id`` is the queried end (the key of the outer dict) and ``related_id`` is the
-        end whose row is returned. For ``"both"``, the entries are sorted again, so that each group
-        lists first the items that the outgoing links give, then those that the incoming links
-        give.
+        calls in all, ``"both"`` included. Each link gives one :class:`_End` for each queried end
+        that it has. For ``"both"``, the ends are sorted again, so that each group lists first the
+        items that the outgoing links give, then those that the incoming links give.
         """
-        links = self._service.repository.list_item_relation_links_batch(
-            item_ids, direction=direction, relation_types=relation_types
-        )
+        links = self._repo.list_item_relation_links_batch(item_ids, direction=direction, relation_types=relation_types)
         if not links:
             return {}
-        entries: list[tuple[UUID, UUID, str, int, bool]] = []
+        ends: list[_End] = []
         needed_ids: set[UUID] = set()
         # One loop for every direction. The check that an end is a queried item tells the two
         # cases of "both" apart: a link can match at either end or at both. For "outgoing" and
         # "incoming", the repository already filtered the links, so the check is always true.
         for link in links:
             if direction in ("outgoing", "both") and link.source_item_id in item_ids:
-                entries.append((link.source_item_id, link.target_item_id, link.relation_type, link.sort_index, True))
+                ends.append(_End(link.source_item_id, link.target_item_id, link.relation_type, link.sort_index, True))
                 needed_ids.update((link.source_item_id, link.target_item_id))
             if direction in ("incoming", "both") and link.target_item_id in item_ids:
-                entries.append((link.target_item_id, link.source_item_id, link.relation_type, link.sort_index, False))
+                ends.append(_End(link.target_item_id, link.source_item_id, link.relation_type, link.sort_index, False))
                 needed_ids.update((link.target_item_id, link.source_item_id))
         if direction == "both":
             # One read returns the links of both directions in one order. Sort again, so that each
-            # (group, relation_type) lists the items of the outgoing links (related_is_target is
-            # True, so they sort first) before those of the incoming links.
-            entries.sort(key=lambda e: (e[0], e[2], not e[4], e[3], e[1]))
+            # (queried, relation_type) lists the items of the outgoing links before those of the
+            # incoming links.
+            ends.sort(key=lambda e: (e.queried, e.relation_type, not e.related_is_target, e.sort_index, e.related))
         # With no filter, so a disabled row stays different from a row that is not stored.
-        item_map: Mapping[UUID, Item] = self._service.repository.map_items_by_id(needed_ids, enabled=None)
+        item_map: Mapping[UUID, Item] = self._repo.map_items_by_id(needed_ids, enabled=None)
         result: dict[UUID, dict[str, list[Item]]] = {}
-        for group_key_id, related_id, relation_type, _sort_index, related_is_target in entries:
-            found = item_map.get(related_id)
+        for end in ends:
+            found = item_map.get(end.related)
             if found is None:
-                if logger.isEnabledFor(logging.WARNING):
-                    _log_absent_end(
-                        "get_many_related", item_map, group_key_id, related_id, relation_type, related_is_target
-                    )
-                continue
-            if enabled is None or found.enabled == enabled:
-                result.setdefault(group_key_id, {}).setdefault(relation_type, []).append(found)
+                _log_absent_end(
+                    "get_many_related", item_map, end.queried, end.related, end.relation_type, end.related_is_target
+                )
+            elif _selects(enabled, found):
+                result.setdefault(end.queried, {}).setdefault(end.relation_type, []).append(found)
         return {key: {kind: tuple(group) for kind, group in groups.items()} for key, groups in result.items()}
+
+
+class _End(NamedTuple):
+    """One relation link, seen from the queried item at one of its ends.
+
+    Attributes:
+        queried: The identifier of the queried item, which the result groups the related item under.
+        related: The identifier of the item at the other end, whose row the read returns.
+        relation_type: The type of the link.
+        sort_index: The position of the link among the relations of its source.
+        related_is_target: Whether ``related`` is the link's target.
+    """
+
+    queried: UUID
+    related: UUID
+    relation_type: str
+    sort_index: int
+    related_is_target: bool
 
 
 def _normalise_relation_types(relation_types: str | Collection[str] | None) -> tuple[str, ...] | None:
@@ -1273,13 +1201,13 @@ def _normalise_relation_types(relation_types: str | Collection[str] | None) -> t
     if relation_types is None:
         return None
     if isinstance(relation_types, str):
-        return (relation_types.strip().lower(),)
+        return (normalise_relation_type(relation_types),)
     _require_collection("relation_types", relation_types)
     types = tuple(relation_types)
     for relation_type in types:
         if not isinstance(relation_type, str):
             raise TypeError(f"relation_types must hold only str values, not {type(relation_type).__name__}")
-    return tuple(sorted({t.strip().lower() for t in types})) or None
+    return tuple(sorted({normalise_relation_type(t) for t in types})) or None
 
 
 def _direction(direction: object, /) -> Direction:
@@ -1311,6 +1239,8 @@ def _log_absent_end(
     *present_id* is the queried end, and *absent_id* the end that names no stored item. The roles
     come from the link itself, source or target, so the message is correct in every direction.
     """
+    if not logger.isEnabledFor(logging.WARNING):
+        return
     present_role = "source" if absent_is_target else "target"
     absent_role = "target" if absent_is_target else "source"
     present_item = item_map.get(present_id)

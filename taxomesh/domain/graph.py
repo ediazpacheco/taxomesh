@@ -278,25 +278,19 @@ class TaxomeshGraph:
         """Yield the nodes of this snapshot, each exactly once.
 
         The only enumerator of the graph, so ``len(self)`` and the number of nodes it yields can
-        never disagree. It is **iterative**, so it enumerates a chain deeper than the interpreter's
-        recursion limit and does not raise ``RecursionError``, a builtin that a caller who catches
-        only this library's errors does not catch. The categories below one node are that node's
-        :meth:`CategoryNode.descendants`.
+        never disagree. The categories below one node are that node's :meth:`CategoryNode.descendants`.
 
         The walk starts at the categories of :attr:`roots`, depth-first, and **then takes every
         node that it did not reach**. A category that no top-level category reaches can be in the
         graph: for example, a category whose only parent the ``enabled`` filter left out. The walk
         enumerates it; a traversal from the top level would not.
 
-        One visited set does two things: a category that several parents share appears once, and
-        a cycle in stored data ends the walk. ``check_no_cycle`` guards the writes, but rows also
-        come from direct SQL, a migration or a restored backup.
+        The walk is iterative and ends on a cycle in stored data, for the reasons that
+        :mod:`taxomesh.domain.dag` gives.
 
         Returns:
             An iterator over the nodes, depth-first, children in their stored order.
         """
-        # Every node is a seed after those of ``roots``. A node that the walk already reached is
-        # skipped, so only a node that no category of ``roots`` reaches starts a walk of its own.
         seeds = chain(self._root_ids, self._nodes)
         return (self._nodes[category_id] for category_id in depth_first(seeds, self._children))
 

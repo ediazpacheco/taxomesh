@@ -13,11 +13,10 @@ from taxomesh.domain.constants import (
     DEFAULT_VERSION,
     MAX_CATEGORY_NAME_LENGTH,
     MAX_DESCRIPTION_LENGTH,
-    MAX_EXTERNAL_ID_STR_LENGTH,
     MAX_SLUG_LENGTH,
 )
 from taxomesh.domain.models.base import MetadataModelBase, _build_str_repr
-from taxomesh.domain.types import ExternalId, FrozenDict, Metadata, normalise_external_id
+from taxomesh.domain.types import FrozenDict, Metadata, StoredExternalId
 
 
 class Category(MetadataModelBase):
@@ -46,7 +45,7 @@ class Category(MetadataModelBase):
     name: Annotated[str, Field(max_length=MAX_CATEGORY_NAME_LENGTH)]
     description: Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)] = DEFAULT_DESCRIPTION
     enabled: bool = True
-    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = DEFAULT_CATEGORY_EXTERNAL_ID
+    external_id: StoredExternalId = DEFAULT_CATEGORY_EXTERNAL_ID
     slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
     metadata: Metadata = Field(default_factory=FrozenDict)
     created_at: datetime = Field(default=AUDIT_EPOCH)
@@ -58,12 +57,6 @@ class Category(MetadataModelBase):
     def _coerce_none_description(cls, v: object) -> object:
         """Store a ``None`` description as ``""``."""
         return "" if v is None else v
-
-    @field_validator("external_id", mode="before")
-    @classmethod
-    def _coerce_external_id(cls, v: ExternalId) -> str | None:
-        """Convert the external id through the one rule, so a model built here and a lookup agree."""
-        return normalise_external_id(v)
 
     def __str__(self) -> str:
         return _build_str_repr(self.name, self.category_id, self.slug, self.external_id)

@@ -26,29 +26,29 @@ The rest of the library depends on six invariants:
 import threading
 import time
 from collections.abc import Callable, Hashable
+from enum import Enum
 from types import MethodType
-from typing import Any, Concatenate, Protocol, Self, overload
+from typing import Any, Concatenate, Final, Protocol, Self, overload
 
 
-class Miss:
-    """The one object that marks the absence of a fresh cache entry.
+class Miss(Enum):
+    """The type of :data:`MISS`, the one object that marks the absence of a fresh cache entry.
 
     :meth:`MemoizedMethod.cached` returns it instead of ``None``, so that a cached ``None``, or
-    any other falsy value, is not taken for a miss.
+    any other falsy value, is not taken for a miss. It is an ``Enum`` with one member, for the
+    reasons that :class:`~taxomesh.domain.types.UnsetType` gives.
     """
 
-    _instance: "Miss | None" = None
-
-    def __new__(cls) -> "Miss":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    MISS = "MISS"
 
     def __repr__(self) -> str:
         return "MISS"
 
+    def __str__(self) -> str:
+        return "MISS"
 
-MISS = Miss()
+
+MISS: Final[Miss] = Miss.MISS
 
 
 class ReadCache:
@@ -262,12 +262,12 @@ class MemoizedFunction[S: CacheOwnerBase, **P, R]:
 
     def __init__(self, func: Callable[Concatenate[S, P], R]) -> None:
         self.__wrapped__ = func
-        # Copied here because ``functools.wraps`` does not apply to a class instance. Without
-        # these, a decorated method would report the name and the docstring of the cache class
-        # to ``help()``, every IDE and ``inspect.signature``.
-        self.__name__: str = getattr(func, "__name__", "memoized")
-        self.__qualname__: str = getattr(func, "__qualname__", self.__name__)
-        self.__module__ = getattr(func, "__module__", __name__)
+        # Assigned one by one, and not with ``functools.update_wrapper``, so that the type checker
+        # knows each attribute. Without them, a decorated method would report the name and the
+        # docstring of this class to ``help()``, every IDE and ``inspect.signature``.
+        self.__name__ = func.__name__
+        self.__qualname__ = func.__qualname__
+        self.__module__ = func.__module__
         self.__doc__ = func.__doc__
 
     def __call__(self, instance: S, /, *args: P.args, **kwargs: P.kwargs) -> R:

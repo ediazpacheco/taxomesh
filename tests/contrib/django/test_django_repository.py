@@ -206,7 +206,7 @@ class TestDatabaseErrors:
     def test_items_by_external_id(self) -> None:
         repo = DjangoRepository()
         with (
-            patch.object(repo._ItemModel.objects, "using", side_effect=DatabaseError("db down")),
+            patch.object(repo._items, "get_queryset", side_effect=DatabaseError("db down")),
             pytest.raises(TaxomeshRepositoryError),
         ):
             repo.map_items_by_external_id(["some-id"])
@@ -214,7 +214,7 @@ class TestDatabaseErrors:
     def test_categories_by_external_id(self) -> None:
         repo = DjangoRepository()
         with (
-            patch.object(repo._CategoryModel.objects, "using", side_effect=DatabaseError("db down")),
+            patch.object(repo._categories, "get_queryset", side_effect=DatabaseError("db down")),
             pytest.raises(TaxomeshRepositoryError),
         ):
             repo.map_categories_by_external_id(["some-id"])
@@ -222,7 +222,7 @@ class TestDatabaseErrors:
     def test_the_lock_a_block_starts_with(self) -> None:
         repo = DjangoRepository()
         with (
-            patch.object(repo._CategoryModel.objects, "using", side_effect=DatabaseError("db down")),
+            patch.object(repo._categories, "get_queryset", side_effect=DatabaseError("db down")),
             pytest.raises(TaxomeshRepositoryError),
             repo.atomic(),
         ):

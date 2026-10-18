@@ -282,6 +282,53 @@ def _position_among[L: _Positioned](siblings: Iterable[L], /, *, stored: Callabl
     return 0 if last is None else last + 1
 
 
+class _Switchable(Protocol):
+    """A row with an enabled state: a category or an item."""
+
+    @property
+    def enabled(self) -> bool: ...
+
+
+def _selects(enabled: bool | None, row: _Switchable, /) -> bool:
+    """Return whether the ``enabled`` filter keeps this row. ``None`` keeps every row."""
+    return enabled is None or row.enabled == enabled
+
+
+def _in_order[R: _Switchable](
+    ids: Iterable[UUID],
+    rows: Mapping[UUID, R],
+    enabled: bool | None,
+    missing: Callable[[UUID], TaxomeshNotFoundError],
+    /,
+) -> tuple[R, ...]:
+    """Return the row of each identifier, in the order given, that the ``enabled`` filter keeps.
+
+    ``rows`` holds the stored rows with no ``enabled`` filter, so an identifier that is not in it
+    names a row that is not stored, and a disabled row is not taken for a deleted one.
+
+    Args:
+        ids: The identifiers, in the order of the result.
+        rows: The stored rows of those identifiers, keyed by identifier.
+        enabled: ``True`` enabled only, ``False`` disabled only, ``None`` all.
+        missing: Builds the not-found error of an identifier that is not in ``rows``.
+
+    Returns:
+        The rows that the filter keeps, in the order of ``ids``.
+
+    Raises:
+        TaxomeshNotFoundError: The error that ``missing`` builds, for the first identifier that
+            is not in ``rows``.
+    """
+    selected: list[R] = []
+    for row_id in ids:
+        row = rows.get(row_id)
+        if row is None:
+            raise missing(row_id)
+        if _selects(enabled, row):
+            selected.append(row)
+    return tuple(selected)
+
+
 def _changed[R: BaseModel](row: R, changes: Mapping[str, object], /) -> R:
     """Return a new row with these fields changed, checked as a new row would be.
 
@@ -335,12 +382,14 @@ class EntityCollectionBase[T, K](ABC):
     the invariant ``list[T]``.
 
     A subclass sets :attr:`_not_found` to its own ``TaxomeshNotFoundError`` subclass, so a caller
-    that catches the error of one kind never gets the error of another kind, and
-    :attr:`_namespace` to the service attribute that it is reached through.
+    that catches the error of one kind never gets the error of another kind,
+    :attr:`_namespace` to the service attribute that it is reached through, and :attr:`_kind` to
+    the noun that its messages use.
     """
 
     _not_found: ClassVar[type[TaxomeshNotFoundError]]
     _namespace: ClassVar[str]
+    _kind: ClassVar[str]
     __iter__: ClassVar[None] = None
     __reversed__: ClassVar[None] = None
 
@@ -351,12 +400,13 @@ class EntityCollectionBase[T, K](ABC):
         one, because the cache that a collection reads through is the service's.
 
         Args:
-            service: The service that owns the collection. The collection reaches storage through
-                its public ``repository`` property, never through a private attribute.
+            service: The service that owns the collection. The collection keeps its public
+                ``repository``, which a service never replaces, and reaches storage through it.
             cache: The service's cache, which holds this collection's memoized reads and which
                 a write through this collection clears.
         """
         self._service = service
+        self._repo = service.repository
         self._cache = cache
 
     def __repr__(self) -> str:
@@ -390,6 +440,30 @@ class EntityCollectionBase[T, K](ABC):
     def _all(self) -> Sequence[T]:
         """Return every stored row, unfiltered."""
 
+    @abstractmethod
+    def _find(self, key_id: UUID, /) -> T | None:
+        """Return the stored row with this identifier, read from storage, or ``None``."""
+
+    def _missing(self, key_id: UUID, /) -> TaxomeshNotFoundError:
+        """Return the not-found error of this kind for this identifier."""
+        return self._not_found(f"{self._kind.capitalize()} not found: {key_id}")
+
+    def _require_stored(self, key_id: UUID, /) -> T:
+        """Return the stored row with this identifier, read from storage, or raise.
+
+        A write calls it, and not subscript, because a write checks, and builds on, what it is
+        about to change: a row that another service changed or deleted after this service read it
+        is seen as it is stored. The cached ``_lookup`` of categories and items calls it on a miss.
+
+        Raises:
+            TaxomeshNotFoundError: The subclass's own subclass of it, when no row with this
+                identifier is stored.
+        """
+        found = self._find(key_id)
+        if found is None:
+            raise self._missing(key_id)
+        return found
+
     @contextmanager
     def _atomic(self, *, then: Callable[[], None] | None = None) -> Iterator[None]:
         """Run a member's storage writes in one ``atomic()`` block, then clear the service's cache.
@@ -408,7 +482,7 @@ class EntityCollectionBase[T, K](ABC):
                 corpus.
         """
         try:
-            with self._service.repository.atomic():
+            with self._repo.atomic():
                 yield
         finally:
             self._cache.clear()
@@ -527,13 +601,10 @@ class _UniqueKeysCollection[T, K](EntityCollectionBase[T, K]):
     """The base of the collections whose rows have a slug and an external id, with the checks of those keys.
 
     A category and an item each have a slug and an external id, unique among rows of their kind. A
-    subclass sets :attr:`_kind` to the noun its messages use, and answers which stored row, if any,
-    already has a key. Both checks read storage, never the cache, inside the ``atomic()`` block of
-    the write that they guard, and both let a row keep its own key: ``own_id`` is the identifier of
-    the row being saved.
+    subclass answers which stored row, if any, already has a key. Both checks read storage, never
+    the cache, inside the ``atomic()`` block of the write that they guard, and both let a row keep
+    its own key: ``own_id`` is the identifier of the row being saved.
     """
-
-    _kind: ClassVar[str]
 
     @abstractmethod
     def _holder_of_slug(self, slug: str) -> UUID | None:

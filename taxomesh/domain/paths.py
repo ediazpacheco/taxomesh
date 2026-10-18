@@ -2,16 +2,14 @@
 
 The graph holds one node for each category, but a drawing is a *tree*: a category that several
 parents reach is drawn once **for each path**, because a nested ``children`` document or a branch of
-a tree means that. This has two consequences for :func:`walk_paths`.
+a tree means that. So the guard of :func:`walk_paths` is **path-local**, not global: it holds the
+ancestors of the category that it visits, and nothing else. A global set would stop the second visit
+of a shared subtree, and change the drawing that the tests pin. :func:`~taxomesh.domain.dag.depth_first`
+and ``TaxomeshGraph.walk`` use a global set for the opposite reason: they yield each category exactly
+once. One guard cannot replace the other.
 
-* The walk is **iterative**. A chain deeper than the interpreter's recursion limit must draw, and not
-  raise ``RecursionError``: that error is a builtin, which a caller who catches this library's errors
-  does not catch.
-* Its guard is **path-local**, not global: it holds the ancestors of the category that it visits, and
-  nothing else. A global set would stop the second visit of a shared subtree, and change the drawing
-  that the tests pin. :func:`~taxomesh.domain.dag.depth_first` and ``TaxomeshGraph.walk`` use a global
-  set for the opposite reason: they yield each category exactly once. One guard cannot replace the
-  other.
+The walk is iterative, as :func:`~taxomesh.domain.dag.depth_first` is, for the reason that
+:mod:`taxomesh.domain.dag` gives.
 
 The HTTP serializer and the ``graph`` command each draw in their own form, and both use this walk.
 """

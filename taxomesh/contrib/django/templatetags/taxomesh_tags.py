@@ -1,10 +1,11 @@
 """The template tags and filters of the taxomesh admin templates."""
 
-import importlib.metadata
 from pathlib import Path
 
 from django import template
 from django.conf import settings
+
+import taxomesh
 
 register = template.Library()
 
@@ -25,16 +26,10 @@ def taxomesh_version_info() -> dict[str, str]:
     """Return the version of taxomesh and a description of its backend, for the admin pages.
 
     Returns:
-        A dict with the keys ``version`` and ``backend``. ``version`` is the version of the
-        installed taxomesh package, or ``"unknown"`` when the package metadata is not found.
-        ``backend`` is the path of ``taxomesh.toml`` in ``settings.BASE_DIR`` when that file
-        exists, and ``"Django ORM backend"`` otherwise.
+        A dict with the keys ``version`` and ``backend``. ``version`` is ``taxomesh.__version__``,
+        the version of the installed taxomesh package. ``backend`` is the path of ``taxomesh.toml``
+        in ``settings.BASE_DIR`` when that file exists, and ``"Django ORM backend"`` otherwise.
     """
-    try:
-        version = importlib.metadata.version("taxomesh")
-    except importlib.metadata.PackageNotFoundError:
-        version = "unknown"
-
     backend = "Django ORM backend"
     base_dir = getattr(settings, "BASE_DIR", None)
     if base_dir is not None:
@@ -42,4 +37,4 @@ def taxomesh_version_info() -> dict[str, str]:
         if toml_path.exists():
             backend = str(toml_path)
 
-    return {"version": version, "backend": backend}
+    return {"version": taxomesh.__version__, "backend": backend}

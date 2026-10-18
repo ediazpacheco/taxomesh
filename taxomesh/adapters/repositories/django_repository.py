@@ -2,8 +2,8 @@
 
 Every Django import is inside ``__init__`` or a method body, so that this module, and
 ``import taxomesh``, work when Django is not installed.
-Every deferred import line carries ``# noqa: PLC0415``. The ORM models and ``QuerySet`` are
-imported at module level for the type checker only, under ``TYPE_CHECKING``.
+Every deferred import line carries ``# noqa: PLC0415``. The names that only the annotations use, such
+as ``QuerySet``, are imported at module level for the type checker only, under ``TYPE_CHECKING``.
 
 Usage::
 
@@ -31,6 +31,7 @@ from taxomesh.domain.models import (
     ItemParentLink,
     ItemRelationLink,
     ItemTagLink,
+    ModelBase,
     Tag,
 )
 from taxomesh.exceptions import (
@@ -41,26 +42,19 @@ from taxomesh.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from django.db.models import QuerySet
+    from django.db.models import Manager, Model, QuerySet
 
-    from taxomesh.contrib.django.models import (
-        CategoryModel,
-        CategoryParentLinkModel,
-        ItemModel,
-        ItemParentLinkModel,
-        ItemRelationLinkModel,
-        TagModel,
-    )
+    from taxomesh.contrib.django.models import CategoryModel, ItemModel
 
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
 
-_USING_DEFAULT = "default"
+DEFAULT_DJANGO_USING: Final[str] = "default"
 DJANGO_REPO_TYPE: Final[str] = "django"
 
 
-def _import_failure(exc: ImportError) -> TaxomeshRepositoryError:
+def django_import_error(exc: ImportError) -> TaxomeshRepositoryError:
     """Return the error for an ``ImportError`` that setting up Django raised: Django, or its settings module.
 
     ``exc.name`` is ``django`` or one of its submodules when Django is not installed. Any other name
@@ -117,6 +111,11 @@ def _unique_key_failure(
     return TaxomeshRepositoryError(str(exc))
 
 
+def _row[R: ModelBase](row_type: type[R], orm_row: "Model") -> R:
+    """Return the ``row_type`` row that ``orm_row`` holds: each field is read from the attribute of its name."""
+    return row_type.model_validate(orm_row, from_attributes=True)
+
+
 class DjangoRepository:
     """The storage adapter that stores taxomesh data through the Django ORM.
 
@@ -131,7 +130,7 @@ class DjangoRepository:
         TypeError: If ``using`` is not a ``str``.
     """
 
-    def __init__(self, using: str = _USING_DEFAULT) -> None:
+    def __init__(self, using: str = DEFAULT_DJANGO_USING) -> None:
         """Check that Django is installed and configured, and keep the ORM models.
 
         Args:
@@ -156,31 +155,26 @@ class DjangoRepository:
                 TagModel,
             )
         except ImportError as exc:
-            raise _import_failure(exc) from exc
+            raise django_import_error(exc) from exc
         except Exception as exc:
-            try:
-                from django.core.exceptions import (  # noqa: PLC0415
-                    ImproperlyConfigured,
-                )
+            from django.core.exceptions import ImproperlyConfigured  # noqa: PLC0415
 
-                if isinstance(exc, ImproperlyConfigured):
-                    raise TaxomeshRepositoryError(
-                        "Django settings are not configured: set the DJANGO_SETTINGS_MODULE environment "
-                        "variable before running taxomesh with type = 'django'"
-                    ) from exc
-            except ImportError:
-                pass
+            if isinstance(exc, ImproperlyConfigured):
+                raise TaxomeshRepositoryError(
+                    "Django settings are not configured: set the DJANGO_SETTINGS_MODULE environment "
+                    "variable before running taxomesh with type = 'django'"
+                ) from exc
             raise
 
         self._using = using
-        # The ORM models, kept so that no member imports them again
-        self._CategoryModel = CategoryModel
-        self._ItemModel = ItemModel
-        self._TagModel = TagModel
-        self._CategoryParentLinkModel = CategoryParentLinkModel
-        self._ItemParentLinkModel = ItemParentLinkModel
-        self._ItemTagLinkModel = ItemTagLinkModel
-        self._ItemRelationLinkModel = ItemRelationLinkModel
+        # The manager of each ORM model on the database alias, so that no member imports the models again
+        self._categories = CategoryModel.objects.db_manager(using)
+        self._items = ItemModel.objects.db_manager(using)
+        self._tags = TagModel.objects.db_manager(using)
+        self._parent_links = CategoryParentLinkModel.objects.db_manager(using)
+        self._placements = ItemParentLinkModel.objects.db_manager(using)
+        self._tag_links = ItemTagLinkModel.objects.db_manager(using)
+        self._relations = ItemRelationLinkModel.objects.db_manager(using)
 
     def __repr__(self) -> str:
         """Render as the constructor call that opens the same database alias."""
@@ -224,9 +218,7 @@ class DjangoRepository:
         body_raised = False
         try:
             with transaction.atomic(using=self._using):
-                self._CategoryModel.objects.using(self._using).filter(name=ROOT_CATEGORY_NAME).update(
-                    name=ROOT_CATEGORY_NAME
-                )
+                self._categories.filter(name=ROOT_CATEGORY_NAME).update(name=ROOT_CATEGORY_NAME)
                 try:
                     yield
                 except BaseException:
@@ -255,68 +247,78 @@ class DjangoRepository:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _row_to_category(self, row: "CategoryModel") -> Category:
-        """Build the ``Category`` row from its ORM object."""
-        return Category(
-            category_id=row.category_id,
-            name=row.name,
-            description=row.description,
-            enabled=row.enabled,
-            external_id=row.external_id,
-            slug=row.slug,
-            metadata=row.metadata,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-            version=row.version,
-        )
+    def _first[R: ModelBase](self, row_type: type[R], objects: "Manager[Model]", **lookup: object) -> R | None:
+        """Return the first stored row that ``lookup`` matches, as a ``row_type`` row, or ``None``."""
+        with _storage_errors():
+            orm_row = objects.filter(**lookup).first()
+        return None if orm_row is None else _row(row_type, orm_row)
 
-    def _row_to_item(self, row: "ItemModel") -> Item:
-        """Build the ``Item`` row from its ORM object."""
-        return Item(
-            item_id=row.item_id,
-            name=row.name,
-            external_id=row.external_id,
-            slug=row.slug,
-            enabled=row.enabled,
-            metadata=row.metadata,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-            version=row.version,
-        )
+    def _delete(self, objects: "Manager[Model]", **lookup: object) -> bool:
+        """Delete the stored rows that ``lookup`` matches, and return whether one was stored."""
+        with _storage_errors():
+            deleted, _ = objects.filter(**lookup).delete()
+        return int(deleted) > 0
 
-    def _row_to_tag(self, row: "TagModel") -> Tag:
-        """Build the ``Tag`` row from its ORM object."""
-        return Tag(
-            tag_id=row.tag_id,
-            name=row.name,
-            metadata=row.metadata,
-        )
+    def _matching[M: Model](
+        self, objects: "Manager[M]", lookup: str, values: Collection[object], enabled: bool | None = None
+    ) -> list[M]:
+        """Return the stored rows that the lookup ``lookup``, such as ``item_id__in``, matches in ``values``.
 
-    def _row_to_category_parent_link(self, row: "CategoryParentLinkModel") -> CategoryParentLink:
-        """Build the parent link from its ORM object."""
-        return CategoryParentLink(
-            category_id=row.category_id,
-            parent_category_id=row.parent_category_id,
-            sort_index=row.sort_index,
-        )
+        When ``enabled`` is not ``None``, only the rows with that ``enabled`` value are returned. The
+        values are read in as many queries as the database's limit on parameters needs.
+        """
+        with _storage_errors():
+            rows = objects.all()
+            if enabled is not None:
+                rows = rows.filter(enabled=enabled)
+            return [
+                row
+                for lookups in self._batches({lookup: values}, fixed=int(enabled is not None))
+                for row in rows.filter(**lookups)
+            ]
 
-    def _row_to_item_parent_link(self, row: "ItemParentLinkModel") -> ItemParentLink:
-        """Build the placement from its ORM object."""
-        return ItemParentLink(
-            item_id=row.item_id,
-            category_id=row.category_id,
-            sort_index=row.sort_index,
-        )
+    def _save_versioned[R: (Category, Item)](
+        self,
+        objects: "Manager[CategoryModel] | Manager[ItemModel]",
+        kind: str,
+        row: R,
+        row_id: UUID,
+        expected_version: int | None,
+    ) -> R:
+        """Store a category row or an item row, as ``save_category`` and ``save_item`` describe.
 
-    def _row_to_item_relation_link(self, row: "ItemRelationLinkModel") -> ItemRelationLink:
-        """Build the relation from its ORM object."""
-        return ItemRelationLink(
-            source_item_id=row.source_item_id,
-            target_item_id=row.target_item_id,
-            relation_type=row.relation_type,
-            sort_index=row.sort_index,
-            metadata=row.metadata,
-        )
+        Args:
+            objects: The manager of the row's ORM model.
+            kind: The noun of the messages, ``"category"`` or ``"item"``.
+            row: The row to store.
+            row_id: The identifier of the row.
+            expected_version: The version the stored row must be at, or ``None`` for no comparison.
+
+        Returns:
+            The row, with the version that the database assigned.
+        """
+        from django.db import IntegrityError, transaction  # noqa: PLC0415
+        from django.db.models import F  # noqa: PLC0415
+
+        # Every column but the primary key, which the lookups name, and the version, which the database assigns
+        fields = row.model_dump(exclude={objects.model._meta.pk.name, "version"})
+        with _storage_errors():
+            try:
+                with transaction.atomic(using=self._using):
+                    rows = objects.filter(pk=row_id)
+                    if expected_version is not None:
+                        if not rows.filter(version=expected_version).update(**fields, version=F("version") + 1):
+                            raise version_conflict(kind, row_id, expected_version)
+                        version = expected_version + 1
+                    else:
+                        stored, created = objects.get_or_create(pk=row_id, defaults={**fields, "version": 0})
+                        if not created:
+                            rows.update(**fields, version=F("version") + 1)
+                            stored.refresh_from_db(using=self._using)
+                        version = stored.version
+            except IntegrityError as exc:
+                raise _unique_key_failure(objects.exclude(pk=row_id), kind, row.slug, row.external_id, exc) from exc
+        return row.model_copy(update={"version": version})
 
     def _batches(
         self, lists: Mapping[str, Collection[object] | None], *, fixed: int = 0, uses: int = 1
@@ -411,40 +413,7 @@ class DjangoRepository:
                 category already has it.
             TaxomeshRepositoryError: On any other database error.
         """
-        from django.db import IntegrityError, transaction  # noqa: PLC0415
-
-        fields: dict[str, object] = {
-            "name": category.name,
-            "description": category.description,
-            "enabled": category.enabled,
-            "external_id": category.external_id,
-            "slug": category.slug,
-            "metadata": category.metadata,
-            "created_at": category.created_at,
-            "updated_at": category.updated_at,
-        }
-        with _storage_errors():
-            try:
-                with transaction.atomic(using=self._using):
-                    from django.db.models import F  # noqa: PLC0415
-
-                    rows = self._CategoryModel.objects.using(self._using).filter(category_id=category.category_id)
-                    if expected_version is not None:
-                        if not rows.filter(version=expected_version).update(**fields, version=F("version") + 1):
-                            raise version_conflict("category", category.category_id, expected_version)
-                        version = expected_version + 1
-                    else:
-                        row, created = self._CategoryModel.objects.using(self._using).get_or_create(
-                            category_id=category.category_id, defaults={**fields, "version": 0}
-                        )
-                        if not created:
-                            rows.update(**fields, version=F("version") + 1)
-                            row.refresh_from_db(using=self._using)
-                        version = row.version
-            except IntegrityError as exc:
-                others = self._CategoryModel.objects.using(self._using).exclude(category_id=category.category_id)
-                raise _unique_key_failure(others, "category", category.slug, category.external_id, exc) from exc
-        return category.model_copy(update={"version": version})
+        return self._save_versioned(self._categories, "category", category, category.category_id, expected_version)
 
     def find_category(self, category_id: UUID) -> Category | None:
         """Return the category with this identifier, or ``None``.
@@ -455,11 +424,7 @@ class DjangoRepository:
         Returns:
             The category row, or ``None`` when no category with this identifier is stored.
         """
-        with _storage_errors():
-            row = self._CategoryModel.objects.using(self._using).filter(category_id=category_id).first()
-            if row is None:
-                return None
-            return self._row_to_category(row)
+        return self._first(Category, self._categories, category_id=category_id)
 
     def list_categories(self, *, enabled: bool | None = True) -> list[Category]:
         """Return the stored categories, ordered by name and then by identifier.
@@ -473,10 +438,10 @@ class DjangoRepository:
             match.
         """
         with _storage_errors():
-            qs = self._CategoryModel.objects.using(self._using)
+            qs = self._categories.all()
             if enabled is not None:
                 qs = qs.filter(enabled=enabled)
-            return [self._row_to_category(row) for row in qs.order_by("name", "category_id")]
+            return [_row(Category, row) for row in qs.order_by("name", "category_id")]
 
     def delete_category(self, category_id: UUID) -> bool:
         """Delete a category and every link that names it, in one transaction.
@@ -494,9 +459,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            deleted_count, _ = self._CategoryModel.objects.using(self._using).filter(category_id=category_id).delete()
-        return int(deleted_count) > 0
+        return self._delete(self._categories, category_id=category_id)
 
     # ------------------------------------------------------------------
     # Item CRUD
@@ -526,39 +489,7 @@ class DjangoRepository:
                 item already has it.
             TaxomeshRepositoryError: On any other database error.
         """
-        from django.db import IntegrityError, transaction  # noqa: PLC0415
-
-        fields: dict[str, object] = {
-            "name": item.name,
-            "external_id": item.external_id,
-            "slug": item.slug,
-            "enabled": item.enabled,
-            "metadata": item.metadata,
-            "created_at": item.created_at,
-            "updated_at": item.updated_at,
-        }
-        with _storage_errors():
-            try:
-                with transaction.atomic(using=self._using):
-                    from django.db.models import F  # noqa: PLC0415
-
-                    rows = self._ItemModel.objects.using(self._using).filter(item_id=item.item_id)
-                    if expected_version is not None:
-                        if not rows.filter(version=expected_version).update(**fields, version=F("version") + 1):
-                            raise version_conflict("item", item.item_id, expected_version)
-                        version = expected_version + 1
-                    else:
-                        row, created = self._ItemModel.objects.using(self._using).get_or_create(
-                            item_id=item.item_id, defaults={**fields, "version": 0}
-                        )
-                        if not created:
-                            rows.update(**fields, version=F("version") + 1)
-                            row.refresh_from_db(using=self._using)
-                        version = row.version
-            except IntegrityError as exc:
-                others = self._ItemModel.objects.using(self._using).exclude(item_id=item.item_id)
-                raise _unique_key_failure(others, "item", item.slug, item.external_id, exc) from exc
-        return item.model_copy(update={"version": version})
+        return self._save_versioned(self._items, "item", item, item.item_id, expected_version)
 
     def find_item(self, item_id: UUID) -> Item | None:
         """Return the item with this identifier, or ``None``.
@@ -569,11 +500,7 @@ class DjangoRepository:
         Returns:
             The item row, or ``None`` when no item with this identifier is stored.
         """
-        with _storage_errors():
-            row = self._ItemModel.objects.using(self._using).filter(item_id=item_id).first()
-            if row is None:
-                return None
-            return self._row_to_item(row)
+        return self._first(Item, self._items, item_id=item_id)
 
     def list_items(self, *, enabled: bool | None = True) -> list[Item]:
         """Return the stored items, ordered by name and then by identifier.
@@ -586,10 +513,10 @@ class DjangoRepository:
             The matching items, ordered by ``(name ASC, item_id ASC)``; empty when none match.
         """
         with _storage_errors():
-            qs = self._ItemModel.objects.using(self._using)
+            qs = self._items.all()
             if enabled is not None:
                 qs = qs.filter(enabled=enabled)
-            return [self._row_to_item(row) for row in qs.order_by("name", "item_id")]
+            return [_row(Item, row) for row in qs.order_by("name", "item_id")]
 
     def delete_item(self, item_id: UUID) -> bool:
         """Delete an item and every link that names it, in one transaction.
@@ -607,9 +534,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            deleted_count, _ = self._ItemModel.objects.using(self._using).filter(item_id=item_id).delete()
-        return int(deleted_count) > 0
+        return self._delete(self._items, item_id=item_id)
 
     # ------------------------------------------------------------------
     # Tag CRUD
@@ -625,7 +550,7 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            self._TagModel.objects.using(self._using).update_or_create(
+            self._tags.update_or_create(
                 tag_id=tag.tag_id,
                 defaults={
                     "name": tag.name,
@@ -642,11 +567,7 @@ class DjangoRepository:
         Returns:
             The tag row, or ``None`` when no tag with this identifier is stored.
         """
-        with _storage_errors():
-            row = self._TagModel.objects.using(self._using).filter(tag_id=tag_id).first()
-            if row is None:
-                return None
-            return self._row_to_tag(row)
+        return self._first(Tag, self._tags, tag_id=tag_id)
 
     def list_tags(self) -> list[Tag]:
         """Return every stored tag, in no fixed order.
@@ -656,7 +577,7 @@ class DjangoRepository:
             stored.
         """
         with _storage_errors():
-            return [self._row_to_tag(row) for row in self._TagModel.objects.using(self._using).all()]
+            return [_row(Tag, row) for row in self._tags.all()]
 
     def map_tags_by_id(self, tag_ids: Collection[UUID]) -> Mapping[UUID, Tag]:
         """Return the tags whose ``tag_id`` is in ``tag_ids``.
@@ -674,13 +595,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            qs = self._TagModel.objects.using(self._using)
-            return {
-                row.tag_id: self._row_to_tag(row)
-                for lookups in self._batches({"tag_id__in": tag_ids})
-                for row in qs.filter(**lookups)
-            }
+        return {row.tag_id: _row(Tag, row) for row in self._matching(self._tags, "tag_id__in", tag_ids)}
 
     def delete_tag(self, tag_id: UUID) -> bool:
         """Delete a tag and every link that names it, in one transaction.
@@ -697,9 +612,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            deleted_count, _ = self._TagModel.objects.using(self._using).filter(tag_id=tag_id).delete()
-        return int(deleted_count) > 0
+        return self._delete(self._tags, tag_id=tag_id)
 
     # ------------------------------------------------------------------
     # Tag ↔ Item links
@@ -718,7 +631,7 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            self._ItemTagLinkModel.objects.using(self._using).get_or_create(
+            self._tag_links.get_or_create(
                 tag_id=tag_id,
                 item_id=item_id,
             )
@@ -736,11 +649,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            deleted_count, _ = (
-                self._ItemTagLinkModel.objects.using(self._using).filter(tag_id=tag_id, item_id=item_id).delete()
-            )
-        return int(deleted_count) > 0
+        return self._delete(self._tag_links, tag_id=tag_id, item_id=item_id)
 
     def list_item_tag_links(
         self,
@@ -767,7 +676,7 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            qs = self._ItemTagLinkModel.objects.using(self._using).order_by("item_id", "tag_id")
+            qs = self._tag_links.order_by("item_id", "tag_id")
             batches = self._batches({"item_id__in": item_ids, "tag_id__in": tag_ids})
             rows = [row for lookups in batches for row in qs.filter(**lookups).values_list("item_id", "tag_id")]
         if len(batches) > 1:
@@ -791,7 +700,7 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            self._CategoryParentLinkModel.objects.using(self._using).update_or_create(
+            self._parent_links.update_or_create(
                 category_id=link.category_id,
                 parent_category_id=link.parent_category_id,
                 defaults={"sort_index": link.sort_index},
@@ -826,9 +735,9 @@ class DjangoRepository:
         """
         order = ("parent_category_id", "sort_index", "category_id")
         with _storage_errors():
-            qs = self._CategoryParentLinkModel.objects.using(self._using).order_by(*order)
+            qs = self._parent_links.order_by(*order)
             batches = self._batches({"category_id__in": category_ids, "parent_category_id__in": parent_category_ids})
-            links = [self._row_to_category_parent_link(row) for lookups in batches for row in qs.filter(**lookups)]
+            links = [_row(CategoryParentLink, row) for lookups in batches for row in qs.filter(**lookups)]
         if len(batches) > 1:
             links.sort(key=attrgetter(*order))
         return links
@@ -850,7 +759,7 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            self._ItemParentLinkModel.objects.using(self._using).update_or_create(
+            self._placements.update_or_create(
                 item_id=link.item_id,
                 category_id=link.category_id,
                 defaults={"sort_index": link.sort_index},
@@ -881,9 +790,9 @@ class DjangoRepository:
         """
         order = ("category_id", "sort_index", "item_id")
         with _storage_errors():
-            qs = self._ItemParentLinkModel.objects.using(self._using).order_by(*order)
+            qs = self._placements.order_by(*order)
             batches = self._batches({"item_id__in": item_ids, "category_id__in": category_ids})
-            links = [self._row_to_item_parent_link(row) for lookups in batches for row in qs.filter(**lookups)]
+            links = [_row(ItemParentLink, row) for lookups in batches for row in qs.filter(**lookups)]
         if len(batches) > 1:
             links.sort(key=attrgetter(*order))
         return links
@@ -905,13 +814,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            deleted_count, _ = (
-                self._CategoryParentLinkModel.objects.using(self._using)
-                .filter(category_id=category_id, parent_category_id=parent_category_id)
-                .delete()
-            )
-        return int(deleted_count) > 0
+        return self._delete(self._parent_links, category_id=category_id, parent_category_id=parent_category_id)
 
     def delete_item_parent_link(self, item_id: UUID, category_id: UUID) -> bool:
         """Delete the placement of this item in this category.
@@ -926,13 +829,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            deleted_count, _ = (
-                self._ItemParentLinkModel.objects.using(self._using)
-                .filter(item_id=item_id, category_id=category_id)
-                .delete()
-            )
-        return int(deleted_count) > 0
+        return self._delete(self._placements, item_id=item_id, category_id=category_id)
 
     # ------------------------------------------------------------------
     # External-ID lookup
@@ -950,9 +847,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            row = self._ItemModel.objects.using(self._using).filter(external_id=external_id).first()
-        return self._row_to_item(row) if row is not None else None
+        return self._first(Item, self._items, external_id=external_id)
 
     def find_category_by_external_id(self, external_id: str) -> Category | None:
         """Return the category with this external id, or ``None``.
@@ -967,9 +862,7 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            row = self._CategoryModel.objects.using(self._using).filter(external_id=external_id).first()
-        return self._row_to_category(row) if row is not None else None
+        return self._first(Category, self._categories, external_id=external_id)
 
     def map_items_by_id(
         self,
@@ -994,15 +887,8 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            qs = self._ItemModel.objects.using(self._using)
-            if enabled is not None:
-                qs = qs.filter(enabled=enabled)
-            return {
-                row.item_id: self._row_to_item(row)
-                for lookups in self._batches({"item_id__in": item_ids}, fixed=int(enabled is not None))
-                for row in qs.filter(**lookups)
-            }
+        rows = self._matching(self._items, "item_id__in", item_ids, enabled)
+        return {row.item_id: _row(Item, row) for row in rows}
 
     def map_categories_by_id(
         self,
@@ -1028,15 +914,8 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            qs = self._CategoryModel.objects.using(self._using)
-            if enabled is not None:
-                qs = qs.filter(enabled=enabled)
-            return {
-                row.category_id: self._row_to_category(row)
-                for lookups in self._batches({"category_id__in": category_ids}, fixed=int(enabled is not None))
-                for row in qs.filter(**lookups)
-            }
+        rows = self._matching(self._categories, "category_id__in", category_ids, enabled)
+        return {row.category_id: _row(Category, row) for row in rows}
 
     def map_items_by_external_id(
         self,
@@ -1058,16 +937,8 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            qs = self._ItemModel.objects.using(self._using)
-            if enabled is not None:
-                qs = qs.filter(enabled=enabled)
-            return {
-                row.external_id: self._row_to_item(row)
-                for lookups in self._batches({"external_id__in": external_ids}, fixed=int(enabled is not None))
-                for row in qs.filter(**lookups)
-                if row.external_id is not None
-            }
+        rows = self._matching(self._items, "external_id__in", external_ids, enabled)
+        return {row.external_id: _row(Item, row) for row in rows if row.external_id is not None}
 
     def map_categories_by_external_id(
         self,
@@ -1092,16 +963,8 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            qs = self._CategoryModel.objects.using(self._using)
-            if enabled is not None:
-                qs = qs.filter(enabled=enabled)
-            return {
-                row.external_id: self._row_to_category(row)
-                for lookups in self._batches({"external_id__in": external_ids}, fixed=int(enabled is not None))
-                for row in qs.filter(**lookups)
-                if row.external_id is not None
-            }
+        rows = self._matching(self._categories, "external_id__in", external_ids, enabled)
+        return {row.external_id: _row(Category, row) for row in rows if row.external_id is not None}
 
     def find_item_by_slug(self, slug: str) -> Item | None:
         """Return the item with this slug, or ``None``.
@@ -1112,9 +975,7 @@ class DjangoRepository:
         Returns:
             The item row, or ``None`` when no item has this slug.
         """
-        with _storage_errors():
-            row = self._ItemModel.objects.using(self._using).filter(slug=slug).first()
-            return self._row_to_item(row) if row is not None else None
+        return self._first(Item, self._items, slug=slug)
 
     def find_category_by_slug(self, slug: str) -> Category | None:
         """Return the category with this slug, or ``None``.
@@ -1125,9 +986,7 @@ class DjangoRepository:
         Returns:
             The category row, or ``None`` when no category has this slug.
         """
-        with _storage_errors():
-            row = self._CategoryModel.objects.using(self._using).filter(slug=slug).first()
-            return self._row_to_category(row) if row is not None else None
+        return self._first(Category, self._categories, slug=slug)
 
     # ------------------------------------------------------------------
     # Item relation links
@@ -1146,7 +1005,7 @@ class DjangoRepository:
             TaxomeshRepositoryError: On a database error.
         """
         with _storage_errors():
-            self._ItemRelationLinkModel.objects.using(self._using).update_or_create(
+            self._relations.update_or_create(
                 source_item_id=link.source_item_id,
                 target_item_id=link.target_item_id,
                 relation_type=link.relation_type,
@@ -1179,17 +1038,16 @@ class DjangoRepository:
 
         require_relation_types(relation_types)
         with _storage_errors():
-            base = self._ItemRelationLinkModel.objects.using(self._using)
             if direction == "outgoing":
-                qs = base.filter(source_item_id=item_id)
+                qs = self._relations.filter(source_item_id=item_id)
             elif direction == "incoming":
-                qs = base.filter(target_item_id=item_id)
+                qs = self._relations.filter(target_item_id=item_id)
             else:  # "both"
-                qs = base.filter(Q(source_item_id=item_id) | Q(target_item_id=item_id))
+                qs = self._relations.filter(Q(source_item_id=item_id) | Q(target_item_id=item_id))
             if relation_types:
                 qs = qs.filter(relation_type__in=list(relation_types))
             qs = qs.order_by("sort_index", "source_item_id", "target_item_id")
-            return [self._row_to_item_relation_link(row) for row in qs]
+            return [_row(ItemRelationLink, row) for row in qs]
 
     def list_item_relation_links_batch(
         self,
@@ -1227,13 +1085,11 @@ class DjangoRepository:
         }
         order, matching = queries[direction]
         with _storage_errors():
-            qs = self._ItemRelationLinkModel.objects.using(self._using).order_by(*order)
+            qs = self._relations.order_by(*order)
             if types:
                 qs = qs.filter(relation_type__in=types)
             batches = self._batches({"ids": id_list}, fixed=len(types), uses=2 if direction == "both" else 1)
-            links = [
-                self._row_to_item_relation_link(row) for part in batches for row in qs.filter(matching(part["ids"]))
-            ]
+            links = [_row(ItemRelationLink, row) for part in batches for row in qs.filter(matching(part["ids"]))]
         if len(batches) > 1:
             # The parts are read apart, and "both" reads a relation between two parts in each of them.
             unique = {(link.source_item_id, link.target_item_id, link.relation_type): link for link in links}
@@ -1259,17 +1115,9 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: On a database error.
         """
-        with _storage_errors():
-            deleted_count, _ = (
-                self._ItemRelationLinkModel.objects.using(self._using)
-                .filter(
-                    source_item_id=source_item_id,
-                    target_item_id=target_item_id,
-                    relation_type=relation_type,
-                )
-                .delete()
-            )
-        return int(deleted_count) > 0
+        return self._delete(
+            self._relations, source_item_id=source_item_id, target_item_id=target_item_id, relation_type=relation_type
+        )
 
     # ------------------------------------------------------------------
     # Members for Django only, outside the port
@@ -1290,4 +1138,4 @@ class DjangoRepository:
             Building it reads nothing. When the caller evaluates it, a database error is raised as
             Django's ``DatabaseError``.
         """
-        return self._CategoryModel.objects.using(self._using).filter(enabled=True).exclude(name=ROOT_CATEGORY_NAME)
+        return self._categories.filter(enabled=True).exclude(name=ROOT_CATEGORY_NAME)

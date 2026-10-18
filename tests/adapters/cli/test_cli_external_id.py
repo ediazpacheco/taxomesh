@@ -20,7 +20,6 @@ def _stored_external_id(raw: str | None) -> str | None:
     repo = InMemoryRepository()
     built = BuildResult(
         service=TaxomeshService(repository=repo),
-        repository=repo,
         config_file_path=Path("/fake/taxomesh.toml"),
         config_file_exists=False,
     )
@@ -84,9 +83,7 @@ class TestCliExternalIdDisplay:
         repo = InMemoryRepository()
         service = TaxomeshService(repository=repo)
         music = service.categories.create("Music", slug="music", external_id="cat:music")
-        built = BuildResult(
-            service=service, repository=repo, config_file_path=Path("/fake/taxomesh.toml"), config_file_exists=False
-        )
+        built = BuildResult(service=service, config_file_path=Path("/fake/taxomesh.toml"), config_file_exists=False)
         with patch("taxomesh.adapters.cli.main.build", return_value=built):
             result = runner.invoke(app, ["category", "list"])
 

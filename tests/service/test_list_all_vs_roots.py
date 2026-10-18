@@ -67,7 +67,6 @@ def _cli_build_result() -> BuildResult:
     _build_taxonomy(service)
     return BuildResult(
         service=service,
-        repository=repo,
         config_file_path=Path("/fake/taxomesh.toml"),
         config_file_exists=False,
     )

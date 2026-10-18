@@ -284,7 +284,10 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def map_tags_by_id(self, tag_ids: Collection[UUID]) -> Mapping[UUID, Tag]:
-        """Return the tags whose ``tag_id`` is in ``tag_ids``, in one read.
+        """Return the tags whose ``tag_id`` is in ``tag_ids``.
+
+        The repository reads them in one read. When its storage limits the parameters of one query,
+        the repository reads them in as few reads as that limit allows, with the same result.
 
         A tag has no ``enabled`` field, so this member takes no ``enabled`` filter.
 
@@ -539,9 +542,9 @@ class TaxomeshRepositoryBase(Protocol):
         The caller, such as ``TaxomeshService``, removes the duplicates before the call. The
         repository must not change the input further.
 
-        The repository passes the collection to its storage as one request, and must not split it.
-        When the storage has a limit for each query, that limit is the library's limit, and a
-        request over it raises ``TaxomeshRepositoryError``, as any other storage failure does.
+        The repository passes the collection to its storage as one request. When the storage limits
+        the parameters of one query, the repository splits the collection into as few requests as
+        that limit allows, with the same result.
 
         Args:
             category_ids: The identifiers of the categories to look up, with no duplicates. An
@@ -756,11 +759,13 @@ class TaxomeshRepositoryBase(Protocol):
         relation_types: Collection[str] | None = None,
         direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> Sequence[ItemRelationLink]:
-        """Return the relations of many items in one query, by direction.
+        """Return the relations of many items, by direction.
 
         One call replaces a loop of :meth:`list_item_relation_links` calls, one for each item: the
         N+1 query pattern. One query reads every given item, whatever the *direction*: ``"both"``
-        also uses one ``source OR target`` query, and not two.
+        also uses one ``source OR target`` query, and not two. When the storage limits the
+        parameters of one query, the repository reads the items in as few queries as that limit
+        allows, with the same result.
 
         What each direction selects, and its fixed order:
 

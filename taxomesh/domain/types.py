@@ -14,7 +14,9 @@ because they name the models, and the models import this module.
 These are not exported, because no caller writes them in an annotation:
 
 * :func:`normalise_external_id` is the one rule that converts an :data:`ExternalId` to the stored
-  form: the conversion behind the type.
+  form: the conversion behind the type. :data:`StoredExternalId` is the ``external_id`` field of a
+  row, which applies that rule.
+* :func:`normalise_relation_type` is the one rule that converts a relation type to the stored form.
 * :data:`Metadata`, :class:`FrozenDict` and :class:`FrozenList` make the ``metadata`` of a row
   immutable all the way down. The field's type is ``dict[str, Any]``, and its value is a ``dict``:
   a :class:`FrozenDict` is a ``dict`` that refuses every change.
@@ -25,7 +27,9 @@ from numbers import Integral
 from typing import Annotated, Any, Final, NoReturn, Self
 from uuid import UUID
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, BeforeValidator, Field
+
+from taxomesh.domain.constants import MAX_EXTERNAL_ID_STR_LENGTH
 
 type ExternalId = str | int | UUID | None
 """What every external-id parameter accepts.
@@ -73,6 +77,21 @@ def normalise_external_id(value: ExternalId) -> str | None:
     if isinstance(value, bool) or not isinstance(value, (str, Integral, UUID)):
         raise TypeError(f"An external id is text, an integer or a UUID, not {type(value).__name__}")
     return str(value)
+
+
+def normalise_relation_type(value: str) -> str:
+    """Convert a relation type to the form that taxomesh stores.
+
+    This is the one conversion rule for a relation type, and writes and lookups both use it, for
+    the reason that :func:`normalise_external_id` gives.
+
+    Args:
+        value: The relation type as the caller gives it.
+
+    Returns:
+        ``value`` without its leading and trailing whitespace, in lowercase.
+    """
+    return value.strip().lower()
 
 
 class Direction(StrEnum):
@@ -136,6 +155,11 @@ the stored value. ``None`` already means the second, so the third needs its own 
 _FROZEN_MESSAGE: Final[str] = "metadata is frozen: change a copy, made with dict() or list(), and save the copy"
 
 
+def _refuse(*args: object, **kwargs: object) -> NoReturn:
+    """Raise, whatever the change: each changing method of a frozen container is this function."""
+    raise TypeError(_FROZEN_MESSAGE)
+
+
 # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
 class FrozenDict(dict[str, Any]):
     """A ``dict`` that refuses every change: one level of the ``metadata`` of a row.
@@ -151,10 +175,6 @@ class FrozenDict(dict[str, Any]):
     """
 
     __slots__ = ()
-
-    def _refuse(self, *args: object, **kwargs: object) -> NoReturn:
-        """Raise, whatever the change."""
-        raise TypeError(_FROZEN_MESSAGE)
 
     __setitem__ = __delitem__ = __ior__ = clear = pop = popitem = setdefault = update = _refuse
 
@@ -174,10 +194,6 @@ class FrozenList(list[Any]):
     """
 
     __slots__ = ()
-
-    def _refuse(self, *args: object, **kwargs: object) -> NoReturn:
-        """Raise, whatever the change."""
-        raise TypeError(_FROZEN_MESSAGE)
 
     __setitem__ = __delitem__ = __iadd__ = __imul__ = _refuse
     append = extend = insert = pop = remove = clear = sort = reverse = _refuse
@@ -232,4 +248,17 @@ type Metadata = Annotated[dict[str, Any], AfterValidator(_freeze_dict)]
 Validated as ``dict[str, Any]``, then built again with a :class:`FrozenDict` for each dict and a
 :class:`FrozenList` for each list in it. Use it with ``Field(default_factory=FrozenDict)``, because
 pydantic does not validate a default.
+"""
+
+
+StoredExternalId = Annotated[
+    str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH), BeforeValidator(normalise_external_id)
+]
+"""The ``external_id`` field of a category row and of an item row.
+
+Validation converts the given value with :func:`normalise_external_id`, then checks the length of
+the text. This is a plain assignment and not a ``type`` statement, because pydantic moves a
+``type`` alias to the ``$defs`` of the JSON schema of a model, and the schema of this field stays
+inline. ``Field`` comes before ``BeforeValidator``: in the other order, ``max_length`` applies to
+the whole union, and ``None`` fails validation.
 """

@@ -3,10 +3,11 @@
 The functions here score and rank candidates against a text query. They have no state, so threads
 can call them at the same time. They use exact, prefix and substring matches, and approximate
 matches from rapidfuzz. :func:`normalize` converts a text for comparison, :func:`score_candidate`
-scores one candidate, and :func:`score_corpus` and :func:`score_and_rank` rank many.
+scores one candidate, and :func:`score_corpus` ranks many.
 
 ``SearchCandidate`` is an internal helper. It keeps a row with its searchable fields already
 normalized, so each field is normalized once and not at each step of the scoring.
+:func:`candidate_of` builds one from a row.
 
 ``SearchCorpus`` holds the built candidates of one kind of entity for the lifetime of the
 service's cache, or until that service next creates, updates or deletes a row of that kind. The
@@ -16,8 +17,8 @@ service gives it to the collection that searches it.
 import heapq
 import re
 import unicodedata
-from collections.abc import Callable, Sequence
-from typing import Final
+from collections.abc import Callable
+from typing import Final, Protocol
 
 from rapidfuzz import fuzz
 
@@ -39,7 +40,7 @@ BOOST_SUBSTRING_EXT: Final[int] = 50
 FUZZY_THRESHOLD: Final[int] = 70
 
 # The characters that normalisation replaces with a space, as word separators
-_SEP_RE: Final[re.Pattern[str]] = re.compile(r"['\'\-._\\]")
+_SEP_RE: Final[re.Pattern[str]] = re.compile(r"['\-._\\]")
 _SPACE_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
 
 
@@ -58,12 +59,7 @@ class SearchCandidate[T]:
 
     Example::
 
-        sc = SearchCandidate(
-            obj=item,
-            norm_name=normalize(item.name),
-            norm_slug=normalize(item.slug),
-            norm_ext=normalize(item.external_id or ""),
-        )
+        sc = candidate_of(item)
         score = score_prenorm(norm_q, sc.norm_name, sc.norm_slug, sc.norm_ext)
     """
 
@@ -75,6 +71,36 @@ class SearchCandidate[T]:
         self.norm_ext = norm_ext
 
 
+class _Searchable(Protocol):
+    """A row with the three fields that a search matches: an ``Item`` or a ``Category``."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def slug(self) -> str: ...
+
+    @property
+    def external_id(self) -> str | None: ...
+
+
+def candidate_of[R: _Searchable](row: R) -> SearchCandidate[R]:
+    """Return the search candidate of a row, with its name, slug and external id normalized.
+
+    Args:
+        row: An ``Item`` or a ``Category``.
+
+    Returns:
+        The candidate. Its ``norm_ext`` is ``""`` when the row has no external id.
+    """
+    return SearchCandidate(
+        obj=row,
+        norm_name=normalize(row.name),
+        norm_slug=normalize(row.slug),
+        norm_ext="" if row.external_id is None else normalize(row.external_id),
+    )
+
+
 class SearchCorpus[T]:
     """The search candidates of one kind of entity, held for the lifetime of the service's cache.
 
@@ -82,7 +108,7 @@ class SearchCorpus[T]:
     not, because no candidate holds a link.
 
     The service owns the corpus and gives it to the collection that searches it. The collection
-    fills it through :meth:`hold` on an unfiltered search that finds nothing held, and calls
+    reads or fills it through :meth:`held_or` on a search that no category limits, and calls
     :meth:`invalidate` whenever it creates, updates or deletes a row of that kind; the service
     reports :attr:`size`. Because the two hold the same object, they agree: a collection with a
     list of its own would let the service describe a corpus that the collection had dropped.
@@ -136,6 +162,19 @@ class SearchCorpus[T]:
             self._candidates = candidates
             self._built_at = self._cache.now()
         return candidates
+
+    def held_or(self, build: Callable[[], list[SearchCandidate[T]]]) -> list[SearchCandidate[T]]:
+        """Return the held candidates, or build them, hold them and return them.
+
+        Args:
+            build: Reads the rows from storage and returns their candidates. It is called only
+                when :attr:`candidates` is ``None``.
+
+        Returns:
+            The corpus to search.
+        """
+        held = self.candidates
+        return self.hold(build()) if held is None else held
 
     def invalidate(self) -> None:
         """Drop the candidates, so the next search rebuilds them from storage."""
@@ -228,36 +267,14 @@ def score_prenorm(
         A score (higher is better), or ``None`` if the candidate does not match.
     """
     boost = _compute_boost(norm_q, norm_name, norm_slug, norm_ext)
-
-    fuzzy_additive = 0.0
-    max_fuzzy = 0.0
-    if fuzzy:
-        max_fuzzy, fuzzy_additive = _compute_fuzzy(norm_q, norm_name, norm_slug)
-
+    best_ratio = _best_ratio(norm_q, norm_name, norm_slug) if fuzzy else 0.0
+    # What the approximate match adds: how far the best ratio is above FUZZY_THRESHOLD, or 0
+    fuzzy_bonus = best_ratio - FUZZY_THRESHOLD if best_ratio >= FUZZY_THRESHOLD else 0.0
     if boost > 0:
-        return float(boost) + fuzzy_additive
-    if max_fuzzy >= FUZZY_THRESHOLD:
-        return fuzzy_additive
+        return float(boost) + fuzzy_bonus
+    if best_ratio >= FUZZY_THRESHOLD:
+        return fuzzy_bonus
     return None
-
-
-def _rank_scored[T](scored: list[tuple[float, str, T]], limit: int) -> tuple[T, ...]:
-    """Sort the *scored* tuples by descending score, then by ascending name, and keep *limit*.
-
-    When *limit* is smaller than the number of matches, ``heapq.nsmallest`` replaces the full
-    sort: O(N log k), not O(N log N).
-
-    Args:
-        scored: The ``(score, norm_name, obj)`` tuples to rank.
-        limit: The maximum number of results.
-
-    Returns:
-        The rows in rank order, at most *limit* of them.
-    """
-    if limit < len(scored):
-        return tuple(c for _, _, c in heapq.nsmallest(limit, scored, key=lambda t: (-t[0], t[1])))
-    scored.sort(key=lambda t: (-t[0], t[1]))
-    return tuple(c for _, _, c in scored)
 
 
 def score_corpus[T](
@@ -268,10 +285,6 @@ def score_corpus[T](
     limit: int,
 ) -> tuple[T, ...]:
     """Score candidates whose fields are already normalized, and return the best *limit*.
-
-    Takes ``SearchCandidate`` objects whose fields are already normalized, so it skips the
-    normalization that ``score_and_rank`` does on each call. The ranking is the same:
-    descending score, then ascending normalized name.
 
     Args:
         norm_q: The normalized query.
@@ -288,100 +301,34 @@ def score_corpus[T](
         score = score_prenorm(norm_q, sc.norm_name, sc.norm_slug, sc.norm_ext, fuzzy=fuzzy)
         if score is not None:
             scored.append((score, sc.norm_name, sc.obj))
-    return _rank_scored(scored, limit)
-
-
-def score_and_rank[T](  # noqa: PLR0913
-    norm_q: str,
-    candidates: Sequence[T],
-    *,
-    get_name: Callable[[T], str],
-    get_slug: Callable[[T], str],
-    get_ext: Callable[[T], str | None],
-    fuzzy: bool,
-    limit: int,
-) -> tuple[T, ...]:
-    """Score *candidates* against *norm_q* and return the best *limit*.
-
-    The fields of each candidate are normalized exactly once, in a ``SearchCandidate``,
-    before the scoring. When ``limit`` is smaller than the number of matching candidates,
-    ``heapq.nsmallest`` replaces the full sort: O(N log k), not O(N log N).
-
-    Args:
-        norm_q: The normalised query.
-        candidates: The rows to score: items or categories.
-        get_name: Returns the name of a candidate.
-        get_slug: Returns the slug of a candidate.
-        get_ext: Returns the external id of a candidate.
-        fuzzy: Passed to ``score_prenorm``.
-        limit: The maximum number of results.
-
-    Returns:
-        The rows, sorted by descending score, then by normalised name, at most *limit* of
-        them.
-    """
-
-    # Normalize the fields of each candidate exactly once.
-    def _norm_ext(c: T) -> str:
-        ext = get_ext(c)
-        return normalize(ext) if ext is not None else ""
-
-    search_candidates: list[SearchCandidate[T]] = [
-        SearchCandidate(
-            obj=c,
-            norm_name=normalize(get_name(c)),
-            norm_slug=normalize(get_slug(c)),
-            norm_ext=_norm_ext(c),
-        )
-        for c in candidates
-    ]
-    return score_corpus(norm_q, search_candidates, fuzzy=fuzzy, limit=limit)
+    return tuple(obj for _, _, obj in heapq.nsmallest(limit, scored, key=lambda t: (-t[0], t[1])))
 
 
 def _compute_boost(query: str, norm_name: str, norm_slug: str, norm_ext: str) -> int:  # noqa: PLR0911
     """Return the highest deterministic boost that applies."""
-    # Exact match on name or slug
     if query in (norm_name, norm_slug):
         return BOOST_EXACT
-
-    # Prefix of name
     if norm_name.startswith(query):
         return BOOST_PREFIX_NAME
-
-    # Prefix of slug
     if norm_slug.startswith(query):
         return BOOST_PREFIX_SLUG
-
-    # Prefix of any individual word in name
-    name_words = norm_name.split()
-    if any(w.startswith(query) for w in name_words):
+    if any(word.startswith(query) for word in norm_name.split()):
         return BOOST_WORD_PREFIX
-
-    # Substring of name
     if query in norm_name:
         return BOOST_SUBSTRING_NAME
-
-    # Substring of slug
     if query in norm_slug:
         return BOOST_SUBSTRING_SLUG
-
-    # Substring of external_id (only when non-empty)
     if norm_ext and query in norm_ext:
         return BOOST_SUBSTRING_EXT
-
     return 0
 
 
-def _compute_fuzzy(query: str, norm_name: str, norm_slug: str) -> tuple[float, float]:
-    """Return (max_fuzzy_score, fuzzy_additive) for the candidate."""
-    scores: list[float] = [
+def _best_ratio(query: str, norm_name: str, norm_slug: str) -> float:
+    """Return the best rapidfuzz ratio of the query against the name and the slug."""
+    return max(
         fuzz.ratio(query, norm_name),
         fuzz.partial_ratio(query, norm_name),
         fuzz.token_set_ratio(query, norm_name),
         fuzz.ratio(query, norm_slug),
         fuzz.partial_ratio(query, norm_slug),
-    ]
-    max_fuzzy = max(scores)
-    # What the approximate match adds: how far the best ratio is above FUZZY_THRESHOLD, or 0
-    fuzzy_additive = max_fuzzy - FUZZY_THRESHOLD if max_fuzzy >= FUZZY_THRESHOLD else 0.0
-    return max_fuzzy, fuzzy_additive
+    )

@@ -19,7 +19,6 @@ def _build_result(repo: InMemoryRepository) -> BuildResult:
     svc = TaxomeshService(repository=repo)
     return BuildResult(
         service=svc,
-        repository=repo,
         config_file_path=Path("/fake/taxomesh.toml"),
         config_file_exists=False,
     )

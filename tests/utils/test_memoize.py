@@ -475,8 +475,8 @@ class TestThreads:
 
 class TestMiss:
     def test_miss_is_a_singleton(self) -> None:
-        assert Miss() is Miss()
-        assert Miss() is MISS
+        assert Miss("MISS") is MISS
+        assert list(Miss) == [MISS]
 
     def test_miss_reprs_as_its_name(self) -> None:
         """So an assertion failure reads ``== MISS`` rather than an object address."""
@@ -563,9 +563,8 @@ class TestOwnership:
 class TestIntrospection:
     """A decorated member keeps its own identity.
 
-    ``functools.wraps`` does not apply to a class instance, so these attributes have to be
-    carried deliberately; without them ``help()`` and every IDE would show the cache class's
-    docstring instead of the member's.
+    The cache class copies these attributes from the method that it wraps; without them ``help()``
+    and every IDE would show the cache class's docstring instead of the member's.
     """
 
     def test_the_member_reports_its_own_identity(self) -> None:

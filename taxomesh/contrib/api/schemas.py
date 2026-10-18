@@ -32,15 +32,21 @@ def _inert(schema: JsonDict) -> None:
     schema.pop("default", None)
 
 
+_Slug = Annotated[str, Field(max_length=MAX_SLUG_LENGTH)]
+_ExternalId = Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)]
+_Description = Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)]
+# Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
+_JsonObject = dict[str, Any]
+
+
 class CreateCategoryRequest(BaseModel):
     """Request body for creating a new category."""
 
     name: Annotated[str, Field(max_length=MAX_CATEGORY_NAME_LENGTH)]
-    description: Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH)] = ""
-    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
-    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = None
-    # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    description: _Description = ""
+    slug: _Slug = ""
+    external_id: _ExternalId = None
+    metadata: _JsonObject = Field(default_factory=dict)
 
 
 class UpdateCategoryRequest(BaseModel):
@@ -58,12 +64,11 @@ class UpdateCategoryRequest(BaseModel):
     """
 
     name: Annotated[str, Field(max_length=MAX_CATEGORY_NAME_LENGTH, json_schema_extra=_inert)] = ""
-    description: Annotated[str, Field(max_length=MAX_DESCRIPTION_LENGTH, json_schema_extra=_inert)] = ""
-    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH, json_schema_extra=_inert)] = ""
-    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH, json_schema_extra=_inert)] = None
+    description: Annotated[_Description, Field(json_schema_extra=_inert)] = ""
+    slug: Annotated[_Slug, Field(json_schema_extra=_inert)] = ""
+    external_id: Annotated[_ExternalId, Field(json_schema_extra=_inert)] = None
     enabled: Annotated[bool, Field(json_schema_extra=_inert)] = True
-    # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
-    metadata: dict[str, Any] = Field(default_factory=dict, json_schema_extra=_inert)
+    metadata: _JsonObject = Field(default_factory=dict, json_schema_extra=_inert)
     expected_version: int | None = None
 
 
@@ -71,10 +76,9 @@ class CreateItemRequest(BaseModel):
     """Request body for creating a new item."""
 
     name: Annotated[str, Field(max_length=MAX_ITEM_NAME_LENGTH)]
-    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH)] = ""
-    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH)] = None
-    # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    slug: _Slug = ""
+    external_id: _ExternalId = None
+    metadata: _JsonObject = Field(default_factory=dict)
 
 
 class UpdateItemRequest(BaseModel):
@@ -92,11 +96,10 @@ class UpdateItemRequest(BaseModel):
     """
 
     name: Annotated[str, Field(max_length=MAX_ITEM_NAME_LENGTH, json_schema_extra=_inert)] = ""
-    slug: Annotated[str, Field(max_length=MAX_SLUG_LENGTH, json_schema_extra=_inert)] = ""
-    external_id: Annotated[str | None, Field(max_length=MAX_EXTERNAL_ID_STR_LENGTH, json_schema_extra=_inert)] = None
+    slug: Annotated[_Slug, Field(json_schema_extra=_inert)] = ""
+    external_id: Annotated[_ExternalId, Field(json_schema_extra=_inert)] = None
     enabled: Annotated[bool, Field(json_schema_extra=_inert)] = True
-    # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
-    metadata: dict[str, Any] = Field(default_factory=dict, json_schema_extra=_inert)
+    metadata: _JsonObject = Field(default_factory=dict, json_schema_extra=_inert)
     expected_version: int | None = None
 
 
@@ -104,8 +107,7 @@ class CreateTagRequest(BaseModel):
     """Request body for creating a new tag."""
 
     name: Annotated[str, Field(max_length=MAX_TAG_NAME_LENGTH)]
-    # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: _JsonObject = Field(default_factory=dict)
 
 
 class UpdateTagRequest(BaseModel):
@@ -119,8 +121,7 @@ class UpdateTagRequest(BaseModel):
     """
 
     name: Annotated[str, Field(max_length=MAX_TAG_NAME_LENGTH, json_schema_extra=_inert)] = ""
-    # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
-    metadata: dict[str, Any] = Field(default_factory=dict, json_schema_extra=_inert)
+    metadata: _JsonObject = Field(default_factory=dict, json_schema_extra=_inert)
 
 
 class AddCategoryParentRequest(BaseModel):

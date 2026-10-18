@@ -224,9 +224,7 @@ def test_categories_list_of_an_unplaced_item_skips_the_batch_resolve(corpus: Cor
 # ---------------------------------------------------------------------------
 #
 # Django is the only backend that can fail at the storage boundary, so this is
-# where the wrapper is provable. It is also what an oversized id collection
-# relies on: exceeding the parameter limit raises a DatabaseError like any other,
-# and must not escape the port as a raw Django exception.
+# where the wrapper is provable.
 
 
 def test_batch_category_lookup_wraps_a_database_error() -> None:
@@ -234,33 +232,29 @@ def test_batch_category_lookup_wraps_a_database_error() -> None:
     repository = DjangoRepository()
 
     with (
-        patch.object(repository._CategoryModel.objects, "using", side_effect=django.db.DatabaseError("db down")),
+        patch.object(repository._categories, "get_queryset", side_effect=django.db.DatabaseError("db down")),
         pytest.raises(TaxomeshRepositoryError),
     ):
         repository.map_categories_by_id([uuid4()])
 
 
 def test_category_parent_link_listing_wraps_a_database_error() -> None:
-    """For the newly filtered link listing, which gained its own query path."""
+    """A parent-link listing filtered by parent raises the port's error for a database error."""
     repository = DjangoRepository()
 
     with (
-        patch.object(
-            repository._CategoryParentLinkModel.objects, "using", side_effect=django.db.DatabaseError("db down")
-        ),
+        patch.object(repository._parent_links, "get_queryset", side_effect=django.db.DatabaseError("db down")),
         pytest.raises(TaxomeshRepositoryError),
     ):
         repository.list_category_parent_links(parent_category_ids=[uuid4()])
 
 
 def test_unfiltered_category_parent_link_listing_wraps_a_database_error() -> None:
-    """The unfiltered path is the one eleven existing call sites use — it must wrap too."""
+    """A parent-link listing with no filter raises the port's error for a database error."""
     repository = DjangoRepository()
 
     with (
-        patch.object(
-            repository._CategoryParentLinkModel.objects, "using", side_effect=django.db.DatabaseError("db down")
-        ),
+        patch.object(repository._parent_links, "get_queryset", side_effect=django.db.DatabaseError("db down")),
         pytest.raises(TaxomeshRepositoryError),
     ):
         repository.list_category_parent_links()

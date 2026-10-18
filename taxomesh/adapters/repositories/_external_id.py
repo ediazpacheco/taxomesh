@@ -16,8 +16,7 @@ class _HasExternalId(Protocol):
     external_id: str | None
 
 
-class _HasExternalIdAndEnabled(Protocol):
-    external_id: str | None
+class _HasExternalIdAndEnabled(_HasExternalId, Protocol):
     enabled: bool
 
 
@@ -69,7 +68,7 @@ def bulk_lookup_by_external_id[T: _HasExternalIdAndEnabled](
     target = set(external_ids)
     result: dict[str, T] = {}
     for entity in collection.values():
-        if entity.external_id in target and (enabled is None or entity.enabled == enabled):
-            assert entity.external_id is not None
-            result[entity.external_id] = entity
+        key = entity.external_id
+        if key is not None and key in target and (enabled is None or entity.enabled == enabled):
+            result[key] = entity
     return result
