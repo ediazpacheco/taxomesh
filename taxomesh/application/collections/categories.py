@@ -365,7 +365,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         Args:
             parent: When given, this parent's children, ordered by sort index. The category or
-                its identifier.
+                its identifier. ``None`` (the default) is no filter, not the top level, which
+                :meth:`roots` lists.
             item: When given, the categories this item is placed in, ordered by the sort index
                 of each placement. The item or its identifier.
             enabled: ``True`` (the default) enabled only, ``False`` disabled only, ``None`` all.
@@ -373,8 +374,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         Returns:
             The matching categories, empty when there are none. With neither ``parent`` nor
             ``item``, every stored category that the ``enabled`` filter keeps (the enabled ones,
-            by default), in no promised order: ``sort_index`` orders a category under one parent,
-            and an unfiltered listing has no parent.
+            by default), at every level, ordered by name, then by identifier.
 
         Raises:
             TaxomeshValidationError: If both ``parent`` and ``item`` are given. They need
@@ -801,15 +801,19 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             category: The category to move.
             from_parent: The parent that it leaves, or ``None`` to take it off the top level.
             to_parent: The parent that it joins, or ``None`` to put it at the top level.
-            before: The sibling to put it before; when it is ``None``, the category goes last.
+            before: The sibling to put it before: a child of ``to_parent``, or a top-level
+                category when ``to_parent`` is ``None``, other than the category that moves. When it
+                is ``None``, the category goes last.
 
         Raises:
-            TaxomeshCategoryNotFoundError: If the category or a given parent is not stored, or is
-                the implicit root.
+            TaxomeshCategoryNotFoundError: If the category, a given parent or a given ``before`` is
+                not stored, or is the implicit root.
             TaxomeshCyclicDependencyError: If ``to_parent`` is the category or one of its
                 descendants.
             TaxomeshValidationError: If ``to_parent`` is ``None`` and the category keeps another
-                parent: a category with a parent is not at the top level.
+                parent: a category with a parent is not at the top level. Also if ``before`` is the
+                category that moves, or a category that is not a child of ``to_parent``, or, for
+                ``None``, not at the top level.
             TaxomeshRepositoryError: If storage fails while writing the move.
             TypeError: If one of them is neither a ``Category`` nor a ``UUID``.
 
@@ -845,7 +849,10 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 (lnk for lnk in links if lnk.parent_category_id == joining and lnk.category_id != category_id),
                 key=lambda lnk: lnk.sort_index,
             )
-            insert_pos = next((i for i, lnk in enumerate(siblings) if lnk.category_id == before_id), len(siblings))
+            if before_id is None:
+                insert_pos = len(siblings)
+            else:
+                insert_pos = self._position_before(before_id, category_id, to_parent_id, siblings)
             siblings.insert(
                 insert_pos,
                 CategoryParentLink(category_id=category_id, parent_category_id=joining, sort_index=insert_pos),
@@ -856,6 +863,39 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 self._repo.delete_category_parent_link(category_id, self._root_id)
             for i, lnk in enumerate(siblings):
                 self._repo.save_category_parent_link(lnk.model_copy(update={"sort_index": i}))
+
+    def _position_before(
+        self, before_id: UUID, category_id: UUID, parent_id: UUID | None, siblings: Sequence[CategoryParentLink]
+    ) -> int:
+        """Return the position of ``before`` among the children of the parent that a category joins.
+
+        A parent link names only a stored category, so a ``before`` among the siblings costs no
+        read. Only a refused ``before`` is read, to choose its error: not-found when no category is
+        stored with its identifier, a validation error otherwise.
+
+        Args:
+            before_id: The category that the moving category goes before.
+            category_id: The category that moves.
+            parent_id: The parent that it joins, or ``None`` for the top level.
+            siblings: The links of that parent, the moving category's own left out, in order.
+
+        Returns:
+            The index of the link of ``before`` in ``siblings``.
+
+        Raises:
+            TaxomeshValidationError: If ``before`` is the category that moves, or is not a child of
+                the parent, or, for ``None``, not at the top level.
+            TaxomeshCategoryNotFoundError: If ``before`` names no stored category, or the implicit
+                root.
+        """
+        if before_id == category_id:
+            raise TaxomeshValidationError(f"Category {category_id} cannot go before itself")
+        for position, link in enumerate(siblings):
+            if link.category_id == before_id:
+                return position
+        self._require_stored(before_id)
+        where = "at the top level" if parent_id is None else f"a child of {parent_id}"
+        raise TaxomeshValidationError(f"before names category {before_id}, which is not {where}")
 
     def reorder(self, parent: CategoryRef | None, categories: Sequence[CategoryRef]) -> None:
         """Set the order of a parent's children, or of the top level.

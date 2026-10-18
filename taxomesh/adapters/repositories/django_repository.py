@@ -131,7 +131,7 @@ class DjangoRepository:
     """
 
     def __init__(self, using: str = DEFAULT_DJANGO_USING) -> None:
-        """Check that Django is installed and configured, and keep the ORM models.
+        """Check that Django is installed and configured, and bind the manager of each ORM model to ``using``.
 
         Args:
             using: The Django database alias. The default is ``"default"``.

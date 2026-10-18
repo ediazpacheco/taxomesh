@@ -495,6 +495,7 @@ def service(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshService:
     return TaxomeshService(repository=_build_repository(request, tmp_path))
 
 
+@TaxomeshRepositoryBase.register
 class CountingRepository:
     """Wrap any backend and count the repository reads a service call issues.
 
@@ -510,6 +511,9 @@ class CountingRepository:
     those prefixes the proxy would count none of them, and every read-count assertion would
     pass while measuring nothing. Configuration introspection needs no exclusion: the
     ``config_summary`` property and ``describe()`` carry no read prefix.
+
+    The service checks a repository with ``isinstance``, which does not see the members that
+    ``__getattr__`` gives, so the class is registered with the port.
     """
 
     _READ_PREFIXES = ("get_", "list_", "find_", "map_")

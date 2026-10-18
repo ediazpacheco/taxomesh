@@ -179,6 +179,10 @@ class TestTheRootIsNotALocation:
                 lambda s, root, c, _o, _i: s.categories.move(c, from_parent=None, to_parent=root),
                 id="categories.move-to",
             ),
+            pytest.param(
+                lambda s, root, c, o, _i: s.categories.move(c, from_parent=None, to_parent=o, before=root),
+                id="categories.move-before",
+            ),
             pytest.param(lambda s, root, c, _o, _i: s.categories.reorder(root, [c]), id="categories.reorder"),
             pytest.param(lambda s, root, _c, _o, i: s.items.place_in(i, root), id="items.place_in"),
             pytest.param(lambda s, root, _c, _o, i: s.items.remove_from(i, root), id="items.remove_from"),

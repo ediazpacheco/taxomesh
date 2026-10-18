@@ -703,20 +703,24 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> ItemParentLink:
         """Move an item from one category to another.
 
-        Each item and category is given as itself or as its identifier.
+        Each item and category is given as itself or as its identifier. Every check comes before the
+        first write, so a refused move changes nothing.
 
         Args:
             item: The item to move.
             from_category: The category that it leaves.
             to_category: The category that it joins.
-            before: The item to put it before; when it is ``None``, the item goes last.
+            before: The item to put it before: an item placed in ``to_category``, other than the
+                item that moves. When it is ``None``, the item goes last.
 
         Returns:
             The ``ItemParentLink`` in the new category.
 
         Raises:
-            TaxomeshItemNotFoundError: If the item is not stored.
+            TaxomeshItemNotFoundError: If the item, or a given ``before``, is not stored.
             TaxomeshCategoryNotFoundError: If either category is not stored, or is the implicit root.
+            TaxomeshValidationError: If ``before`` is the item that moves, or an item that is not
+                placed in ``to_category``.
             TaxomeshRepositoryError: If storage fails while writing the move.
             TypeError: If one of them is neither a row of its kind nor a ``UUID``.
         """
@@ -742,10 +746,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             if before_id is None:
                 insert_pos = len(existing_siblings)
             else:
-                insert_pos = next(
-                    (i for i, lnk in enumerate(existing_siblings) if lnk.item_id == before_id),
-                    len(existing_siblings),
-                )
+                insert_pos = self._position_before(before_id, item_id, to_category_id, existing_siblings)
 
             new_link = ItemParentLink(item_id=item_id, category_id=to_category_id, sort_index=insert_pos)
             existing_siblings.insert(insert_pos, new_link)
@@ -755,6 +756,37 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
                 self._repo.save_item_parent_link(lnk.model_copy(update={"sort_index": i}))
 
         return new_link
+
+    def _position_before(
+        self, before_id: UUID, item_id: UUID, category_id: UUID, siblings: Sequence[ItemParentLink]
+    ) -> int:
+        """Return the position of ``before`` among the placements of the category that an item joins.
+
+        A placement names only a stored item, so a ``before`` among the siblings costs no read. Only
+        a refused ``before`` is read, to choose its error: not-found when no item is stored with its
+        identifier, a validation error otherwise.
+
+        Args:
+            before_id: The item that the moving item goes before.
+            item_id: The item that moves.
+            category_id: The category that it joins.
+            siblings: The placements of that category, the moving item's own left out, in order.
+
+        Returns:
+            The index of the placement of ``before`` in ``siblings``.
+
+        Raises:
+            TaxomeshValidationError: If ``before`` is the item that moves, or is not placed in the
+                category.
+            TaxomeshItemNotFoundError: If ``before`` names no stored item.
+        """
+        if before_id == item_id:
+            raise TaxomeshValidationError(f"Item {item_id} cannot go before itself")
+        for position, link in enumerate(siblings):
+            if link.item_id == before_id:
+                return position
+        self._require_stored(before_id)
+        raise TaxomeshValidationError(f"before names item {before_id}, which is not placed in category {category_id}")
 
     def reorder(self, category: CategoryRef, items: Sequence[ItemRef]) -> None:
         """Set the order of a category's items.

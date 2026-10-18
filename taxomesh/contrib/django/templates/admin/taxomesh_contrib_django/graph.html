@@ -205,7 +205,8 @@
           toggle.textContent = "[-]";
           toggle.disabled = false;
           initRelToggles();
-          initHandles();
+          // The drag-and-drop script below sets up the handles of the new entries.
+          graph.dispatchEvent(new Event("taxomesh:entries-added"));
         })
         .catch(function (err) {
           toggle.textContent = prevText;
@@ -334,6 +335,8 @@
   }
 
   initHandles();
+  // The expand script above sends this event after it adds the entries of a branch.
+  graph.addEventListener("taxomesh:entries-added", initHandles);
 
   // ---- Mouse guard: only allow drag from handle ----
   var mouseOnHandle = false;

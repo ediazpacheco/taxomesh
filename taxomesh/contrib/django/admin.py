@@ -19,15 +19,18 @@ from django.apps import apps
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.exceptions import NotRegistered
+from django.contrib.admin.utils import flatten_fieldsets
 from django.contrib.admin.widgets import FilteredSelectMultiple
 from django.contrib.auth import get_permission_codename
 from django.db import models
 from django.forms import ModelChoiceField
+from django.forms.renderers import BaseRenderer
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.urls import URLPattern, path, reverse
 from django.utils.html import format_html
+from django.utils.safestring import SafeString
 
 from taxomesh import TaxomeshService
 from taxomesh.adapters.repositories.django_repository import DjangoRepository
@@ -60,9 +63,13 @@ logger = logging.getLogger(__name__)
 # django-stubs types the admin and form classes by their models, but Django cannot subscript
 # them at run time. The type checker reads each base below with its models; the running code
 # reads the bare class. A mixin's base names ``Any``, since it serves the admin of any model,
-# and is ``object`` at run time, where the consumer's own ``ModelAdmin`` comes after it.
+# and is ``object`` at run time, where the ``ModelAdmin`` or the inline comes after it.
 if TYPE_CHECKING:
+    # The type of what ModelAdmin.get_fields returns, which only django-stubs defines.
+    from django.contrib.admin.options import _FieldGroups
+
     _ModelAdminMixinBase = admin.ModelAdmin[Any]
+    _LinkInlineMixinBase = admin.TabularInline[Any, Any]
     _CategoryAdminBase = admin.ModelAdmin[CategoryModel]
     _ItemAdminBase = admin.ModelAdmin[ItemModel]
     _TagAdminBase = admin.ModelAdmin[TagModel]
@@ -78,7 +85,7 @@ if TYPE_CHECKING:
     _ItemRelationLinkFormBase = forms.ModelForm[ItemRelationLinkModel]
     _TagFormBase = forms.ModelForm[TagModel]
 else:
-    _ModelAdminMixinBase = object
+    _ModelAdminMixinBase = _LinkInlineMixinBase = object
     _CategoryAdminBase = _ItemAdminBase = _TagAdminBase = admin.ModelAdmin
     _GraphProxyAdminBase = _DebugProxyAdminBase = admin.ModelAdmin
     _CategoryParentLinkTabular = _CategoryItemLinkTabular = admin.TabularInline
@@ -102,6 +109,12 @@ DRAG_KIND_CATEGORY: Final[str] = "category"
 TOP_LEVEL_FIELD: Final[str] = "at_top_level"
 # How the graph's drag-and-drop names the top level as a parent: a category there has none.
 TOP_LEVEL_PARENT: Final[str] = ""
+# The read-only field of a change page that shows the ↗ link to the linked record.
+_LINKED_OBJECT_FIELD: Final[str] = "linked_object_url"
+# The form field that ItemCategoryAssignmentMixin adds, and the end of the name of the hidden input
+# that its widget renders beside it.
+_CATEGORIES_FIELD: Final[str] = "categories"
+_SHOWN_SUFFIX: Final[str] = "_shown"
 # The category and item pages edit a JSON field in the JSON editor.
 # Any: the field options of django-stubs' ModelAdmin.formfield_overrides, which are Any.
 _JSON_EDITOR_OVERRIDES: Final[Mapping[type[models.Field[Any, Any]], Mapping[str, Any]]] = {
@@ -166,13 +179,35 @@ def _graph_view_error(exc: Exception) -> JsonResponse:
     return JsonResponse({"error": GENERIC_SERVER_ERROR_DETAIL}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
+def _linked_model_label(setting_name: str) -> str | None:
+    """Return the ``"app_label.ModelName"`` that a linked-model setting holds, or ``None`` when it is not set or empty.
+
+    Args:
+        setting_name: The Django setting.
+    """
+    label: str | None = getattr(settings, setting_name, None)
+    return label or None
+
+
+def _category_linked_model_setting() -> str:
+    """Return the setting that names the linked model of a category.
+
+    It is ``TAXOMESH_CATEGORY_LINKED_MODEL`` when that setting is set, and ``TAXOMESH_LINKED_MODEL``
+    otherwise. The category pages, the category list and the graph read this rule.
+    """
+    if _linked_model_label(TAXOMESH_CATEGORY_LINKED_MODEL_SETTING):
+        return TAXOMESH_CATEGORY_LINKED_MODEL_SETTING
+    return TAXOMESH_LINKED_MODEL_SETTING
+
+
 def _resolve_linked_url(external_id: str | None, setting_name: str = TAXOMESH_LINKED_MODEL_SETTING) -> str | None:
     """Return the admin change URL of the record that an external id names in the linked model.
 
     The Django setting ``setting_name`` names the linked model, as ``"app_label.ModelName"``. The
     function builds the URL of that model's admin change page with the external id as the primary
-    key. It does not check that a record with that key exists. When the setting is not set, or the
-    URL cannot be built, it logs a warning and returns ``None``.
+    key. It does not check that a record with that key exists. When the setting is not set, it
+    returns ``None``, since the setting is optional. When the URL cannot be built, it logs a warning
+    and returns ``None``.
 
     Args:
         external_id: The external id, used as the primary key in the linked model. An empty value
@@ -183,13 +218,10 @@ def _resolve_linked_url(external_id: str | None, setting_name: str = TAXOMESH_LI
     Returns:
         The admin change URL, or ``None``.
     """
-    if not external_id:
+    linked_model_label = _linked_model_label(setting_name)
+    if not external_id or linked_model_label is None:
         return None
     try:
-        linked_model_label = getattr(settings, setting_name, None)
-        if not linked_model_label:
-            logger.warning("_resolve_linked_url: setting %r is not configured", setting_name)
-            return None
         linked_model = apps.get_model(linked_model_label)
         app_label = linked_model._meta.app_label
         model_name = linked_model._meta.model_name
@@ -197,6 +229,24 @@ def _resolve_linked_url(external_id: str | None, setting_name: str = TAXOMESH_LI
     except Exception as exc:
         logger.warning("_resolve_linked_url(%r, %r) failed: %s", external_id, setting_name, exc)
         return None
+
+
+def _fields_with_link(fields: _FieldGroups, setting_name: str) -> _FieldGroups:
+    """Return the fields of a change page, without the ↗ link while ``setting_name`` is not set.
+
+    A line of fields that holds the link keeps its other fields.
+
+    Args:
+        fields: The fields of the page, as ``ModelAdmin.get_fields`` returns them.
+        setting_name: The setting that names the linked model of the page's rows.
+    """
+    if _linked_model_label(setting_name) is not None:
+        return fields
+    return [
+        line if isinstance(line, str) else tuple(name for name in line if name != _LINKED_OBJECT_FIELD)
+        for line in fields
+        if line != _LINKED_OBJECT_FIELD
+    ]
 
 
 def _item_entry(item: Item, *, depth: int, parent_uuid: str, sort_index: int) -> GraphEntry:
@@ -228,7 +278,7 @@ def _category_entry(
         uuid=str(category.category_id),
         enabled=category.enabled,
         external_id=category.external_id or "",
-        linked_url=_resolve_linked_url(category.external_id),
+        linked_url=_resolve_linked_url(category.external_id, _category_linked_model_setting()),
         has_descendants=has_descendants,
         depth_limited=False,
         initially_collapsed=True,
@@ -248,7 +298,13 @@ def _new_service() -> TaxomeshService:
 
 
 class TaxomeshAdminMixin:
-    """A mixin that builds a new service for each write, and has the display members that the admins share."""
+    """A mixin that builds a new service for each write, and has the display members that the admins share.
+
+    The display members link a row to the admin page of its linked record: the record of the linked
+    model whose primary key is the row's external id. The setting of an admin names the linked
+    model. It is ``TAXOMESH_LINKED_MODEL``, and for the admin of categories
+    ``TAXOMESH_CATEGORY_LINKED_MODEL`` while that setting is set.
+    """
 
     def _make_service(self) -> TaxomeshService:
         """Build a new ``TaxomeshService`` over a new ``DjangoRepository``.
@@ -259,10 +315,14 @@ class TaxomeshAdminMixin:
         """
         return _new_service()
 
+    def _linked_model_setting(self) -> str:
+        """Return the setting that names the model of the records that the rows of this admin link to."""
+        return TAXOMESH_LINKED_MODEL_SETTING
+
     @admin.display(description="↗")
     # Any: Django hands a display method a row of whichever model the admin lists, a consumer's own included.
     def linked_object_url(self, obj: Any) -> str:
-        """Return a ↗ link to the admin page of the linked record, when ``TAXOMESH_LINKED_MODEL`` is set.
+        """Return a ↗ link to the admin page of the linked record, when the setting of this admin is set.
 
         It works with any model that has an ``external_id`` attribute, such as ``CategoryModel`` and
         ``ItemModel``.
@@ -273,7 +333,7 @@ class TaxomeshAdminMixin:
         Returns:
             An HTML link with the ↗ icon, or an empty string when no URL can be built.
         """
-        url = _resolve_linked_url(getattr(obj, "external_id", None) or "")
+        url = _resolve_linked_url(getattr(obj, "external_id", None) or "", self._linked_model_setting())
         if url:
             return format_html('<a href="{}" title="View in admin">&#8599;</a>', url)
         return ""
@@ -283,7 +343,7 @@ class TaxomeshAdminMixin:
     def external_id_with_link(self, obj: Any) -> str:
         """Show the external id, and after it a ↗ link to the admin page of the linked record.
 
-        When ``TAXOMESH_LINKED_MODEL`` is not set, or the URL cannot be built, it shows the external
+        When the setting of this admin is not set, or the URL cannot be built, it shows the external
         id alone.
 
         Args:
@@ -293,7 +353,7 @@ class TaxomeshAdminMixin:
             Safe HTML: the external id and a ↗ link, or the external id alone.
         """
         external_id = getattr(obj, "external_id", None) or ""
-        url = _resolve_linked_url(external_id)
+        url = _resolve_linked_url(external_id, self._linked_model_setting())
         if url and external_id:
             return format_html(
                 '{} <a href="{}" title="View in admin" style="text-decoration:none">&#8599;</a>',
@@ -399,19 +459,51 @@ def _get_item_category_ids(obj: Any, external_id_attr: str) -> list[UUID]:
     return [link.category_id for link in svc.repository.list_item_parent_links() if link.item_id == item.item_id]
 
 
+class _CategoriesWidget(FilteredSelectMultiple):
+    """The widget of the ``categories`` field: the admin's two-box select, and a hidden input after it.
+
+    A browser posts nothing for a multiple select with no option selected. The posted data alone
+    then does not tell an empty selection from a form that did not show the field. The hidden input
+    is posted with each form that shows the field, and tells the two apart.
+    """
+
+    # Any: an override takes what django-stubs' Widget.render takes, whose attrs are dict[str, Any].
+    def render(
+        self,
+        name: str,
+        value: object,
+        attrs: dict[str, Any] | None = None,
+        renderer: BaseRenderer | None = None,
+    ) -> SafeString:
+        """Render the select, then the hidden input, named ``name`` followed by ``_shown``."""
+        return format_html(
+            '{}<input type="hidden" name="{}" value="1">',
+            super().render(name, value, attrs, renderer),
+            name + _SHOWN_SUFFIX,
+        )
+
+    def value_omitted_from_data(self, data: Mapping[str, object], files: object, name: str) -> bool:
+        """Return whether the data comes from a form that did not show the field: it holds no hidden input."""
+        return name + _SHOWN_SUFFIX not in data
+
+
 # Any: obj is a row of the consumer's own model, and form the admin form django-stubs types as Any.
 def _reconcile_categories(obj: Any, form: Any, external_id_attr: str) -> None:
-    """Place the item of a record in the selected categories, and remove it from the others.
+    """Place the item of a record in the selected categories, and remove it from the others that the field offers.
 
-    The service makes the changes. Nothing changes when the form has no ``categories`` field, or
-    when no item has the external id.
+    The service makes the changes. Nothing changes when the form has no ``categories`` field, when
+    the data does not come from a form that showed the field, or when no item has the external id.
+    A placement in a category that the field does not offer, such as a disabled category, stays.
 
     Args:
         obj: Your record, which the admin saves.
         form: The bound admin form, with ``cleaned_data``.
         external_id_attr: The name of the attribute of ``obj`` that holds the external id.
     """
-    if "categories" not in form.cleaned_data:
+    field = form.fields.get(_CATEGORIES_FIELD)
+    if field is None or field.widget.value_omitted_from_data(
+        form.data, form.files, form.add_prefix(_CATEGORIES_FIELD)
+    ):
         return
     external_id = str(getattr(obj, external_id_attr))
     svc = TaxomeshService(repository=DjangoRepository())
@@ -420,10 +512,12 @@ def _reconcile_categories(obj: Any, form: Any, external_id_attr: str) -> None:
         return
     all_links = svc.repository.list_item_parent_links()
     current_ids = {link.category_id for link in all_links if link.item_id == item.item_id}
-    selected = {cat.category_id for cat in form.cleaned_data["categories"]}
+    selected = {cat.category_id for cat in form.cleaned_data[_CATEGORIES_FIELD]}
+    # The categories that the item is in and the field offers: only these can be deselected.
+    offered_ids = set(field.queryset.filter(category_id__in=current_ids).values_list("category_id", flat=True))
     for cat_id in selected - current_ids:
         svc.items.place_in(item.item_id, cat_id)
-    for cat_id in current_ids - selected:
+    for cat_id in offered_ids - selected:
         svc.items.remove_from(item.item_id, cat_id)
 
 
@@ -486,8 +580,14 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
     """An admin mixin that adds a ``categories`` field, which selects many, to the admin of your model.
 
     Each record of your model stands for the taxomesh item whose external id is the record's
-    ``taxomesh_external_id_attr``, its primary key by default. The field places that item in the
-    selected categories.
+    ``taxomesh_external_id_attr``, its primary key by default. The field offers the enabled
+    categories, and places that item in the selected ones.
+
+    The page shows the field last when your admin declares no ``fields`` or ``fieldsets``, unless
+    the user may only view the record. When your admin declares them, the page shows the field
+    where they name ``categories``, and not at all when they do not name it. A save changes the
+    placements only when its page showed the field. It removes the item only from categories that
+    the field offers, so a placement in a disabled category stays.
 
     Usage::
 
@@ -499,20 +599,43 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
     list_filter = (TaxomeshCategoryListFilter,)
 
     # Any: the mixin serves the consumer's own ModelAdmin, whose model taxomesh does not know.
+    def get_fields(self, request: HttpRequest, obj: Any | None = None) -> _FieldGroups:
+        """Add the ``categories`` field, last, to the fields of an admin that declares no ``fields``.
+
+        Django then lists the fields of the form that ``get_form(fields=None)`` returns, and that
+        form has no ``categories`` field. A page for a user who may not change the record shows no
+        form, so the method adds no field to it.
+
+        Args:
+            request: The current HTTP request.
+            obj: The record that the page edits; ``None`` on the add page.
+
+        Returns:
+            The fields of the page.
+        """
+        fields = super().get_fields(request, obj)
+        if self.fields or _CATEGORIES_FIELD in fields:
+            return fields
+        if obj is not None and not self.has_change_permission(request, obj):
+            return fields
+        return [*fields, _CATEGORIES_FIELD]
+
+    # Any: the mixin serves the consumer's own ModelAdmin, whose model taxomesh does not know.
     def get_form(
         self, request: HttpRequest, obj: Any | None = None, change: bool = False, **kwargs: Any
     ) -> type[forms.ModelForm[Any]]:
-        """Add a ``categories`` field, a ``ModelMultipleChoiceField``, to the admin form.
+        """Add a ``categories`` field, a ``ModelMultipleChoiceField``, to the form of a page that shows it.
 
-        Django's ``ModelAdmin._get_form_for_get_fields`` calls ``get_form(fields=None)`` to find
-        the fields of the form. On that call, which ``fields=None`` marks, this method adds no
-        field, so that the list of fields holds no field that the model does not have.
-
-        On every other call, from the add page and the change page, the method declares the
-        ``categories`` field on the base form class before it calls ``super().get_form()``.
+        Django passes ``fields``, the fields that the page shows; without it, the method reads them
+        from ``get_fieldsets()``, as Django's own method does. When they name ``categories``, the
+        method declares the field on the base form class before it calls ``super().get_form()``.
         ``modelform_factory`` then finds the field in ``declared_fields``. Without that, a
         ``fieldsets`` that names the field, which the model does not have, would raise
         ``FieldError``.
+
+        Django's ``ModelAdmin._get_form_for_get_fields`` calls ``get_form(fields=None)`` to find
+        the fields of the form. ``fields=None`` names no field, so that form has no ``categories``
+        field, and ``get_fields`` adds the field to the list.
 
         Args:
             request: The current HTTP request.
@@ -521,18 +644,20 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
             **kwargs: Passed to ``super().get_form()``.
 
         Returns:
-            A form class with a ``categories`` field, whose choices are the enabled categories,
-            without the implicit root, from ``DjangoRepository.assignable_categories_qs()``.
+            The form class. When the page shows the field, it has a ``categories`` field, whose
+            choices are the enabled categories, without the implicit root, from
+            ``DjangoRepository.assignable_categories_qs()``.
         """
-        # fields=None marks the call from _get_form_for_get_fields: add no field.
-        if "fields" in kwargs and kwargs.get("fields") is None:
+        if "fields" not in kwargs:
+            kwargs["fields"] = flatten_fieldsets(self.get_fieldsets(request, obj))
+        if kwargs["fields"] is None or _CATEGORIES_FIELD not in kwargs["fields"]:
             return super().get_form(request, obj, change, **kwargs)
 
         qs = DjangoRepository().assignable_categories_qs()
         cat_field = forms.ModelMultipleChoiceField(
             queryset=qs,
             required=False,
-            widget=FilteredSelectMultiple("categories", is_stacked=False),
+            widget=_CategoriesWidget(_CATEGORIES_FIELD, is_stacked=False),
             label="Categories",
         )
 
@@ -541,14 +666,14 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
         # in fieldsets (which become the fields= argument to modelform_factory).
         # Any: the consumer's form is a ModelForm of its own model, which taxomesh does not know.
         base_form: type[forms.ModelForm[Any]] = kwargs.pop("form", None) or self.form
-        kwargs["form"] = type(base_form.__name__, (base_form,), {"categories": cat_field})
+        kwargs["form"] = type(base_form.__name__, (base_form,), {_CATEGORIES_FIELD: cat_field})
 
         form_class = super().get_form(request, obj, change, **kwargs)
 
         if obj is not None:
             initial_ids = _get_item_category_ids(obj, self.taxomesh_external_id_attr)
             if initial_ids:
-                form_class.base_fields["categories"].initial = CategoryModel.objects.filter(
+                form_class.base_fields[_CATEGORIES_FIELD].initial = CategoryModel.objects.filter(
                     category_id__in=initial_ids
                 )
 
@@ -559,9 +684,10 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
     def save_model(self, request: HttpRequest, obj: Any, form: Any, change: bool) -> None:
         """Save the record, then place its item in the selected categories through the service.
 
-        ``super().save_model()`` stores the record first. Then ``items.place_in`` places the item in
-        each selected category that it is not in, and ``items.remove_from`` removes it from each
-        category that is not selected.
+        ``super().save_model()`` stores the record first. When the page showed the ``categories``
+        field, ``items.place_in`` then places the item in each selected category that it is not in,
+        and ``items.remove_from`` removes it from each category that the field offers and that is
+        not selected.
 
         Args:
             request: The current HTTP request.
@@ -631,11 +757,32 @@ class CategoryChildLinkForm(_CategoryLinkForm):
 
 
 # ---------------------------------------------------------------------------
+# The base of the link inlines
+# ---------------------------------------------------------------------------
+
+
+class _LinkInlineMixin(_LinkInlineMixinBase):
+    """An inline of links that reads the two ends of each link with the link, in one query.
+
+    The label of each row names both ends, so without this, each row would read them on its own.
+    """
+
+    # Any: the mixin serves the inline of each link model, with the model of its page.
+    def get_queryset(self, request: HttpRequest) -> models.QuerySet[Any]:
+        """Return the links, each with the rows of its two ends.
+
+        Args:
+            request: The current HTTP request.
+        """
+        return super().get_queryset(request).select_related()
+
+
+# ---------------------------------------------------------------------------
 # CategoryParentLink Inline
 # ---------------------------------------------------------------------------
 
 
-class _CategoryLinkInline(_CategoryParentLinkTabular):
+class _CategoryLinkInline(_LinkInlineMixin, _CategoryParentLinkTabular):
     """The base of the two inlines of parent links on the category page: no select offers the implicit root."""
 
     model = CategoryParentLinkModel
@@ -667,6 +814,8 @@ class CategoryParentLinkInline(_CategoryLinkInline):
 
     form = CategoryParentLinkForm
     fk_name = "category"
+    verbose_name = "Parent category"
+    verbose_name_plural = "Parent categories"
     autocomplete_fields = ["parent_category"]
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[CategoryParentLinkModel]:
@@ -707,25 +856,27 @@ class CategoryChildLinkInline(_CategoryLinkInline):
 # ---------------------------------------------------------------------------
 
 
-class ItemParentLinkInline(_ItemParentLinkTabular):
+class ItemParentLinkInline(_LinkInlineMixin, _ItemParentLinkTabular):
     """The inline of the placements of an item, on the item page."""
 
     model = ItemParentLinkModel
-    verbose_name = "Parent category"
-    verbose_name_plural = "Parent categories"
+    verbose_name = "Category"
+    verbose_name_plural = "Categories"
     extra = 0
     autocomplete_fields = ["category"]
 
 
-class ItemTagLinkInline(_ItemTagLinkTabular):
+class ItemTagLinkInline(_LinkInlineMixin, _ItemTagLinkTabular):
     """The inline of the tag links of an item, on the item page."""
 
     model = ItemTagLinkModel
     extra = 0
+    verbose_name = "Tag"
+    verbose_name_plural = "Tags"
     autocomplete_fields = ["tag"]
 
 
-class CategoryItemLinkInline(_CategoryItemLinkTabular):
+class CategoryItemLinkInline(_LinkInlineMixin, _CategoryItemLinkTabular):
     """The inline of the placements in a category, on the category page.
 
     It lists the items placed in the category, and an admin can place an item there or remove one
@@ -870,11 +1021,11 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
         "description",
         "enabled",
         TOP_LEVEL_FIELD,
-        ("external_id", "linked_object_url"),
+        ("external_id", _LINKED_OBJECT_FIELD),
         "metadata",
         ("created_at", "updated_at", "version"),
     )
-    readonly_fields = (TOP_LEVEL_FIELD, "linked_object_url", "created_at", "updated_at", "version")
+    readonly_fields = (TOP_LEVEL_FIELD, _LINKED_OBJECT_FIELD, "created_at", "updated_at", "version")
     inlines = [CategoryParentLinkInline, CategoryChildLinkInline, CategoryItemLinkInline]
     formfield_overrides = _JSON_EDITOR_OVERRIDES
     # The sort modes of the graph page. A subclass extends the list to add a mode.
@@ -884,27 +1035,18 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
         """Return the function of the sort mode that ``sort_by`` names, or of the first mode in ``sort_modes``."""
         return next((fn for key, _label, fn in self.sort_modes if key == sort_by), self.sort_modes[0][2])
 
-    @admin.display(description="↗")
-    # Any: overrides TaxomeshAdminMixin.linked_object_url, which takes a row of any model.
-    def linked_object_url(self, obj: Any) -> str:
-        """Return a ↗ link to the admin page of the record that the external id of the category names.
+    def _linked_model_setting(self) -> str:
+        """Return the setting that names the linked model of a category: see ``_category_linked_model_setting``."""
+        return _category_linked_model_setting()
 
-        It reads ``TAXOMESH_CATEGORY_LINKED_MODEL`` first, and ``TAXOMESH_LINKED_MODEL`` when that
-        gives no URL.
+    def get_fields(self, request: HttpRequest, obj: CategoryModel | None = None) -> _FieldGroups:
+        """Return the fields of the page, without the ↗ link while no setting names the linked model.
 
         Args:
-            obj: The category that the admin shows.
-
-        Returns:
-            An HTML link with the ↗ icon, or an empty string when no URL can be built.
+            request: The current HTTP request.
+            obj: The category that the page edits; ``None`` on the add page.
         """
-        external_id = getattr(obj, "external_id", None) or ""
-        url = _resolve_linked_url(external_id, TAXOMESH_CATEGORY_LINKED_MODEL_SETTING) or _resolve_linked_url(
-            external_id
-        )
-        if url:
-            return format_html('<a href="{}" title="View in admin">&#8599;</a>', url)
-        return ""
+        return _fields_with_link(super().get_fields(request, obj), self._linked_model_setting())
 
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[CategoryModel]:
         """Return the queryset of the categories, without the implicit root.
@@ -1385,7 +1527,7 @@ class ItemRelationLinkForm(_ItemRelationLinkFormBase):
 # ---------------------------------------------------------------------------
 
 
-class _ItemRelationInlineBase(_ItemRelationLinkTabular):
+class _ItemRelationInlineBase(_LinkInlineMixin, _ItemRelationLinkTabular):
     """The base of the two relation inlines; a subclass sets ``fk_name``, its names and ``autocomplete_fields``."""
 
     model = ItemRelationLinkModel
@@ -1425,15 +1567,24 @@ class ItemModelAdmin(_ServiceAdminMixin, _ItemAdminBase):
     list_filter = ("enabled", HasSlugFilter)
     fields = (
         "name",
-        ("external_id", "linked_object_url"),
+        ("external_id", _LINKED_OBJECT_FIELD),
         "slug",
         "enabled",
         "metadata",
         ("created_at", "updated_at", "version"),
     )
-    readonly_fields = ("linked_object_url", "created_at", "updated_at", "version")
+    readonly_fields = (_LINKED_OBJECT_FIELD, "created_at", "updated_at", "version")
     inlines = [ItemParentLinkInline, OutgoingRelationInline, IncomingRelationInline, ItemTagLinkInline]
     formfield_overrides = _JSON_EDITOR_OVERRIDES
+
+    def get_fields(self, request: HttpRequest, obj: ItemModel | None = None) -> _FieldGroups:
+        """Return the fields of the page, without the ↗ link while ``TAXOMESH_LINKED_MODEL`` is not set.
+
+        Args:
+            request: The current HTTP request.
+            obj: The item that the page edits; ``None`` on the add page.
+        """
+        return _fields_with_link(super().get_fields(request, obj), self._linked_model_setting())
 
     def save_model(
         self,
@@ -1582,11 +1733,16 @@ class TagModelForm(_TagFormBase):
 
 @admin.register(TagModel)
 class TagModelAdmin(_ServiceAdminMixin, _TagAdminBase):
-    """The admin of ``TagModel``: the tag pages."""
+    """The admin of ``TagModel``: the tag pages.
+
+    The pages take no identifier, as the category and item pages take none: the service assigns it
+    when it creates the tag. The change page shows it in its heading.
+    """
 
     form = TagModelForm
     list_display = ("tag_id", "name")
     search_fields = ("name",)
+    fields = ("name", "metadata")
 
     def save_model(
         self,
@@ -1609,7 +1765,7 @@ class TagModelAdmin(_ServiceAdminMixin, _TagAdminBase):
             if not change:
                 domain_tag = svc.tags.create(name=obj.name, metadata=obj.metadata)
                 # The service assigns the identifier. Give it to obj, so that the confirmation after
-                # the save links to the stored tag and not to the form's value.
+                # the save and the log entry name the stored tag.
                 obj.tag_id = domain_tag.tag_id
             else:
                 svc.tags.update(tag=obj.tag_id, name=obj.name, metadata=obj.metadata)

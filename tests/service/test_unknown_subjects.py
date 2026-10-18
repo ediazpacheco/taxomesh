@@ -80,6 +80,11 @@ CALLS: list[tuple[str, Call, type[TaxomeshNotFoundError]]] = [
         lambda s, r, x: s.categories.move(r.jazz, from_parent=None, to_parent=x),
         CATEGORY,
     ),
+    (
+        "categories.move(before=x)",
+        lambda s, r, x: s.categories.move(r.jazz, from_parent=r.music, to_parent=None, before=x),
+        CATEGORY,
+    ),
     ("categories.reorder(x)", lambda s, r, x: s.categories.reorder(x, []), CATEGORY),
     ("graph(root=x)", lambda s, r, x: s.graph(root=x), CATEGORY),
     ("items[x]", lambda s, r, x: s.items[x], ITEM),
@@ -100,6 +105,11 @@ CALLS: list[tuple[str, Call, type[TaxomeshNotFoundError]]] = [
         CATEGORY,
     ),
     ("items.move(to_category=x)", lambda s, r, x: s.items.move(r.song, from_category=r.jazz, to_category=x), CATEGORY),
+    (
+        "items.move(before=x)",
+        lambda s, r, x: s.items.move(r.song, from_category=r.jazz, to_category=r.music, before=x),
+        ITEM,
+    ),
     ("items.reorder(x)", lambda s, r, x: s.items.reorder(x, []), CATEGORY),
     ("items.tag(x, tag)", lambda s, r, x: s.items.tag(x, r.live), ITEM),
     ("items.tag(item, x)", lambda s, r, x: s.items.tag(r.tune, x), TAG),

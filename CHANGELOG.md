@@ -11,10 +11,30 @@ The full entries of that series are in
 The changes of 1.0.0 were first dated as 0.2.0 in this file, on 2026-10-12; that version was never
 tagged or published.
 
-## [1.0.1] — 2026-10-17
+## [1.0.2] — 2026-10-18
 
-1.0.1 fixes what a move or a reorder reads, two error answers of the admin graph's moves, and the
-opening examples of three documentation pages. No public name or signature changes.
+1.0.2 changes how the code is written, not what it does: each step that the code repeated is
+written once. No public name or signature changes.
+
+### Changed
+
+- The collections, the repositories, the Django admin, the command line and the HTTP request
+  schemas each write a repeated step once: one builder of a search candidate, one read of a row or
+  its not-found error, one versioned save and one query of each shape on Django, one upsert and one
+  removal for the four kinds of link in the file repositories, and one handler of a refused write in
+  the admin. The answers, the errors and their messages, the order of results, and the reads and
+  the number of queries that each member makes stay the same.
+- The admin's reparent view reads the one category that it moves to refuse the implicit root, not
+  every category, and the admin's version tag reads `taxomesh.__version__`.
+- `sort_modes` is an attribute of `CategoryModelAdmin`, where `docs/django-integration.md` documents
+  it, and no longer of `TaxomeshAdminMixin`, which every taxomesh admin shares.
+
+## [1.0.1] — 2026-10-18
+
+1.0.1 fixes what a move or a reorder reads, the `before` of a move, the check of the service's
+repository, six defects of the Django admin, the opening examples of three documentation pages, and
+the statements of the documentation that a user of 1.0.0 found short. No public name or signature
+changes.
 
 ### Fixed
 
@@ -22,6 +42,29 @@ opening examples of three documentation pages. No public name or signature chang
   `categories.reorder` the parent links of one parent or of the top level, as `items.place_in` does.
   In 1.0.0 they read every link of the store: with 100,000 placements on SQLite, a move took 0.8 s;
   it now takes 3 ms.
+- `items.move` and `categories.move` check `before` before they write. A `before` that names no
+  stored row raises the not-found error of its kind, and a row that is not in the destination, the
+  moving row included, raises `TaxomeshValidationError`. In 1.0.0 the move took the row from its old
+  place and put it last.
+- `TaxomeshService(repository)` raises `TypeError` for an object that does not implement
+  `TaxomeshRepositoryBase`, such as a path. In 1.0.0 `TaxomeshService("x.yaml")` raised
+  `AttributeError: 'str' object has no attribute 'list_categories'`. The port is runtime-checkable,
+  so a class that gives the port's members through `__getattr__`, which `isinstance` does not see,
+  calls `TaxomeshRepositoryBase.register` on itself.
+- `ItemCategoryAssignmentMixin` shows its *categories* field on an admin that declares no `fields`
+  or `fieldsets`. A save changes placements only when its page shows the field, and keeps each
+  placement in a category that the field does not offer, such as a disabled one. In 1.0.0 the page
+  showed no field, and a save of the other fields removed the item from every category.
+- The admin's tag pages take no identifier: the service assigns it, as on the category and item
+  pages. In 1.0.0 the add page required a UUID that the save replaced, and an edit of it answered 500.
+- On the admin graph, opening a branch sets up the drag handles of its entries. In 1.0.0 it showed
+  "Loading failed: initHandles is not defined", and the toggle went back to `[+]`.
+- Every admin page links a category to the model that `TAXOMESH_CATEGORY_LINKED_MODEL` names, or
+  `TAXOMESH_LINKED_MODEL` while that setting is not set; in 1.0.0 the category list and the graph
+  read `TAXOMESH_LINKED_MODEL` alone. With neither setting, a change page shows no `↗` row, where it
+  showed an empty one, and no page logs a warning for each row.
+- The admin shows a tag as its name and identifier, and a link as its two ends and its
+  `sort_index`. In 1.0.0 the tag autocomplete showed `TagModel object (…)`.
 - In the admin graph's reorder and reparent views, an identifier that is not text, such as a
   number, answers 400 "Invalid UUID format" in JSON, as text that is not a UUID does. A storage
   failure before the move answers the JSON 500 with the generic text, as a failure of the move does.
@@ -29,8 +72,17 @@ opening examples of three documentation pages. No public name or signature chang
 - The opening examples of `docs/python-api.md`, `docs/http-api-integration.md` and `docs/design.md`
   run again in the same folder: each first empties a store of its own, as the README's quick start
   does. With the default store, a second run raised.
-- The documentation says that `node.ancestors()` takes the parents in identifier order, and that
-  `categories.list()` with no filter returns every enabled category, at every level.
+- The documentation says that `node.ancestors()` takes the parents in identifier order; that
+  `categories.list()` with no filter returns every enabled category, at every level, by name, then
+  identifier; that `parent=None` is no filter there, while `roots()` lists the top level; that an
+  unfiltered `tags.list()` has no promised order; that a model's field takes what pydantic's lax
+  mode takes; and that a `config_path` naming no file gives the default store.
+- The port no longer says that a batch read must not be split: a backend may read one over its
+  storage's parameter limit in several queries, as `DjangoRepository` does. The port and
+  `docs/repositories.md` state the implicit root's duty: it is a `Category` named `__root__`, and a
+  backend that loads a store without it links each category that has no parent to it first.
+- `docs/django-integration.md` names the two linked-model settings, the app label, the permissions
+  that the graph's moves need, and the graph's and the debug page's URLs.
 
 ## [1.0.0] — 2026-10-15
 

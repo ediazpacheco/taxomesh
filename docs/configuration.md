@@ -1,10 +1,10 @@
 # Configuration (`taxomesh.toml`)
 
 `taxomesh.toml` is optional. It keeps the choice of storage out of application code, so the same
-code runs on another storage backend in another environment. `TaxomeshService()` reads the one in
-the working directory, or the one `config_path` names, and builds the repository it describes.
-With no file, or a file with no `[repository]` section, the repository is a YAML file at
-`data/taxomesh.yaml`. A repository passed to the service is used as given, and no file is read.
+code runs on another backend in another environment. `TaxomeshService()` reads the one in the
+working directory, or the one `config_path` names, and builds the repository it describes. When that
+file does not exist, named or not, or has no `[repository]` section, the repository is a YAML file
+at `data/taxomesh.yaml`. A repository passed to the service is used as given, and no file is read.
 
 ```toml
 [taxomesh]

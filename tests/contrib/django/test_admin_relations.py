@@ -9,6 +9,7 @@ django = pytest.importorskip("django", reason="Django is not installed")
 
 from django.contrib.admin.sites import AdminSite  # noqa: E402
 from django.http import HttpRequest  # noqa: E402
+from django.test import Client  # noqa: E402
 
 from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: E402
 from taxomesh.application.service import TaxomeshService  # noqa: E402
@@ -358,3 +359,26 @@ class TestItemRelationLinkSelfRelationValidation:
 
         with pytest.raises(dj_forms.ValidationError):
             form.clean()
+
+
+def test_each_relation_inline_lists_only_the_relations_of_the_page_item(admin_client: Client) -> None:
+    """The outgoing inline lists the item's relations as a source, the incoming one as a target, the add page none."""
+    svc = TaxomeshService(DjangoRepository())
+    first, second, third = (svc.items.create(name) for name in ("First", "Second", "Third"))
+    svc.items.relate(first, second, "covers")
+    svc.items.relate(third, first, "samples")
+    svc.items.relate(second, third, "remixes")
+
+    def listed(path: str) -> dict[str, set[tuple[UUID, UUID]]]:
+        formsets = [inline.formset for inline in admin_client.get(path).context["inline_admin_formsets"]]
+        return {
+            formset.fk.name: {(link.source_item_id, link.target_item_id) for link in formset.queryset}
+            for formset in formsets
+            if formset.model is ItemRelationLinkModel
+        }
+
+    assert listed(f"/admin/taxomesh_contrib_django/itemmodel/{first.item_id}/change/") == {
+        "source_item": {(first.item_id, second.item_id)},
+        "target_item": {(third.item_id, first.item_id)},
+    }
+    assert listed("/admin/taxomesh_contrib_django/itemmodel/add/") == {"source_item": set(), "target_item": set()}
