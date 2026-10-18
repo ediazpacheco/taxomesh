@@ -137,6 +137,10 @@ class TagModel(models.Model):
     name = models.CharField(max_length=MAX_TAG_NAME_LENGTH)
     metadata = models.JSONField(default=dict)
 
+    def __str__(self) -> str:
+        """Return the label that the admin shows in its selects: the name and the identifier."""
+        return f"{self.name} (id: {self.tag_id})"
+
     class Meta:
         app_label = APP_LABEL
         db_table = TAG_TABLE
@@ -160,6 +164,10 @@ class CategoryParentLinkModel(models.Model):
         db_column="parent_category_id",
     )
     sort_index = models.IntegerField(default=0)
+
+    def __str__(self) -> str:
+        """Return the label that the admin shows: the category under its parent, and its ``sort_index``."""
+        return f"{self.category} under {self.parent_category} (sort_index: {self.sort_index})"
 
     class Meta:
         app_label = APP_LABEL
@@ -188,7 +196,8 @@ class ItemParentLinkModel(models.Model):
     sort_index = models.IntegerField(default=0)
 
     def __str__(self) -> str:
-        return f"{self.item} → {self.category.name}"
+        """Return the label that the admin shows: the item in its category, and its ``sort_index``."""
+        return f"{self.item} in {self.category} (sort_index: {self.sort_index})"
 
     class Meta:
         app_label = APP_LABEL
@@ -214,6 +223,10 @@ class ItemTagLinkModel(models.Model):
         related_name="tag_links",
         db_column="item_id",
     )
+
+    def __str__(self) -> str:
+        """Return the label that the admin shows: the tag on its item."""
+        return f"{self.tag} on {self.item}"
 
     class Meta:
         app_label = APP_LABEL
@@ -241,7 +254,8 @@ class ItemRelationLinkModel(models.Model):
     metadata = models.JSONField(blank=True, default=dict)
 
     def __str__(self) -> str:
-        return f"{self.source_item.slug} {self.relation_type} → {self.target_item.slug} ({self.pk})"
+        """Return the label that the admin shows: the source, the relation type, the target, and the ``sort_index``."""
+        return f"{self.source_item} --[{self.relation_type}]--> {self.target_item} (sort_index: {self.sort_index})"
 
     class Meta:
         app_label = APP_LABEL

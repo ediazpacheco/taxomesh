@@ -1,22 +1,32 @@
 """Admin registration smoke tests for taxomesh Django models."""
 
+import json
+import re
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
 django = pytest.importorskip("django", reason="Django is not installed")
 
 from django.contrib import admin  # noqa: E402
+from django.contrib.auth.models import User  # noqa: E402
 from django.forms import ModelForm  # noqa: E402
-from django.test import Client  # noqa: E402
+from django.test import Client, RequestFactory  # noqa: E402
 from django.utils.datastructures import MultiValueDict  # noqa: E402
 from pytest_django.fixtures import SettingsWrapper  # noqa: E402
 
+from taxomesh import TaxomeshService  # noqa: E402
+from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: E402
+from taxomesh.contrib.django.admin import CategoryModelAdmin, ItemModelAdmin  # noqa: E402
 from taxomesh.contrib.django.models import (  # noqa: E402
     CategoryModel,
+    CategoryParentLinkModel,
     ItemModel,
     ItemParentLinkModel,
+    ItemRelationLinkModel,
+    ItemTagLinkModel,
     TagModel,
 )
 
@@ -83,6 +93,95 @@ def test_item_parent_link_model_str_shows_item_and_category() -> None:
     assert str(item.item_id) in s
     assert "track-1" in s
     assert "Music" in s
+
+
+def test_tag_model_str_shows_name_and_uuid() -> None:
+    """TagModel.__str__ returns 'Name (id: <tag_id>)', as the domain's Tag does."""
+    tag = TagModel.objects.create(tag_id=uuid4(), name="featured")
+    assert str(tag) == f"featured (id: {tag.tag_id})"
+
+
+def test_category_parent_link_model_str_shows_the_category_under_its_parent_and_its_sort_index() -> None:
+    music = CategoryModel.objects.create(name="Music")
+    jazz = CategoryModel.objects.create(name="Jazz")
+    link = CategoryParentLinkModel.objects.create(category=jazz, parent_category=music, sort_index=2)
+    assert str(link) == f"{jazz} under {music} (sort_index: 2)"
+
+
+def test_item_parent_link_model_str_shows_the_item_in_its_category_and_its_sort_index() -> None:
+    music = CategoryModel.objects.create(name="Music")
+    track = ItemModel.objects.create(name="Track")
+    link = ItemParentLinkModel.objects.create(item=track, category=music, sort_index=3)
+    assert str(link) == f"{track} in {music} (sort_index: 3)"
+
+
+def test_item_tag_link_model_str_shows_the_tag_on_its_item() -> None:
+    track = ItemModel.objects.create(name="Track")
+    tag = TagModel.objects.create(tag_id=uuid4(), name="featured")
+    link = ItemTagLinkModel.objects.create(tag=tag, item=track)
+    assert str(link) == f"{tag} on {track}"
+
+
+def test_item_relation_link_model_str_shows_the_source_its_type_the_target_and_its_sort_index() -> None:
+    cover = ItemModel.objects.create(name="Cover")
+    original = ItemModel.objects.create(name="Original")
+    link = ItemRelationLinkModel.objects.create(
+        source_item=cover, target_item=original, relation_type="covers", sort_index=1
+    )
+    assert str(link) == f"{cover} --[covers]--> {original} (sort_index: 1)"
+
+
+def _inline_headings(page: str) -> list[str]:
+    """The headings of the inlines of an admin page."""
+    return re.findall(r'class="inline-heading">\s*(.*?)\s*</h2>', page, re.S)
+
+
+class TestTheEditorReadsNoModelClassName:
+    """The tag select and the inline headings and rows read as text, not as Django's default for a model."""
+
+    def test_the_tag_autocomplete_shows_the_tag(self, admin_client: Client) -> None:
+        tag = TaxomeshService(DjangoRepository()).tags.create("featured")
+        query = {"app_label": "taxomesh_contrib_django", "model_name": "itemtaglinkmodel", "field_name": "tag"}
+
+        response = admin_client.get("/admin/autocomplete/", {**query, "term": "feat"})
+
+        assert [result["text"] for result in json.loads(response.content)["results"]] == [str(tag)]
+
+    def test_the_category_page_names_its_parent_links(self, admin_client: Client) -> None:
+        svc = TaxomeshService(DjangoRepository())
+        music = svc.categories.create("Music")
+        jazz = svc.categories.create("Jazz")
+        svc.categories.add_parent(jazz, music)
+
+        page = admin_client.get(f"/admin/taxomesh_contrib_django/categorymodel/{jazz.category_id}/change/")
+
+        text = page.content.decode()
+        assert _inline_headings(text) == ["Parent categories", "Child categories", "Items"]
+        assert "Model object" not in text
+
+    def test_each_inline_reads_the_two_ends_of_its_links_with_them(self, admin_user: User) -> None:
+        """A row's label names both ends of its link: the inline reads them in the query of its links."""
+        request = RequestFactory().get("/")
+        request.user = admin_user
+        category_admin = CategoryModelAdmin(CategoryModel, admin.site)
+        item_admin = ItemModelAdmin(ItemModel, admin.site)
+        inlines = [*category_admin.get_inline_instances(request), *item_admin.get_inline_instances(request)]
+
+        for inline in inlines:
+            assert inline.get_queryset(request).query.select_related is True, type(inline).__name__
+
+    def test_the_item_page_names_its_tag_links(self, admin_client: Client) -> None:
+        svc = TaxomeshService(DjangoRepository())
+        track = svc.items.create("Track")
+        svc.items.tag(track, svc.tags.create("featured"))
+
+        page = admin_client.get(f"/admin/taxomesh_contrib_django/itemmodel/{track.item_id}/change/")
+
+        text = page.content.decode()
+        headings = _inline_headings(text)
+        assert headings[0] == "Categories"
+        assert headings[-1] == "Tags"
+        assert "Model object" not in text
 
 
 # ---------------------------------------------------------------------------

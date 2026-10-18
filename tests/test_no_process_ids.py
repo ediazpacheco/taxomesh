@@ -1,10 +1,11 @@
 """No process in the product: the library and its tests say what the code does, not how it came to be.
 
-A docstring or a comment under ``taxomesh/`` or ``tests/`` carries no task, requirement, spec or
-finding identifier, no history and no citation of the governance text. History belongs to
+A docstring or a comment under ``taxomesh/`` or ``tests/`` carries no ticket, task, requirement or
+specification identifier, no planning label or file, and no history. History belongs to
 ``CHANGELOG.md``. Every text file under both directories is read, templates and the recorded
-fixtures included, and a line matching any pattern below fails the build. This file is the one
-exemption, since it has to spell the patterns out.
+fixtures included, and a line matching any pattern below fails the build. No pattern finds every
+account of a change written in plain words: review finds those. This file is the one exemption,
+since it has to spell the patterns out.
 """
 
 import re
@@ -21,34 +22,31 @@ SKIPPED_DIRECTORIES: Final[frozenset[str]] = frozenset({"__pycache__"})
 #: Each pattern beside a line it must match, so that an expression which matches nothing cannot
 #: pass for a clean tree.
 PATTERNS: Final[dict[str, tuple[str, str]]] = {
-    "task": (r"\bT\d{3}[a-z]?\b", "see T180"),
-    "task with a dash": (r"\bT-\d{2}\b", "T-42: the cache tests"),
-    "requirement": (r"\bFR-\d", "(FR-012)"),
-    "non-functional requirement": (r"\bNFR-\d", "(NFR-008)"),
-    "success criterion": (r"\bSC-\d", "the bytes SC-009 pins"),
-    "finding": (r"\bJ-[BSC]\d", "closes J-C9"),
-    "short finding": (r"\b[GEF]\d{1,2}\b", "fixes G1"),
-    "user story": (r"\bUS\d", "(US1 + US3)"),
-    "identifier inside a name": (r"(?i)(?<![a-z\d])(?:us|sc)\d{1,3}(?![a-z\d])", "test_total_us2"),
-    "acceptance criterion": (r"\bAC\d\b", "meets AC2"),
-    "phase": (r"\bPhase \d+\b", "Phase 4"),
-    "spec number": (r"(?i)\bspecs? ?\d{3}\b|specs/\d{3}", "introduced in spec 034"),
-    "spec number in brackets": (r"\(0\d{2}\)", "the batch reads (093)"),
-    "spec number as a label": (r"(?<![\w.,+-])0\d{2}(?: —|:)", "093 — one query each"),
-    "spec slug": (r"\b0\d{2}-[a-z][a-z-]+", "(047-some-feature)"),
-    "research note": (r"research\.md", "(research.md R2)"),
-    "research decision": (r"\bR\d{2}\b", "as R07 decided"),
-    "analyze run": (r"(?i)analyze run", "the third analyze run"),
+    "lettered identifier": (r"\b[A-Z]{1,3}-[A-Z]\d{1,3}\b", "as XY-Z4 asked"),
+    "zero-padded identifier": (r"\b[A-Z]{1,3}-0\d{1,3}\b", "(QR-007)"),
+    "one-letter identifier": (r"\b[A-Z]-\d{2,4}\b", "Q-77: the cache tests"),
+    "task number": (r"\bT\d{3}[a-z]?\b", "see T512"),
+    "story or criterion label": (r"\b(?:US|AC)\d\b", "(US4, AC7)"),
+    "numbered label inside a name": (r"(?<=_)[a-z]{2}\d{1,3}(?![a-z\d])", "test_total_qa2"),
+    "planning word and its number": (
+        r"(?i:\b(?:phase|stage|round|ruling|session|sprint|spec|specification|feature|iteration|milestone|ticket"
+        r"|task|story)s?)\s+(?:[A-Z]?\d+[a-z]?|[A-Z])\b",
+        "done in sprint 7",
+    ),
+    "planning file": (r"(?i)\b(?:spec|plan|tasks|research|roadmap)\.md\b|\bspecs?/\d", "see plan.md"),
+    "numbered slug": (r"\b0\d{2}-[a-z][a-z-]+", "(047-some-feature)"),
+    "zero-padded number in brackets": (r"\(0\d{2}\)", "the batch reads (093)"),
+    "zero-padded number as a heading": (r"(?<![\w.,+-])0\d{2}(?: —|:)", "093 — one query each"),
+    "before or after a zero-padded number": (
+        r"(?i)\b(?:before|after|since|until|in) 0\d{2}\b",
+        "raised a 500 before 071",
+    ),
     "previously": (r"(?i)\bpreviously\b", "it was previously private"),
     "formerly": (r"(?i)\bformerly\b", "formerly a list"),
     "used to be": (r"(?i)\bused to be\b", "the sentinel used to be private"),
     "renamed": (r"(?i)\b(?:was|were) renamed\b|\brenamed (?:from|to)\b", "renamed from get_tag"),
     "backward compatibility": (r"(?i)\bbackwards?[- ]compat", "for backward-compatible imports"),
-    "release": (r"\b0\.\d+\.\d+a\d+\b", "no counterpart in 0.1.0a50"),
-    "added in a spec": (r"(?i)\b(?:added|introduced|removed) in (?:spec )?0\d{2}\b", "(removed in 025)"),
-    "constitution": (r"(?i)\bconstitution\b", "(Constitution II)"),
-    "feature number": (r"(?i)\bfeature \d{3}\b", "Feature 052: the list is ordered"),
-    "before or after a spec": (r"(?i)\b(?:before|after|since|until) 0\d{2}\b", "raised a 500 before 071"),
+    "pre-release version": (r"\b\d+\.\d+\.\d+(?:a|b|rc)\d+\b", "no counterpart in 0.3.0a2"),
 }
 COMPILED: Final[dict[str, re.Pattern[str]]] = {name: re.compile(pattern) for name, (pattern, _) in PATTERNS.items()}
 

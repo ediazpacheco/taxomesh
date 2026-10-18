@@ -11,10 +11,10 @@ from tests.docs._reference import REPO_ROOT
 
 BUDGETS = {
     "README.md": 170,
-    "docs/python-api.md": 700,
-    "docs/http-api-integration.md": 170,
-    "docs/django-integration.md": 124,
-    "docs/repositories.md": 80,
+    "docs/python-api.md": 703,
+    "docs/http-api-integration.md": 172,
+    "docs/django-integration.md": 138,
+    "docs/repositories.md": 84,
     "docs/configuration.md": 40,
     "llms.txt": 150,
 }

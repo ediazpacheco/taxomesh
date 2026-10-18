@@ -597,16 +597,51 @@ class TestGetItemCategoryIdsHelper:
         assert result == [cat_id_a]
 
 
+def _form_that_showed_the_field(*selected: UUID, offered: tuple[UUID, ...] = ()) -> MagicMock:
+    """Return a mock bound form whose page showed the ``categories`` field.
+
+    ``selected`` are the identifiers of the selected categories. ``offered`` are the identifiers of
+    the categories that the item is in and that the field offers.
+    """
+    form = MagicMock()
+    field = form.fields.get.return_value
+    field.widget.value_omitted_from_data.return_value = False
+    field.queryset.filter.return_value.values_list.return_value = list(offered)
+    form.cleaned_data = {"categories": [MagicMock(category_id=category_id) for category_id in selected]}
+    return form
+
+
+def _placement(item_id: UUID, category_id: UUID) -> MagicMock:
+    """Return a mock placement of an item in a category."""
+    return MagicMock(item_id=item_id, category_id=category_id)
+
+
 class TestReconcileCategoriesHelper:
     """Tests for the _reconcile_categories module-level helper."""
 
-    def test_no_op_when_categories_key_absent(self) -> None:
-        """Returns immediately without calling service when 'categories' not in cleaned_data."""
+    def test_no_op_when_the_form_has_no_categories_field(self) -> None:
+        """Returns without calling the service when the form has no 'categories' field."""
         from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
 
         obj = MagicMock()
         form = MagicMock()
-        form.cleaned_data = {}
+        form.fields = {}
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            _reconcile_categories(obj, form, "pk")
+            mock_svc.items.get_by_external_id.assert_not_called()
+            mock_svc.items.place_in.assert_not_called()
+            mock_svc.items.remove_from.assert_not_called()
+
+    def test_no_op_when_the_page_did_not_show_the_field(self) -> None:
+        """Returns without calling the service when the data comes from a form that did not show the field."""
+        from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
+
+        obj = MagicMock()
+        form = _form_that_showed_the_field()
+        form.fields.get.return_value.widget.value_omitted_from_data.return_value = True
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
@@ -622,8 +657,7 @@ class TestReconcileCategoriesHelper:
 
         obj = MagicMock()
         obj.pk = "ghost"
-        form = MagicMock()
-        form.cleaned_data = {"categories": []}
+        form = _form_that_showed_the_field()
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
@@ -641,51 +675,53 @@ class TestReconcileCategoriesHelper:
         obj.pk = "ext-1"
         item_id = uuid4()
         cat_id_new = uuid4()
-
-        mock_item = MagicMock()
-        mock_item.item_id = item_id
-
-        mock_cat = MagicMock()
-        mock_cat.category_id = cat_id_new
-
-        form = MagicMock()
-        form.cleaned_data = {"categories": [mock_cat]}
+        form = _form_that_showed_the_field(cat_id_new)
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.items.get_by_external_id.return_value = mock_item
+            mock_svc.items.get_by_external_id.return_value = MagicMock(item_id=item_id)
             mock_svc.repository.list_item_parent_links.return_value = []
             _reconcile_categories(obj, form, "pk")
             mock_svc.items.place_in.assert_called_once_with(item_id, cat_id_new)
             mock_svc.items.remove_from.assert_not_called()
 
     def test_removes_deselected_categories(self) -> None:
-        """Calls items.remove_from for categories in current but not in selected."""
+        """Calls items.remove_from for an offered category in current but not in selected."""
         from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
 
         obj = MagicMock()
         obj.pk = "ext-1"
         item_id = uuid4()
         cat_id_old = uuid4()
-
-        mock_item = MagicMock()
-        mock_item.item_id = item_id
-
-        link = MagicMock()
-        link.item_id = item_id
-        link.category_id = cat_id_old
-
-        form = MagicMock()
-        form.cleaned_data = {"categories": []}
+        form = _form_that_showed_the_field(offered=(cat_id_old,))
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.items.get_by_external_id.return_value = mock_item
-            mock_svc.repository.list_item_parent_links.return_value = [link]
+            mock_svc.items.get_by_external_id.return_value = MagicMock(item_id=item_id)
+            mock_svc.repository.list_item_parent_links.return_value = [_placement(item_id, cat_id_old)]
             _reconcile_categories(obj, form, "pk")
             mock_svc.items.remove_from.assert_called_once_with(item_id, cat_id_old)
+            mock_svc.items.place_in.assert_not_called()
+
+    def test_keeps_a_placement_in_a_category_the_field_does_not_offer(self) -> None:
+        """Does not call items.remove_from for a category in current that the field does not offer."""
+        from taxomesh.contrib.django.admin import _reconcile_categories  # noqa: PLC0415
+
+        obj = MagicMock()
+        obj.pk = "ext-1"
+        item_id = uuid4()
+        cat_id_disabled = uuid4()
+        form = _form_that_showed_the_field()
+
+        with patch(_PATCH_TARGET) as MockSvc:
+            mock_svc = MagicMock()
+            MockSvc.return_value = mock_svc
+            mock_svc.items.get_by_external_id.return_value = MagicMock(item_id=item_id)
+            mock_svc.repository.list_item_parent_links.return_value = [_placement(item_id, cat_id_disabled)]
+            _reconcile_categories(obj, form, "pk")
+            mock_svc.items.remove_from.assert_not_called()
             mock_svc.items.place_in.assert_not_called()
 
     def test_places_and_removes_correctly_for_mixed_diff(self) -> None:
@@ -698,32 +734,16 @@ class TestReconcileCategoriesHelper:
         cat_id_keep = uuid4()
         cat_id_remove = uuid4()
         cat_id_add = uuid4()
-
-        mock_item = MagicMock()
-        mock_item.item_id = item_id
-
-        link_keep = MagicMock()
-        link_keep.item_id = item_id
-        link_keep.category_id = cat_id_keep
-
-        link_remove = MagicMock()
-        link_remove.item_id = item_id
-        link_remove.category_id = cat_id_remove
-
-        mock_cat_keep = MagicMock()
-        mock_cat_keep.category_id = cat_id_keep
-
-        mock_cat_add = MagicMock()
-        mock_cat_add.category_id = cat_id_add
-
-        form = MagicMock()
-        form.cleaned_data = {"categories": [mock_cat_keep, mock_cat_add]}
+        form = _form_that_showed_the_field(cat_id_keep, cat_id_add, offered=(cat_id_keep, cat_id_remove))
 
         with patch(_PATCH_TARGET) as MockSvc:
             mock_svc = MagicMock()
             MockSvc.return_value = mock_svc
-            mock_svc.items.get_by_external_id.return_value = mock_item
-            mock_svc.repository.list_item_parent_links.return_value = [link_keep, link_remove]
+            mock_svc.items.get_by_external_id.return_value = MagicMock(item_id=item_id)
+            mock_svc.repository.list_item_parent_links.return_value = [
+                _placement(item_id, cat_id_keep),
+                _placement(item_id, cat_id_remove),
+            ]
             _reconcile_categories(obj, form, "pk")
             mock_svc.items.place_in.assert_called_once_with(item_id, cat_id_add)
             mock_svc.items.remove_from.assert_called_once_with(item_id, cat_id_remove)
@@ -767,8 +787,7 @@ class TestItemCategoryAssignmentMixin:
         obj = MagicMock(spec=ItemModel)
         obj.pk = str(uuid4())
 
-        form = MagicMock()
-        form.cleaned_data = {"categories": []}
+        form = _form_that_showed_the_field()
 
         from django.contrib.admin import ModelAdmin as _ModelAdmin  # noqa: PLC0415
 

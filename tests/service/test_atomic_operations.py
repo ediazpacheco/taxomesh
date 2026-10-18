@@ -1,18 +1,17 @@
-"""Atomicity behavior tests for the five multi-write ``TaxomeshService`` operations.
+"""Atomicity of the five ``TaxomeshService`` operations that make several writes.
 
-These tests exercise the ``with self._repo.atomic():`` boundary added to
-``categories.create``, ``categories.reorder``, ``items.reorder``,
-``categories.move``, and ``items.move``:
+``categories.create``, ``categories.reorder``, ``items.reorder``, ``categories.move`` and
+``items.move`` each run inside one ``with self._repo.atomic():`` block:
 
-- **User Story 1 (Django, transactional)**: a mid-operation write failure rolls
-  the whole operation back to its pre-operation state. A storage failure is the
-  ``TaxomeshRepositoryError`` the port's writes raise, and it propagates
-  unchanged, as any mid-write ``TaxomeshError`` does, *and* still rolls back
-  (savepoint nesting). Pre-write ``ValueError`` / ``pydantic.ValidationError``
-  stay outside the boundary and propagate unwrapped.
-- **User Story 2 (all backends)**: the success path is byte-for-byte unchanged.
-- **User Story 3 (file/in-memory)**: the boundary is a best-effort no-op —
-  partial state MAY remain after a mid-operation failure, exactly as documented.
+- **Django, transactional**: a write failure in the middle of the operation rolls the whole
+  operation back to its state before the operation. A storage failure is the
+  ``TaxomeshRepositoryError`` the port's writes raise, and it propagates unchanged, as any
+  ``TaxomeshError`` raised between the writes does, *and* still rolls back (savepoint nesting).
+  ``ValueError`` and ``pydantic.ValidationError`` raised before the first write stay outside the
+  block and propagate unwrapped.
+- **Every backend**: the block changes nothing when the operation succeeds.
+- **Files and in-memory**: the block is a best-effort no-op, so partial state may remain after a
+  failure in the middle of the operation, as documented.
 """
 
 from collections.abc import Callable
@@ -40,6 +39,7 @@ from tests.service.conftest import InMemoryRepository
 # ---------------------------------------------------------------------------
 
 
+@TaxomeshRepositoryBase.register
 class FailingRepository:
     """Wrap a real backend and raise on the Nth call to a targeted write method.
 
@@ -49,6 +49,9 @@ class FailingRepository:
     the supplied exception **instance** (the port's ``TaxomeshRepositoryError``
     or another ``TaxomeshError`` subclass), allowing a failure to occur *after* an earlier
     write has already been performed — exercising Django savepoint nesting.
+
+    The service checks a repository with ``isinstance``, which does not see the members that
+    ``__getattr__`` gives, so the class is registered with the port.
     """
 
     def __init__(self, wrapped: TaxomeshRepositoryBase) -> None:

@@ -17,6 +17,7 @@ from importlib import import_module
 from importlib.resources import files
 from itertools import chain
 from pathlib import Path
+from types import ModuleType
 from typing import Final
 
 import pytest
@@ -194,6 +195,38 @@ class TestPublicExports:
             if getattr(taxomesh, name, None) is not getattr(import_module(module_path), name)
         ]
         assert not shadowed, f"re-exported as a different object than its own module defines: {shadowed}"
+
+    def test_the_root_binds_no_public_name_beyond_its_exports(self) -> None:
+        """The package root binds no public name that ``__all__`` leaves out, its submodules aside.
+
+        ``logging`` and ``version`` are the two standard-library names that the root imports for its
+        own use. An adapter imported into the root, a name ``__all__`` does not list, fails here.
+        """
+        public = {name for name in vars(taxomesh) if not name.startswith("_")}
+        submodules = {
+            name
+            for name in public
+            if isinstance(module := getattr(taxomesh, name), ModuleType) and module.__name__ == f"taxomesh.{name}"
+        }
+        unlisted = public - submodules - set(taxomesh.__all__)
+        assert unlisted == {"logging", "version"}, f"bound on taxomesh but not in __all__: {sorted(unlisted)}"
+
+    def test_every_error_class_of_the_core_is_exported(self) -> None:
+        """Each error class that ``taxomesh.exceptions`` defines is importable from ``taxomesh``.
+
+        ``TaxomeshGraphTooLargeError`` is the one error class outside the core:
+        ``taxomesh.contrib.api.errors`` defines it, beside the HTTP serializer that raises it, as
+        :class:`TestTheHttpOnlyError` checks.
+        """
+        defined = {
+            name
+            for name, value in vars(taxomesh.exceptions).items()
+            if isinstance(value, type)
+            and issubclass(value, Exception)
+            and value.__module__ == taxomesh.exceptions.__name__
+        }
+        assert defined, "taxomesh.exceptions defines no error class"
+        assert not defined - set(taxomesh.__all__), f"not exported: {sorted(defined - set(taxomesh.__all__))}"
 
 
 class TestTheHttpOnlyError:

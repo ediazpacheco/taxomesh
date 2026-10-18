@@ -574,8 +574,6 @@ class TestATagWithoutMetadataIsSaved:
         url = reverse(TAG_ADD_URL_NAME)
         posted = _as_rendered(admin_client, url)
         posted["name"] = "Mood"
-        # The form asks for an identifier, and the save stores the one the service assigns.
-        posted["tag_id"] = str(uuid4())
 
         response = admin_client.post(url, posted)
 
@@ -595,3 +593,44 @@ class TestATagWithoutMetadataIsSaved:
 
     def test_the_add_page_opens_the_box_empty(self, admin_client: Client) -> None:
         assert _as_rendered(admin_client, reverse(TAG_ADD_URL_NAME))["metadata"] == "{}"
+
+
+class TestTheServiceAssignsATagIdentifier:
+    """The tag pages take no identifier, as the category and item pages take none: the service assigns it.
+
+    The change page shows the identifier in its heading, as the category and item pages do.
+    """
+
+    def test_the_add_page_asks_for_no_identifier(self, admin_client: Client) -> None:
+        assert "tag_id" not in _as_rendered(admin_client, reverse(TAG_ADD_URL_NAME))
+
+    def test_a_tag_is_added_with_a_name_alone(self, admin_client: Client) -> None:
+        url = reverse(TAG_ADD_URL_NAME)
+        posted = _as_rendered(admin_client, url)
+        posted["name"] = "Mood"
+
+        response = admin_client.post(url, posted)
+
+        assert response.status_code == 302
+        stored = TagModel.objects.get(name="Mood")
+        assert LogEntry.objects.get().object_id == str(stored.tag_id)
+
+    def test_an_edit_keeps_the_identifier(self, admin_client: Client) -> None:
+        mood = _service().tags.create("Mood")
+        url = reverse(TAG_CHANGE_URL_NAME, args=[mood.tag_id])
+        posted = _as_rendered(admin_client, url)
+        assert "tag_id" not in posted
+        posted["name"] = "Moods"
+        posted["tag_id"] = str(uuid4())  # the form has no such field, so it reads no such value
+
+        response = admin_client.post(url, posted)
+
+        assert response.status_code == 302
+        assert list(TagModel.objects.values_list("tag_id", "name")) == [(mood.tag_id, "Moods")]
+
+    def test_the_change_page_shows_the_identifier_in_its_heading(self, admin_client: Client) -> None:
+        mood = _service().tags.create("Mood")
+
+        page = admin_client.get(reverse(TAG_CHANGE_URL_NAME, args=[mood.tag_id])).content.decode()
+
+        assert f"<h2>Mood (id: {mood.tag_id})</h2>" in page

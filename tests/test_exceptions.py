@@ -2,15 +2,13 @@
 
 Verifies that every exception class is correctly placed in the hierarchy,
 catchable at the right granularity, and importable from the public surface.
-TaxomeshCyclicDependencyError is a stub for future DAG cycle-detection logic;
-its hierarchy placement is validated here even though no service method raises
-it yet.
 """
 
 import pickle
 
 import pytest
 
+import taxomesh.exceptions
 from taxomesh import (
     TaxomeshCategoryNotFoundError,
     TaxomeshConfigError,
@@ -25,6 +23,7 @@ from taxomesh import (
     TaxomeshRootCategoryError,
     TaxomeshTagNotFoundError,
     TaxomeshValidationError,
+    TaxomeshVersionConflictError,
 )
 
 # ------------------------------------------------------------------
@@ -87,6 +86,42 @@ def test_not_found_subclasses_are_mutually_exclusive() -> None:
     assert not issubclass(TaxomeshCategoryNotFoundError, TaxomeshItemNotFoundError)
     assert not issubclass(TaxomeshItemNotFoundError, TaxomeshTagNotFoundError)
     assert not issubclass(TaxomeshTagNotFoundError, TaxomeshCategoryNotFoundError)
+
+
+# Each error class of ``taxomesh.exceptions`` with its direct bases.
+BASES: list[tuple[type[Exception], tuple[type, ...]]] = [
+    (TaxomeshError, (Exception,)),
+    (TaxomeshNotFoundError, (TaxomeshError, KeyError)),
+    (TaxomeshCategoryNotFoundError, (TaxomeshNotFoundError,)),
+    (TaxomeshItemNotFoundError, (TaxomeshNotFoundError,)),
+    (TaxomeshTagNotFoundError, (TaxomeshNotFoundError,)),
+    (TaxomeshValidationError, (TaxomeshError, ValueError)),
+    (TaxomeshCyclicDependencyError, (TaxomeshValidationError,)),
+    (TaxomeshRelationError, (TaxomeshValidationError,)),
+    (TaxomeshDuplicateSlugError, (TaxomeshValidationError,)),
+    (TaxomeshRootCategoryError, (TaxomeshValidationError,)),
+    (TaxomeshExternalIdConflictError, (TaxomeshValidationError,)),
+    (TaxomeshRepositoryError, (TaxomeshError,)),
+    (TaxomeshConfigError, (TaxomeshError,)),
+    (TaxomeshVersionConflictError, (TaxomeshError,)),
+]
+
+
+@pytest.mark.parametrize(("error", "bases"), BASES, ids=[error.__name__ for error, _ in BASES])
+def test_each_error_class_has_its_bases(error: type[Exception], bases: tuple[type, ...]) -> None:
+    assert error.__bases__ == bases
+
+
+def test_the_bases_cover_every_error_class() -> None:
+    defined = {
+        value
+        for value in vars(taxomesh.exceptions).values()
+        if isinstance(value, type)
+        and issubclass(value, Exception)
+        and value.__module__ == taxomesh.exceptions.__name__
+    }
+
+    assert defined == {error for error, _ in BASES}
 
 
 # ------------------------------------------------------------------

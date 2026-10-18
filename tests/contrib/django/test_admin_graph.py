@@ -1,5 +1,6 @@
 """Tests for the Django admin taxonomy graph view."""
 
+import logging
 import pathlib
 import re
 
@@ -250,6 +251,28 @@ class TestLinkedModel:
         assert "&#8599;" not in response.content.decode(), (
             "Expected no ↗ icon when TAXOMESH_LINKED_MODEL setting is absent"
         )
+
+    def test_an_absent_setting_logs_nothing(self, admin_client: Client, caplog: pytest.LogCaptureFixture) -> None:
+        """A site that sets no linked model gets no warning: the setting is optional."""
+        from django.urls import reverse  # noqa: PLC0415
+
+        from taxomesh import TaxomeshService  # noqa: PLC0415
+        from taxomesh.adapters.repositories.django_repository import DjangoRepository  # noqa: PLC0415
+
+        svc = TaxomeshService(DjangoRepository())
+        music = svc.categories.create("Music", external_id="7")
+        svc.items.place_in(svc.items.create("Track", external_id="1"), music)
+        pages = (
+            reverse("admin:taxomesh_contrib_django_graph"),
+            "/admin/taxomesh_contrib_django/categorymodel/",
+            "/admin/taxomesh_contrib_django/itemmodel/",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="taxomesh"):
+            statuses = [admin_client.get(page).status_code for page in pages]
+
+        assert statuses == [200, 200, 200]
+        assert [record.getMessage() for record in caplog.records if record.name.startswith("taxomesh")] == []
 
     def test_no_icon_when_instance_not_found(self, admin_client: Client, settings: SettingsWrapper) -> None:
         """No ↗ icon when setting is valid but no instance with the given pk exists."""

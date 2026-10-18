@@ -19,7 +19,13 @@ from taxomesh.domain.info import TaxomeshInfo
 from taxomesh.domain.models import Category, Item, Tag
 from taxomesh.exceptions import TaxomeshError, TaxomeshValidationError
 from taxomesh.ports.repository import TaxomeshRepositoryBase
-from tests.service.conftest import BACKEND_PARAMS, CountedService, CountingRepository, _build_repository
+from tests.service.conftest import (
+    BACKEND_PARAMS,
+    CountedService,
+    CountingRepository,
+    InMemoryRepository,
+    _build_repository,
+)
 
 
 # Any: these calls pass what the annotations refuse, as an untyped caller can.
@@ -34,8 +40,8 @@ def _make_service(repo: MagicMock) -> TaxomeshService:
 
 
 def _mock_repo() -> MagicMock:
-    """Create a mock repository with common return values."""
-    repo = MagicMock()
+    """Create a mock repository with common return values. Its spec is the port, so the service takes it."""
+    repo = MagicMock(spec=TaxomeshRepositoryBase)
     repo.in_transaction = False
     cat_id = uuid4()
     item_id = uuid4()
@@ -570,8 +576,6 @@ class TestPlacementReadCaching:
 
     @staticmethod
     def _service_with_one_placement() -> tuple[TaxomeshService, UUID, UUID]:
-        from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
-
         service = TaxomeshService(repository=InMemoryRepository())
         category = service.categories.create("Cached")
         item = service.items.create(name="Cached Item")
@@ -608,8 +612,6 @@ class TestPlacementReadCaching:
 
     def test_categories_list_by_parent_is_served_from_cache_on_repeat(self) -> None:
         """For the children path."""
-        from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
-
         service = TaxomeshService(repository=InMemoryRepository())
         parent = service.categories.create("Cached Parent")
         child = service.categories.create("Cached Child")
@@ -624,8 +626,6 @@ class TestPlacementReadCaching:
         assert [c.category_id for c in first] == [c.category_id for c in second]
 
     def test_categories_list_by_parent_is_invalidated_by_a_write(self) -> None:
-        from tests.service.conftest import InMemoryRepository  # noqa: PLC0415
-
         service = TaxomeshService(repository=InMemoryRepository())
         parent = service.categories.create("Cached Parent")
         child = service.categories.create("Cached Child")
@@ -897,6 +897,34 @@ class TestOneServicesCache:
         assert str(caught.value).startswith("cache_ttl ")
         assert not isinstance(caught.value, TaxomeshError)
         assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.parametrize("repository", ["x.yaml", Path("x.yaml"), object()], ids=["str", "Path", "object"])
+    def test_a_repository_that_is_not_one_is_a_type_error_naming_it(
+        self, repository: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(TypeError) as caught:
+            TaxomeshService(untyped(repository))
+
+        assert (
+            str(caught.value) == f"repository must implement TaxomeshRepositoryBase, not {type(repository).__name__}"
+        )
+        assert not isinstance(caught.value, TaxomeshError)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_backend_without_one_member_of_the_port_is_refused(self) -> None:
+        """A backend with every member but ``list_tags`` is refused when the service is built, not at a later call."""
+        members = {
+            name: member
+            for name, member in vars(InMemoryRepository).items()
+            if name == "__init__" or not name.startswith("__")
+        }
+        del members["list_tags"]
+        partial = type("PartialRepository", (), members)
+
+        with pytest.raises(TypeError, match="not PartialRepository$"):
+            TaxomeshService(untyped(partial()))
 
     def test_a_lifetime_of_true_is_one_second(self, repository: TaxomeshRepositoryBase) -> None:
         """``True`` is the integer 1, as ``limit=True`` and ``expected_version=True`` are."""

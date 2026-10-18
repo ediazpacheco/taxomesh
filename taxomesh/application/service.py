@@ -92,16 +92,21 @@ class TaxomeshService:
             repository: The repository to use. When it is given, the service reads no config file
                 and ignores ``config_path``.
             config_path: The ``taxomesh.toml`` to read when no repository is given. When it is
-                ``None``, the service reads ``taxomesh.toml`` in the working directory. Without the
-                file, or without a ``[repository]`` section in it, the repository is a
-                ``YamlRepository`` at its default path, which creates the file and its directory
-                when they are absent.
+                ``None``, the service reads ``taxomesh.toml`` in the working directory. When the
+                file does not exist, named here or not, or has no ``[repository]`` section, the
+                repository is a ``YamlRepository`` at its default path, which creates the file and
+                its directory when they are absent. A misspelt name therefore gives that store, and
+                no error.
             cache_ttl: How many seconds the service serves a read from memory: a lookup, a batch
                 lookup, a listing, the rows a graph is built from, and each search corpus. ``0``
                 caches nothing, so every read reaches storage.
 
         Raises:
-            TypeError: If ``cache_ttl`` is not a number.
+            TypeError: If ``repository`` is given and is not a ``TaxomeshRepositoryBase``, such as a
+                path or an object that lacks a member of the port, or if ``cache_ttl`` is not a
+                number. The service checks the repository with ``isinstance``, which does not see a
+                member that ``__getattr__`` gives: a class that forwards the port that way calls
+                ``TaxomeshRepositoryBase.register`` on itself.
             TaxomeshValidationError: If ``cache_ttl`` is negative or NaN. The service checks it
                 before it reads the config file or storage.
             TaxomeshConfigError: If the config file exists but cannot be read or parsed, or names a
@@ -109,6 +114,8 @@ class TaxomeshService:
             TaxomeshRepositoryError: If the service builds the repository and the build fails, or
                 if the write that stores the implicit root fails.
         """
+        if repository is not None and not isinstance(repository, TaxomeshRepositoryBase):
+            raise TypeError(f"repository must implement TaxomeshRepositoryBase, not {type(repository).__name__}")
         if not isinstance(cache_ttl, (int, float)):
             raise TypeError(f"cache_ttl must be a number of seconds, not {type(cache_ttl).__name__}")
         # Written as a negation so that NaN, which compares false with everything, is refused too.

@@ -23,12 +23,17 @@ annotations. Every example on this page runs, in order, in the test suite.
 
 ## The worked example
 
-Every example below runs against the taxonomy built here.
+Every example below uses this taxonomy. With no argument, `TaxomeshService()` reads `taxomesh.toml`
+in the working directory, and without one keeps its store in `data/taxomesh.yaml`, between runs.
 
 ```python
-from taxomesh import TaxomeshService
+from pathlib import Path
 
-svc = TaxomeshService()  # the taxomesh.toml in the working directory, else a YAML file in ./data/
+from taxomesh import TaxomeshService
+from taxomesh.repositories import YamlRepository
+
+Path("example.yaml").unlink(missing_ok=True)  # each run starts with an empty store
+svc = TaxomeshService(YamlRepository("example.yaml"))
 
 music = svc.categories.create(name="Music", slug="music", external_id="cat:music")
 jazz = svc.categories.create(name="Jazz", slug="jazz", external_id="cat:jazz")
@@ -228,7 +233,7 @@ assert [n.category.name for n in svc.graph().roots] == ["Music"]
 | `get_by_external_id(external_id, /)` | `Category \| None` | The category with that external id |
 | `get_many(categories, /, *, enabled=None)` | `Mapping[UUID, Category]` | The categories found, in one read |
 | `get_many_by_external_id(external_ids, /, *, enabled=None)` | `Mapping[str, Category]` | The same, keyed by stored external id |
-| `list(*, parent=None, item=None, enabled=True)` | `Sequence[Category]` | Every category; or a parent's children; or an item's categories |
+| `list(*, parent=None, item=None, enabled=True)` | `Sequence[Category]` | Every enabled category, at every level; or a parent's children; or an item's categories |
 | `roots(*, enabled=True)` | `Sequence[Category]` | The top level |
 | `search(query, *, limit=20, parent=None, enabled=True, fuzzy=True)` | `Sequence[Category]` | Ranked matches: see [Search](#search) |
 | `add_parent(category, parent, *, sort_index=None)` | `CategoryParentLink` | Adds a parent, keeping the others |
@@ -289,13 +294,12 @@ assert [c.name for c in svc.categories.list(item=kob)] == ["Jazz"]  # the placem
 
 ## Reading
 
-`list(parent=…)` orders the children by their sort index under that parent, and `list(item=…)`
-the item's categories by the sort index of each placement. Unfiltered, `list()` holds every
-category `enabled` keeps, in no promised order, since a sort index orders a category within one
-parent only. The two filters reach different reads, so passing both raises
-`TaxomeshValidationError`. A filter naming an entity that is not stored raises the not-found error
-of that entity: it is a wrong address, not a miss. `roots()` orders the top level by sort index,
-then by identifier.
+`list(parent=…)` orders the children by their sort index under that parent, and `list(item=…)` the
+item's categories by the sort index of each placement. Unfiltered, `list()` holds every category
+`enabled` keeps, at every level, by name, then by identifier: `parent=None` is no filter, and
+`roots()` lists the top level, by sort index, then by identifier. Passing both filters raises
+`TaxomeshValidationError`, since they reach different reads. A filter naming an entity that is not
+stored raises the not-found error of that entity: it is a wrong address, not a miss.
 
 ```python
 from taxomesh import TaxomeshCategoryNotFoundError
@@ -318,10 +322,11 @@ for wrong, error in ((dict(parent=missing), TaxomeshCategoryNotFoundError), (dic
 ## Parents and order
 
 `add_parent` adds: the category keeps the parents it had. A link that would close a cycle raises
-`TaxomeshCyclicDependencyError`. `remove_parent` removes one link and is a no-op when there is
-none. `move` removes the link to `from_parent`, when there is one, and adds `to_parent`, before the
-sibling `before` or last; `to_parent=None` raises `TaxomeshValidationError` while the category keeps
-another parent. Every check runs before the first write, so a refused move changes nothing.
+`TaxomeshCyclicDependencyError`. `remove_parent` removes one link and is a no-op when there is none.
+`move` removes the link to `from_parent`, if any, and adds `to_parent`, before the sibling `before`
+or last. A `before` that is not stored raises its not-found error. `TaxomeshValidationError` refuses
+one that is no sibling there, the category itself included, and `to_parent=None` while the category
+keeps another parent. Every check runs before the first write, so a refused move changes nothing.
 
 `reorder` gives the categories passed positions 0, 1, 2… in that order. Pass every child: one left
 out keeps its position, which another may then share. A category that is not a child of that
@@ -411,12 +416,12 @@ assert [i.name for i in recursive] == ["Kind of Blue", "Giant Steps", "Birth of 
 
 ## Placement, order and tags
 
-An item may be placed in any number of categories. `place_in` again sets the sort index it is
-given, or keeps the stored one, and adds no second placement; `remove_from`, `untag` and `unrelate`
-are no-ops when there is nothing to remove, and `tag` when the tag is already there. `reorder` works
-as it does for categories, and refuses an item not placed in that category. With no position,
-`place_in` reads the category's placements to find the last, so its cost grows with the category:
-a load of many items into one category passes their positions.
+An item may be placed in any number of categories. `place_in` again sets the sort index it is given,
+or keeps the stored one, and adds no second placement; `remove_from`, `untag` and `unrelate` are
+no-ops when there is nothing to remove, and `tag` when the tag is already there. `move` and
+`reorder` work as they do for categories, and refuse a `before`, or an item, not placed in that
+category. With no position, `place_in` reads the category's placements to find the last, so its cost
+grows with the category: a load of many items into one category passes their positions.
 
 ```python
 svc.items.place_in(kob, blues, sort_index=9)
@@ -426,10 +431,10 @@ svc.items.remove_from(kob, blues)  # a no-op the second time
 
 svc.items.move(steps, from_category=jazz, to_category=blues)
 assert [i.name for i in svc.items.list(category=blues)] == ["Birth of the Cool", "Giant Steps"]
-svc.items.move(steps, from_category=blues, to_category=jazz)
-svc.items.reorder(jazz, [steps, kob])
+svc.items.move(steps, from_category=blues, to_category=jazz, before=kob)
 assert [i.name for i in svc.items.list(category=jazz)] == ["Giant Steps", "Kind of Blue"]
 svc.items.reorder(jazz, [kob, steps])
+assert [i.name for i in svc.items.list(category=jazz)] == ["Kind of Blue", "Giant Steps"]
 
 live = svc.tags.create(name="live")
 svc.items.tag(steps, live)
@@ -499,7 +504,7 @@ assert svc.items.list_relations(kob, direction="both") == ()
 | `update(tag, *, name, metadata)` | `Tag` | Stores a new row with the fields given; neither takes `None` |
 | `delete(key, /)` | `None` | Deletes it, and its links to items |
 | `get_many(tags, /)` | `Mapping[UUID, Tag]` | The tags found, in one read |
-| `list(*, item=None)` | `Sequence[Tag]` | Every tag, or an item's tags by name, then identifier |
+| `list(*, item=None)` | `Sequence[Tag]` | Every tag, in no promised order; or an item's tags, by name, then identifier |
 
 ```python
 featured = svc.tags.create(name="featured", metadata={"colour": "gold"})
@@ -567,7 +572,7 @@ that category and its descendants; `include_items=False` reads no items at all.
 | `node.category` | the `Category` row |
 | `node.children` · `node.parents` | `Sequence[CategoryNode]`, one level: children by sort index, parents by identifier |
 | `node.items` | `Sequence[Item]`, by sort index; `()` in a graph built with `include_items=False` |
-| `node.descendants()` · `node.ancestors()` | `Sequence[CategoryNode]`, every level down or up, depth-first in stored order, each once, the node left out |
+| `node.descendants()` · `node.ancestors()` | `Sequence[CategoryNode]`, every level down or up, depth-first in the order of `children` or `parents`, each once, the node left out |
 
 `walk()` is the graph's only enumerator: it yields every node once, a category no top-level
 category reaches included. It and both node walks end on a cycle in stored data. The graph itself

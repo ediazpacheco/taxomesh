@@ -8,7 +8,7 @@ member kind                           default            meaning
 ====================================  =================  ==========================
 ``list``, ``roots``, ``search``,      ``enabled=True``   enabled rows only
 ``list_related``,
-``get_many_related``
+``get_many_related``, ``graph()``
 ``get_many``, ``get_many_by_*``       ``enabled=None``   unfiltered — agrees with ``get``
 ``get``, ``get_by_*``, ``[...]``,     *no parameter*     unfiltered, always
 ``in``, ``len``
@@ -33,6 +33,7 @@ import pytest
 from taxomesh.application.collections.categories import CategoryCollection
 from taxomesh.application.collections.items import ItemCollection
 from taxomesh.application.collections.tags import TagCollection
+from taxomesh.application.service import TaxomeshService
 
 type Member = tuple[str, Callable[..., object]]
 
@@ -45,6 +46,7 @@ FILTERING: list[Member] = [
     ("ItemCollection.search", ItemCollection.search),
     ("ItemCollection.list_related", ItemCollection.list_related),
     ("ItemCollection.get_many_related", ItemCollection.get_many_related),
+    ("TaxomeshService.graph", TaxomeshService.graph),
 ]
 
 # Bulk lookups: the plural of ``get``, so they must answer as ``get`` answers — unfiltered.
@@ -99,7 +101,7 @@ def _ids(members: list[Member]) -> list[str]:
 
 @pytest.mark.parametrize(("label", "member"), FILTERING, ids=_ids(FILTERING))
 def test_filtering_members_default_to_enabled_only(label: str, member: Callable[..., object]) -> None:
-    """``list``, ``roots``, ``search`` and the two related reads return enabled rows unless asked otherwise."""
+    """``list``, ``roots``, ``search``, the two related reads and ``graph()`` keep enabled rows by default."""
     parameter = _enabled(member)
 
     assert parameter is not None, f"{label} must accept an enabled filter"

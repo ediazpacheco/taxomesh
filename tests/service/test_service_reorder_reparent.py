@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from taxomesh.application.service import TaxomeshService
-from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshItemNotFoundError
+from taxomesh.exceptions import TaxomeshCategoryNotFoundError, TaxomeshItemNotFoundError, TaxomeshValidationError
 
 
 class TestItemsReorder:
@@ -239,3 +239,124 @@ class TestCategoriesMove:
             service.categories.move(
                 child.category_id, from_parent=uuid4(), to_parent=new_parent.category_id, before=None
             )
+
+
+def _stored_links(service: TaxomeshService) -> tuple[set[tuple[UUID, UUID, int]], set[tuple[UUID, UUID, int]]]:
+    """Every stored parent link and placement, as ``(child, parent, sort_index)``."""
+    repository = service.repository
+    return (
+        {(lnk.category_id, lnk.parent_category_id, lnk.sort_index) for lnk in repository.list_category_parent_links()},
+        {(lnk.item_id, lnk.category_id, lnk.sort_index) for lnk in repository.list_item_parent_links()},
+    )
+
+
+class TestMoveBefore:
+    """A ``before`` that is not a sibling in the destination is refused, and the move changes nothing.
+
+    One that names no stored row is a wrong address, and raises the not-found error of its kind. A
+    stored row that is not in the destination, the moving row included, is a refused value.
+    """
+
+    def test_an_item_not_placed_in_the_destination_is_refused(self, service: TaxomeshService) -> None:
+        left, right = service.categories.create("Left"), service.categories.create("Right")
+        moved, stayed, elsewhere = (service.items.create(name) for name in ("Moved", "Stayed", "Elsewhere"))
+        service.items.place_in(moved, left)
+        service.items.place_in(stayed, right)
+        service.items.place_in(elsewhere, left)
+        links = _stored_links(service)
+
+        with pytest.raises(TaxomeshValidationError) as caught:
+            service.items.move(moved, from_category=left, to_category=right, before=elsewhere)
+
+        assert str(elsewhere.item_id) in str(caught.value)
+        assert str(right.category_id) in str(caught.value)
+        assert _stored_links(service) == links
+
+    def test_the_moving_item_is_refused(self, service: TaxomeshService) -> None:
+        left, right = service.categories.create("Left"), service.categories.create("Right")
+        moved = service.items.create("Moved")
+        service.items.place_in(moved, left)
+        service.items.place_in(moved, right)
+        links = _stored_links(service)
+
+        with pytest.raises(TaxomeshValidationError) as caught:
+            service.items.move(moved, from_category=left, to_category=right, before=moved)
+
+        assert str(moved.item_id) in str(caught.value)
+        assert _stored_links(service) == links
+
+    def test_an_unknown_item_changes_nothing(self, service: TaxomeshService) -> None:
+        left, right = service.categories.create("Left"), service.categories.create("Right")
+        moved = service.items.create("Moved")
+        service.items.place_in(moved, left)
+        links = _stored_links(service)
+
+        with pytest.raises(TaxomeshItemNotFoundError):
+            service.items.move(moved, from_category=left, to_category=right, before=uuid4())
+
+        assert _stored_links(service) == links
+
+    def test_a_category_not_a_child_of_the_destination_is_refused(self, service: TaxomeshService) -> None:
+        left, right = service.categories.create("Left"), service.categories.create("Right")
+        moved, stayed, elsewhere = (service.categories.create(name) for name in ("Moved", "Stayed", "Elsewhere"))
+        service.categories.add_parent(moved, left)
+        service.categories.add_parent(stayed, right)
+        service.categories.add_parent(elsewhere, left)
+        links = _stored_links(service)
+
+        with pytest.raises(TaxomeshValidationError) as caught:
+            service.categories.move(moved, from_parent=left, to_parent=right, before=elsewhere)
+
+        assert str(elsewhere.category_id) in str(caught.value)
+        assert str(right.category_id) in str(caught.value)
+        assert _stored_links(service) == links
+
+    def test_a_category_not_at_the_top_level_is_refused(self, service: TaxomeshService) -> None:
+        parent = service.categories.create("Parent")
+        moved, child = service.categories.create("Moved"), service.categories.create("Child")
+        service.categories.add_parent(moved, parent)
+        service.categories.add_parent(child, parent)
+        links = _stored_links(service)
+
+        with pytest.raises(TaxomeshValidationError) as caught:
+            service.categories.move(moved, from_parent=parent, to_parent=None, before=child)
+
+        assert str(child.category_id) in str(caught.value)
+        assert "top level" in str(caught.value)
+        assert _stored_links(service) == links
+
+    def test_the_moving_category_is_refused(self, service: TaxomeshService) -> None:
+        left, right = service.categories.create("Left"), service.categories.create("Right")
+        moved = service.categories.create("Moved")
+        service.categories.add_parent(moved, left)
+        service.categories.add_parent(moved, right)
+        links = _stored_links(service)
+
+        with pytest.raises(TaxomeshValidationError) as caught:
+            service.categories.move(moved, from_parent=left, to_parent=right, before=moved)
+
+        assert str(moved.category_id) in str(caught.value)
+        assert _stored_links(service) == links
+
+    def test_an_unknown_category_changes_nothing(self, service: TaxomeshService) -> None:
+        left, right = service.categories.create("Left"), service.categories.create("Right")
+        moved = service.categories.create("Moved")
+        service.categories.add_parent(moved, left)
+        links = _stored_links(service)
+
+        with pytest.raises(TaxomeshCategoryNotFoundError):
+            service.categories.move(moved, from_parent=left, to_parent=right, before=uuid4())
+
+        assert _stored_links(service) == links
+
+    def test_a_sibling_is_taken(self, service: TaxomeshService) -> None:
+        left, right = service.categories.create("Left"), service.categories.create("Right")
+        moved, first, second = (service.items.create(name) for name in ("Moved", "First", "Second"))
+        service.items.place_in(moved, left)
+        service.items.place_in(first, right)
+        service.items.place_in(second, right)
+
+        service.items.move(moved, from_category=left, to_category=right, before=second)
+
+        assert [i.name for i in service.items.list(category=right)] == ["First", "Moved", "Second"]
+        assert service.items.list(category=left) == ()

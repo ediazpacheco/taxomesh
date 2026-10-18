@@ -46,8 +46,13 @@ def test_the_second_write_waits_for_the_first_and_sees_what_it_stored(
     assert snapshot(_open(kind, path), scene) == snapshot(repository, scene)
 
 
+@TaxomeshRepositoryBase.register
 class BlockWatcher:
-    """Pass every call to a repository, and record the blocks opened and each call made outside one."""
+    """Pass every call to a repository, and record the blocks opened and each call made outside one.
+
+    The service checks a repository with ``isinstance``, which does not see the members that
+    ``__getattr__`` gives, so the class is registered with the port.
+    """
 
     def __init__(self, wrapped: TaxomeshRepositoryBase) -> None:
         self._wrapped = wrapped

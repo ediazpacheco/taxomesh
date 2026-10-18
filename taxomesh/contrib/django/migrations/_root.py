@@ -18,9 +18,9 @@ def normalise_root_links(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) ->
 
     The invariant: a category holds a link to the implicit root exactly when it holds no other parent
     link, and no item is placed in the root. A root link held beside another parent is deleted, a
-    category holding no parent link gets a root link at sort index 0, as ``create`` makes it, and
-    every item placement in the root is deleted. A store with no root is left as it is. Every query
-    goes to the database being migrated, the schema editor's connection.
+    category holding no parent link gets a root link at sort index 0, and every item placement in
+    the root is deleted. A store with no root is left as it is. Every query goes to the database
+    being migrated, the schema editor's connection.
     """
     alias = schema_editor.connection.alias
     category_model = apps.get_model(APP_LABEL, "CategoryModel")

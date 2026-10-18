@@ -1,7 +1,8 @@
 """Shared pytest fixtures for the service test suite."""
 
 import contextlib
-from collections.abc import Collection, Mapping
+from collections import Counter
+from collections.abc import Collection, Mapping, Sized
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -494,6 +495,7 @@ def service(request: pytest.FixtureRequest, tmp_path: Path) -> TaxomeshService:
     return TaxomeshService(repository=_build_repository(request, tmp_path))
 
 
+@TaxomeshRepositoryBase.register
 class CountingRepository:
     """Wrap any backend and count the repository reads a service call issues.
 
@@ -509,6 +511,9 @@ class CountingRepository:
     those prefixes the proxy would count none of them, and every read-count assertion would
     pass while measuring nothing. Configuration introspection needs no exclusion: the
     ``config_summary`` property and ``describe()`` carry no read prefix.
+
+    The service checks a repository with ``isinstance``, which does not see the members that
+    ``__getattr__`` gives, so the class is registered with the port.
     """
 
     _READ_PREFIXES = ("get_", "list_", "find_", "map_")
@@ -516,6 +521,7 @@ class CountingRepository:
     def __init__(self, wrapped: TaxomeshRepositoryBase) -> None:
         self._wrapped = wrapped
         self.calls: list[str] = []
+        self.rows: Counter[str] = Counter()
 
     @property
     def total(self) -> int:
@@ -526,9 +532,14 @@ class CountingRepository:
         """Return how many times the named read was issued."""
         return self.calls.count(name)
 
+    def rows_of(self, name: str) -> int:
+        """Return how many rows or links the named read returned, over every call since the last reset."""
+        return self.rows[name]
+
     def reset(self) -> None:
-        """Discard recorded calls, so a measurement excludes fixture setup."""
+        """Discard recorded calls and rows, so a measurement excludes fixture setup."""
         self.calls.clear()
+        self.rows.clear()
 
     # Any: a proxy forwards whatever attribute the wrapped repository has, called with whatever it takes.
     def __getattr__(self, name: str) -> Any:
@@ -543,7 +554,10 @@ class CountingRepository:
         # Any: the forwarded read takes and returns whatever the port member does.
         def proxy(*args: Any, **kwargs: Any) -> Any:
             self.calls.append(name)
-            return attr(*args, **kwargs)
+            result = attr(*args, **kwargs)
+            if isinstance(result, Sized):
+                self.rows[name] += len(result)
+            return result
 
         return proxy
 

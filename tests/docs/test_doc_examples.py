@@ -1,11 +1,12 @@
 """Execute the runnable code examples of every user documentation page.
 
-A clean environment must be able to copy each example and run it. The pages are ``README.md`` and
-every ``docs/*.md``. A page's fenced ``python`` blocks are concatenated in document order and
-executed in an isolated temporary working directory; a block tagged ``python notest`` is an
-illustrative fragment and is left out. ``RUNNABLE_BLOCKS`` pins how many blocks each page runs, and
-each test id reports it: a block dropped or tagged ``notest`` fails the build until the count is
-changed on purpose, and a new page fails until it is registered.
+A clean environment must be able to copy each example and run it, then run it again in the same
+folder. The pages are ``README.md`` and every ``docs/*.md``. A page's fenced ``python`` blocks are
+concatenated in document order and executed in an isolated temporary working directory, once by one
+test and twice by another; a block tagged ``python notest`` is an illustrative fragment and is left
+out. ``RUNNABLE_BLOCKS`` pins how many blocks each page runs, and each test id reports it: a block
+dropped or tagged ``notest`` fails the build until the count is changed on purpose, and a new page
+fails until it is registered.
 
 The command line runs against the Typer application: once with commands that need no identifier,
 and once with every command, against identifiers read back from the CLI's own output.
@@ -71,9 +72,12 @@ def test_doc_python_examples_run(rel_path: str, tmp_path: Path, monkeypatch: pyt
     exec(compile("\n\n".join(blocks), str(path), "exec"), namespace)
 
 
-def test_the_readme_quick_start_runs_twice_in_one_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A reader runs the quick start again where they ran it, and it runs as it did the first time."""
-    path = REPO_ROOT / "README.md"
+@pytest.mark.parametrize("rel_path", sorted(page for page, count in RUNNABLE_BLOCKS.items() if count))
+def test_doc_python_examples_run_twice_in_one_folder(
+    rel_path: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reader runs a page's examples again where they ran them, and they run as they did the first time."""
+    path = REPO_ROOT / rel_path
     code = compile("\n\n".join(_runnable_blocks(path.read_text(encoding="utf-8"))), str(path), "exec")
     monkeypatch.chdir(tmp_path)
     for _ in range(2):

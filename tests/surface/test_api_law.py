@@ -127,6 +127,13 @@ class TestNamingLaw:
 
         assert not offenders, f"_for_ must not appear in service names: {offenders}"
 
+    @pytest.mark.parametrize("collection", [CategoryCollection, ItemCollection, TagCollection])
+    def test_no_collection_name_contains_for(self, collection: type) -> None:
+        """``_for_`` appears nowhere on the three collections either."""
+        offenders = _names_containing_for(collection)
+
+        assert not offenders, f"_for_ must not appear in {collection.__name__} names: {offenders}"
+
     def test_no_list_member_returns_a_mapping(self) -> None:
         """A ``list*`` member returns a sequence, never a mapping.
 
