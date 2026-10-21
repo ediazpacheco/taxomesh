@@ -70,18 +70,18 @@ node = svc.graph()[jazz]  # a read-only snapshot of the whole taxonomy
 assert sorted(parent.category.name for parent in node.parents) == ["Genres", "Music"]
 ```
 
-With no argument, `TaxomeshService()` reads `taxomesh.toml` in the working directory, and without one
-keeps its store in `data/taxomesh.yaml`, between runs.
+With no argument, `TaxomeshService()` reads `taxomesh.toml` in the working directory. Without that
+file, its store is `data/taxomesh.yaml`, which keeps the taxonomy from one run to the next.
 
-## The forms
+## The collection interface
 
 `coll` is `svc.categories`, `svc.items` or `svc.tags`, and a key is a row or its `UUID`. Tags have
-no slug, external id or search:
+no slug, no external id and no search.
 
 | Form | Returns | On a miss |
 |---|---|---|
 | `coll[key]` | the row | raises `Taxomesh<X>NotFoundError`, a `KeyError` |
-| `coll.get(key, default=None)` | the row | `default` |
+| `coll.get(key, default=None, /)` | the row | `default` |
 | `key in coll` | `bool` | `False` |
 | `len(coll)` | `int` | `0` |
 | `del coll[key]` | `None` | raises |
@@ -98,10 +98,11 @@ The collections do not iterate ([why](https://github.com/ediazpacheco/taxomesh/b
   `TaxomeshCyclicDependencyError`.
 - **An order under each parent**: every parent link and placement carries its own `sort_index`,
   which `reorder` and `move` change.
-- **External ids**: `str`, `int` or `UUID`, stored as text and unique within its kind, and looked
-  up one at a time or in bulk.
-- **Tags and typed relations**: free-form tags, and directed item-to-item relations (`covers`,
-  `version_of`) read in either direction, for many items at once in two storage reads.
+- **External ids**: each is a `str`, an `int` or a `UUID`, stored as text, unique within its kind,
+  and looked up one at a time or in bulk.
+- **Tags and typed relations**: free-form tags, and directed item-to-item relations of types that
+  you name, such as `covers` or `version_of`. `get_many_related` reads the relations of many items
+  in two storage reads, in one direction or both.
 - **Fuzzy search**: ranked, typo-tolerant and accent-insensitive, on names and slugs; an external id
   matches as a substring only. It runs in the process, with rapidfuzz, and needs no search server.
 - **Graph snapshots**: `svc.graph()` holds one node per category, however many paths reach it.
@@ -109,13 +110,13 @@ The collections do not iterate ([why](https://github.com/ediazpacheco/taxomesh/b
 - **A cache per service**: reads are cached for `cache_ttl` seconds, 5 by default, and a write
   clears its own service's cache only.
 - **Storage**: YAML (the default), JSON or the Django ORM, chosen in code or in a `taxomesh.toml`,
-  or your own backend implementing `TaxomeshRepositoryBase`. One contract suite holds every shipped
-  backend to that port.
+  or your own backend implementing `TaxomeshRepositoryBase`. One contract test suite checks every
+  shipped backend against that port.
 - **Errors**: a member raises a `TaxomeshError`, a not-found one also a `KeyError` and a validation
-  one also a `ValueError`, or a `TypeError` for an argument of the wrong type. Two exceptions: the
-  flags `recursive`, `fuzzy` and `include_items` are read as `if flag:`, and a model's field takes
-  what pydantic's lax mode takes, so `sort_index="5"` is 5. Log records go to the `taxomesh` logger,
-  which has only a `NullHandler` of its own.
+  one also a `ValueError`, or a `TypeError` for an argument of the wrong type. Two cases take a value of
+  another type: the flags `recursive`, `fuzzy` and `include_items` are read as `if flag:`, and a
+  model's field takes what pydantic's lax mode takes, so `sort_index="5"` is 5.
+- **Logging**: log records go to the `taxomesh` logger, which has only a `NullHandler` of its own.
 
 ## Documentation
 
@@ -140,13 +141,13 @@ incompatibly only in a major release. The [changelog](https://github.com/ediazpa
 names every breaking change.
 
 taxomesh supports Python 3.13 and 3.14, and Django 6.x. CI checks every change to `main` with
-`ruff`, `mypy --strict` over the package and its tests, the Django integration included, and the full
-test suite with at least 80% line coverage, a measure that leaves out the Django integration, which
-its own tests exercise.
+`ruff`, with `mypy --strict` over the package and its tests, the Django integration included, and
+with the full test suite on Python 3.13 and 3.14. The suite must cover at least 80% of the lines.
+That measure leaves out the Django integration, which has tests of its own.
 
 ## Used in production
 
-taxomesh is used in production at [LetrasTango](https://letrastango.com/) to organise the categories
+taxomesh is used in production at [LetrasTango](https://letrastango.com/) to organize the categories
 and relations of its tango content.
 
 ## Development
