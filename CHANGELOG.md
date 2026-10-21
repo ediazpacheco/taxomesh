@@ -11,7 +11,7 @@ The full entries of that series are in
 The changes of 1.0.0 were first dated as 0.2.0 in this file, on 2026-10-12; that version was never
 tagged or published.
 
-## [1.0.3] — 2026-10-20
+## [1.0.3] — 2026-10-21
 
 1.0.3 builds a row with metadata in less time. No public name or signature changes.
 
