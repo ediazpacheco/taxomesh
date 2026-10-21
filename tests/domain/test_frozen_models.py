@@ -11,6 +11,7 @@ import copy
 import json
 import pickle
 import re
+from collections import OrderedDict
 from collections.abc import Callable, Hashable
 from enum import IntEnum, StrEnum
 from typing import Any
@@ -28,7 +29,7 @@ from taxomesh.domain.models import (
     ItemTagLink,
     Tag,
 )
-from taxomesh.domain.types import FrozenList
+from taxomesh.domain.types import FrozenDict, FrozenList
 
 
 class Mood(StrEnum):
@@ -256,6 +257,24 @@ class TestFrozenMetadata:
         assert [type(key) for key in (*metadata, *metadata["in"])] == [str] * 6
         assert [type(metadata["mood"]), type(metadata["rank"][0]), type(metadata["loud"])] == [str, int, float]
         assert metadata["on"] is True
+
+    def test_a_dict_subclass_below_the_top_level_becomes_a_frozen_dict(self, model: str) -> None:
+        """An ``OrderedDict`` in the metadata is held as a ``FrozenDict``, as a plain dict is."""
+        inner = METADATA_ROWS[model]({"inner": OrderedDict(a=1)}).metadata["inner"]
+        assert type(inner) is FrozenDict
+        assert inner == {"a": 1}
+        with pytest.raises(TypeError):
+            inner["b"] = 2
+
+    def test_metadata_passed_from_one_model_to_another_is_built_again(self, model: str) -> None:
+        """The new model holds new frozen dicts and lists, equal to the ones passed, none of them the same object."""
+        held = METADATA_ROWS[model](_payload()).metadata
+        again = METADATA_ROWS[model]({"held": held}).metadata["held"]
+        assert again == held
+        assert again is not held
+        assert again["lunfardo"]["regions"] is not held["lunfardo"]["regions"]
+        assert again["lunfardo"]["senses"][0] is not held["lunfardo"]["senses"][0]
+        assert type(again["lunfardo"]["regions"]) is FrozenList
 
     def test_the_default_is_frozen_too(self, model: str) -> None:
         """A row built without metadata refuses a change to its empty dict."""

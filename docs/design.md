@@ -214,6 +214,14 @@ names an entity that another service deleted raises its not-found error.
 backend then stores the same thing, and a store already holding another value still loads.
 [Writing](python-api.md#writing) says what plain JSON accepts.
 
+The freeze, which builds the `FrozenDict` and `FrozenList` objects of a model's `metadata`, makes
+one Python call for each dict and list. It makes none for a value whose type is exactly
+`str`, `int`, `float`, `bool` or `None`, not a subclass: it keeps that value where it reads it. The
+shipped backends read the metadata that taxomesh wrote back as dicts and lists of such values. So
+when a shipped backend reads a row or a link, the number of Python calls of the freeze depends on
+the dicts and lists of its metadata, not on how many values they hold.
+`tests/domain/test_metadata_freeze_cost.py` asserts it.
+
 Every `str` field of a model declares a `max_length`, as `Annotated[str, Field(max_length=N)]`, and
 `domain/constants.py` names each limit. A model therefore refuses an oversized value when it is
 built, whichever backend stores it. The text inside `metadata` has no such limit.
@@ -377,7 +385,7 @@ absence of logic in a handler, or the imports of `contrib/api`.
 | The `enabled` defaults | `tests/service/test_enabled_defaults.py` |
 | Stdlib error bases, and the wrong type's `TypeError` | `tests/test_exceptions.py`, `tests/service/test_stdlib_errors.py` |
 | The exports | `tests/test_packaging.py` |
-| Frozen rows and tuples | `tests/domain/test_frozen_models.py`, `tests/service/test_immutable_rows.py`, `tests/surface/test_sequence_returns.py` |
+| Frozen rows and tuples, and the cost of the freeze | `tests/domain/test_frozen_models.py`, `tests/service/test_immutable_rows.py`, `tests/surface/test_sequence_returns.py`, `tests/domain/test_metadata_freeze_cost.py` |
 | Plain-JSON metadata | `tests/service/test_metadata_json.py` |
 | `UNSET` defaults | `tests/service/test_update_unset.py` |
 | String lengths | `tests/domain/test_models.py`, `tests/domain/test_constants.py` |

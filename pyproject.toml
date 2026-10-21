@@ -1,6 +1,6 @@
 [project]
 name = "taxomesh"
-version = "1.0.2"
+version = "1.0.3"
 description = "taxomesh gives a multi-parent category graph a Python stdlib-style interface: categories, items and tags take subscript, get, in, len and del as a dict does. The graph is stored in a YAML file, a JSON file, the Django ORM or a backend of your own."
 readme = "README.md"
 license = "MIT"
