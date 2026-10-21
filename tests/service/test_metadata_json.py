@@ -27,7 +27,7 @@ import pytest
 
 from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.models import Category, Item, ItemRelationLink, Tag
-from taxomesh.domain.types import FrozenList
+from taxomesh.domain.types import FrozenDict, FrozenList
 from taxomesh.exceptions import TaxomeshValidationError
 from taxomesh.repositories import JsonRepository, YamlRepository
 
@@ -130,20 +130,6 @@ def test_a_refused_write_stores_nothing_and_the_store_takes_the_next(service: Ta
     assert service.items.create("next", metadata={"k": 2}).metadata == {"k": 2}
 
 
-def test_plain_json_is_stored_as_given(service: TaxomeshService) -> None:
-    metadata: dict[str, object] = {
-        "s": "x",
-        "i": 1,
-        "f": 1.5,
-        "b": True,
-        "n": None,
-        "l": [1, {"k": "v"}],
-        "d": {"e": {}},
-    }
-    category = service.categories.create("C", metadata=metadata)
-    assert service.categories[category.category_id].metadata == metadata
-
-
 def _read_afresh(service: TaxomeshService) -> TaxomeshService:
     """A service reading the store afresh: a file store reopened, any other with nothing cached."""
     repository = service.repository
@@ -151,6 +137,45 @@ def _read_afresh(service: TaxomeshService) -> TaxomeshService:
     if isinstance(repository, JsonRepository | YamlRepository) and path is not None:
         return TaxomeshService(repository=type(repository)(path))
     return TaxomeshService(repository=repository, cache_ttl=0)
+
+
+# Any: nested plain JSON of every kind, as a caller stores it.
+NESTED: dict[str, Any] = {
+    "título": "Percanta que me amuraste",
+    "count": 2,
+    "ratio": 0.5,
+    "on": True,
+    "none": None,
+    "lists": [[1, 2], [], [{"k": "v"}]],
+    "dicts": {"inner": {"deep": ["x"]}, "empty": {}},
+}
+
+
+def _frozen_as_given(held: object, given: object) -> bool:
+    """Whether ``held`` equals ``given`` at every depth, in key order and of exact types, each dict and list frozen."""
+    if type(given) is dict:
+        return (
+            type(held) is FrozenDict
+            and list(held) == list(given)
+            and all(_frozen_as_given(held[key], value) for key, value in given.items())
+        )
+    if type(given) is list:
+        return type(held) is FrozenList and len(held) == len(given) and all(map(_frozen_as_given, held, given))
+    return type(held) is type(given) and held == given
+
+
+def test_nested_metadata_read_afresh_is_frozen_at_every_depth(service: TaxomeshService) -> None:
+    """Each backend reads nested plain JSON back as it was given, with every dict and list frozen."""
+    category = service.categories.create("C", metadata=NESTED)
+    item = service.items.create("I", metadata=NESTED)
+    tag = service.tags.create("T", metadata=NESTED)
+    service.items.relate(item, service.items.create("J"), "covers", metadata=NESTED)
+
+    fresh = _read_afresh(service)
+    (relation,) = fresh.items.list_relations(item)
+
+    for stored in (fresh.categories[category], fresh.items[item], fresh.tags[tag], relation):
+        assert _frozen_as_given(stored.metadata, NESTED), type(stored).__name__
 
 
 def test_a_tuple_is_held_as_a_list_at_once(service: TaxomeshService) -> None:
@@ -184,6 +209,26 @@ def test_a_str_int_or_float_subclass_is_held_as_its_plain_value_at_once(service:
     assert [type(key) for key in item.metadata] == [str, str, str]
     assert [type(value) for value in (item.metadata["mood"], *item.metadata["calm"])] == [str, int, float]
     assert item.metadata["on"] is True
+    assert _read_afresh(service).items[item] == item
+
+
+class Unhashable(type):
+    """A metaclass whose classes cannot be hashed, as with a metaclass that defines ``__eq__`` and no ``__hash__``."""
+
+    def __hash__(cls) -> int:
+        raise TypeError(f"unhashable type: {type(cls).__name__!r}")
+
+
+class Label(str, metaclass=Unhashable):
+    """A ``str`` subclass whose class cannot be hashed."""
+
+
+def test_a_subclass_whose_class_cannot_be_hashed_is_held_as_its_plain_value(service: TaxomeshService) -> None:
+    """A ``str`` subclass whose class cannot be hashed becomes plain text, as a value in a dict and in a list."""
+    item = service.items.create("I", metadata={"label": Label("x"), "labels": [Label("y")]})
+
+    assert item.metadata == {"label": "x", "labels": ["y"]}
+    assert [type(item.metadata["label"]), type(item.metadata["labels"][0])] == [str, str]
     assert _read_afresh(service).items[item] == item
 
 

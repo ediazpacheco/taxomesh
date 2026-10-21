@@ -11,6 +11,21 @@ The full entries of that series are in
 The changes of 1.0.0 were first dated as 0.2.0 in this file, on 2026-10-12; that version was never
 tagged or published.
 
+## [1.0.3] — 2026-10-21
+
+1.0.3 builds a row with metadata in less time. No public name or signature changes.
+
+### Changed
+
+- With metadata of about 100 JSON values, building a row takes about 40 % of the time that it took
+  in 1.0.0 to 1.0.2 on Python 3.14, and about half on Python 3.13. The freeze of the metadata made
+  two Python calls for each value in it. It now makes one call for each dict and list, and none for
+  a value whose type is exactly `str`, `int`, `float`, `bool` or `None`. With 8,353 items on SQLite
+  whose metadata holds about 100 JSON values each, `DjangoRepository` built an item row in about
+  25 µs on Python 3.14; it now takes about 10 µs. A write and the load of a YAML or JSON file take
+  the same freeze. The metadata that 1.0.2 built is built the same, and the queries and the
+  signatures stay the same.
+
 ## [1.0.2] — 2026-10-18
 
 1.0.2 changes how the code is written, not what it does: each step that the code repeated is

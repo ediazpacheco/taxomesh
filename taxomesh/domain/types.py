@@ -24,6 +24,7 @@ These are not exported, because no caller writes them in an annotation:
 
 from enum import Enum, StrEnum
 from numbers import Integral
+from types import NoneType
 from typing import Annotated, Any, Final, NoReturn, Self
 from uuid import UUID
 
@@ -204,25 +205,43 @@ class FrozenList(list[Any]):
         return type(self), (list(self),)
 
 
+_JSON_LEAF_TYPES: Final[tuple[type, ...]] = (str, int, float, bool, NoneType)
+"""The exact types of a JSON value that holds no other value: text, a number, a boolean and null.
+
+It is a tuple and not a frozenset. ``in`` on a frozenset hashes the type of the value, and some
+classes cannot be hashed, such as a class whose metaclass defines ``__eq__`` and no ``__hash__``.
+``in`` on a tuple compares the types and hashes nothing.
+"""
+
+
 def _freeze(value: object) -> object:
     """Return a JSON-like value with every ``dict`` and ``list`` in it made immutable.
 
-    Builds new containers and does not wrap the given ones, so the caller can still change its own
-    dicts and lists. A tuple becomes a FrozenList, because every backend reads it back as a list. A
-    value of a ``str``, ``int`` or ``float`` subclass, such as an enum member, becomes the plain
-    value, because every backend reads back the plain value. Any other value is returned as it is.
+    It is the validator behind :data:`Metadata`, which gives it a dict. It builds new containers
+    and does not wrap the given ones, so the caller can still change its own dicts and lists. A
+    tuple becomes a FrozenList, because every backend reads it back as a list. A value of a ``str``,
+    ``int`` or ``float`` subclass, such as an enum member, becomes the plain value, because every
+    backend reads back the plain value, and a key of a ``str`` subclass becomes plain text. Any other
+    value is returned as it is.
+
+    The two comprehensions keep a value whose exact type is in :data:`_JSON_LEAF_TYPES` where they
+    read it, and call this function for any other value. The shipped backends read metadata back as
+    dicts and lists of such values, so freezing it makes one call for each dict and list, and none
+    for each value. ``bool`` has no subclass, so the comprehensions keep every ``bool`` and never
+    pass one to this function, whose ``int`` branch would return it as an ``int``.
     """
     if isinstance(value, dict):
-        return _freeze_dict(value)
-    if isinstance(value, list | tuple):
-        return FrozenList(_freeze(item) for item in value)
-    return _plain(value)
-
-
-def _plain(value: object) -> object:
-    """Return a ``str``, ``int`` or ``float`` subclass's value as the plain type; ``bool`` stays."""
-    if isinstance(value, bool) or type(value) in (str, int, float):
-        return value
+        return FrozenDict(
+            {
+                key if type(key) is str else str.__str__(key): (
+                    item if type(item) in _JSON_LEAF_TYPES else _freeze(item)
+                )
+                for key, item in value.items()
+            }
+        )
+    # A tuple of types, not ``list | tuple``, which builds a union object at each call.
+    if isinstance(value, (list, tuple)):
+        return FrozenList([item if type(item) in _JSON_LEAF_TYPES else _freeze(item) for item in value])
     if isinstance(value, str):
         return str.__str__(value)
     if isinstance(value, int):
@@ -233,16 +252,7 @@ def _plain(value: object) -> object:
 
 
 # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
-def _freeze_dict(mapping: dict[str, Any]) -> dict[str, Any]:
-    """Return a :class:`FrozenDict` of these items, each frozen: the validator behind :data:`Metadata`.
-
-    A key is text, and one of a ``str`` subclass becomes plain text as a value does.
-    """
-    return FrozenDict({str.__str__(key): _freeze(item) for key, item in mapping.items()})
-
-
-# Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
-type Metadata = Annotated[dict[str, Any], AfterValidator(_freeze_dict)]
+type Metadata = Annotated[dict[str, Any], AfterValidator(_freeze)]
 """A row's ``metadata`` field: the caller's own JSON, immutable all the way down.
 
 Validated as ``dict[str, Any]``, then built again with a :class:`FrozenDict` for each dict and a
