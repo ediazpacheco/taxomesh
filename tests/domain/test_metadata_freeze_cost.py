@@ -3,7 +3,8 @@
 A plain value is one whose type is exactly ``str``, ``int``, ``float``, ``bool`` or ``None``. The
 test counts the Python calls into ``taxomesh/domain/types.py``, the module of the freeze, while one
 model is built: metadata with 4 plain values and metadata with 400, in the same dicts and lists,
-cost the same number of calls. ``docs/design.md``, "Frozen rows", says why this is the cost.
+cost the same number of calls. That is two calls more than empty metadata: one for the list in it
+and one for the dict in it. ``docs/design.md``, "Frozen rows", says why this is the cost.
 """
 
 import sys
@@ -48,11 +49,13 @@ def _calls_into_the_freeze(build: Callable[[], object]) -> int:
 
 
 @pytest.mark.parametrize("model", METADATA_ROWS)
-def test_freezing_costs_the_same_for_4_values_as_for_400(model: str) -> None:
+def test_freezing_makes_one_call_for_each_dict_and_list_and_none_for_each_value(model: str) -> None:
     build = METADATA_ROWS[model]
     few, many = _metadata(4), _metadata(400)
 
+    calls_for_empty = _calls_into_the_freeze(lambda: build({}))
     calls_for_few = _calls_into_the_freeze(lambda: build(few))
     calls_for_many = _calls_into_the_freeze(lambda: build(many))
 
     assert 0 < calls_for_few == calls_for_many, f"{calls_for_few} calls for 4 values, {calls_for_many} for 400"
+    assert calls_for_few - calls_for_empty == 2, "one call for the list and one for the dict"

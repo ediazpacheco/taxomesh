@@ -227,8 +227,8 @@ def _freeze(value: object) -> object:
     The two comprehensions keep a value whose exact type is in :data:`_JSON_LEAF_TYPES` where they
     read it, and call this function for any other value. The shipped backends read metadata back as
     dicts and lists of such values, so freezing it makes one call for each dict and list, and none
-    for each value. So this function never receives a ``bool``, which the ``int`` branch would
-    return as ``1``.
+    for each value. ``bool`` has no subclass, so the comprehensions keep every ``bool`` and never
+    pass one to this function, whose ``int`` branch would return it as an ``int``.
     """
     if isinstance(value, dict):
         return FrozenDict(

@@ -224,7 +224,7 @@ class Label(str, metaclass=Unhashable):
 
 
 def test_a_subclass_whose_class_cannot_be_hashed_is_held_as_its_plain_value(service: TaxomeshService) -> None:
-    """A ``str`` subclass becomes plain text whatever its metaclass, as a value in a dict and in a list."""
+    """A ``str`` subclass whose class cannot be hashed becomes plain text, as a value in a dict and in a list."""
     item = service.items.create("I", metadata={"label": Label("x"), "labels": [Label("y")]})
 
     assert item.metadata == {"label": "x", "labels": ["y"]}
