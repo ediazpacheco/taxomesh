@@ -21,6 +21,7 @@ from types import ModuleType
 from typing import Final
 
 import pytest
+from packaging.requirements import Requirement
 
 import taxomesh
 import taxomesh.exceptions
@@ -124,6 +125,26 @@ class TestPyTypedMarker:
             pyproject = tomllib.load(fh)
 
         assert "Typing :: Typed" in pyproject["project"]["classifiers"]
+
+
+class TestTheDjangoClassifiers:
+    """The ``Framework :: Django`` classifiers name versions that the ``django`` extra allows."""
+
+    def test_each_named_version_is_in_the_extra_and_the_floor_is_named(self) -> None:
+        project = _project()
+        classifiers = project["classifiers"]
+        extras = project["optional-dependencies"]
+        assert isinstance(classifiers, list)
+        assert isinstance(extras, dict)
+        (requirement,) = extras["django"]
+        specifier = Requirement(requirement).specifier
+        floor = next(clause.version for clause in specifier if clause.operator == ">=")
+        prefix = "Framework :: Django :: "
+        versions = [classifier.removeprefix(prefix) for classifier in classifiers if classifier.startswith(prefix)]
+
+        assert "Framework :: Django" in classifiers
+        assert floor in versions
+        assert all(specifier.contains(version) for version in versions)
 
 
 class TestBuiltWheel:

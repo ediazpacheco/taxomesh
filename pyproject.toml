@@ -7,9 +7,12 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Ezequiel Diaz Pacheco", email = "ediazpacheco@gmail.com" }]
 requires-python = ">=3.13"
-keywords = ["taxonomy", "categorization", "tags", "dag", "hierarchy", "repository"]
+keywords = ["taxonomy", "categorization", "tags", "dag", "hierarchy", "repository", "django"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
+    "Framework :: Django",
+    "Framework :: Django :: 6.0",
+    "Framework :: Django :: 6.1",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
@@ -38,6 +41,7 @@ taxomesh = "taxomesh.adapters.cli:run"
 
 [project.urls]
 Homepage = "https://github.com/ediazpacheco/taxomesh"
+Documentation = "https://github.com/ediazpacheco/taxomesh/tree/main/docs"
 Repository = "https://github.com/ediazpacheco/taxomesh"
 Issues = "https://github.com/ediazpacheco/taxomesh/issues"
 "Python API" = "https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md"
