@@ -1,11 +1,18 @@
 # Django Integration
 
-Use this to keep taxonomy data in a Django project's database, or to manage it in the Django admin.
-Your models stay as they are, with no taxonomy logic: they reach taxomesh through `external_id`.
+Use this page to keep the taxonomy in the database of a Django project, or to manage it in the
+Django admin. Your models get no taxonomy fields or tables: they link to taxomesh through
+`external_id`.
 
 ## Enable the app
 
-Add the app to `INSTALLED_APPS`, then install the `django` extra and run the migrations:
+1. Install the `django` extra. It needs Django 6.
+2. Add the app to `INSTALLED_APPS`.
+3. Run the migrations.
+
+```bash
+pip install "taxomesh[django]"
+```
 
 ```python
 # settings.py
@@ -16,31 +23,46 @@ INSTALLED_APPS = [
 ```
 
 ```bash
-pip install "taxomesh[django]"
 python manage.py migrate
 ```
 
-## The admin
+## Get the service
 
-After migrating, the Django admin manages categories, items and tags (`CategoryModel`, `ItemModel`
-and `TagModel`), with autocomplete foreign keys and a JSON editor for `metadata`, which loads Ace
-from the jsDelivr CDN: without access to it, as under a strict Content Security Policy, the admin
-shows no editor. The admin also adds:
+`get_taxomesh_service_with_django(using="default")`, from `taxomesh.contrib.django`, builds a
+`TaxomeshService` over `DjangoRepository` on that database alias. Building a service reads every
+category once, to find the [implicit root](python-api.md#the-top-level). So build one service for
+each process, at its first use, and share it, as the bridge below does. The cache of a service
+serves no read made inside a transaction, yours or its own. So with `ATOMIC_REQUESTS`, every read
+of a view reaches the database.
 
-- **A graph view** of the whole taxonomy: drag and drop reorders the categories and items under a
-  parent and moves them to another, and children load as a branch is opened. To add a sort mode,
-  subclass `CategoryModelAdmin` and extend its `sort_modes`, a list of `(key, label, function)`. The
-  function takes a list of `GraphEntry` (`taxomesh.contrib.django.graph_types`) and returns it in
-  the order to show. taxomesh registers `CategoryModelAdmin`, which serves the graph view, so call
-  `admin.site.unregister(CategoryModel)`, then `admin.site.register(CategoryModel, YourAdmin)`.
+Each taxomesh write runs in one transaction on the database alias of the repository. The transaction
+first locks the implicit root's row, or on SQLite the whole database. So two taxomesh writes in two
+workers run one after the other. Inside a transaction that you open, the lock is held until your
+transaction ends, and taxomesh writes in other workers wait.
+
+On SQLite, give the database `"OPTIONS": {"transaction_mode": "IMMEDIATE"}`. In Django's default
+mode, a taxomesh write inside your transaction fails at once if your transaction has read already
+and another worker writes.
+
+## Use the admin
+
+After the migrations, the Django admin manages categories, items and tags (`CategoryModel`,
+`ItemModel` and `TagModel`), with autocomplete foreign keys. The category and item pages edit
+`metadata` with a JSON editor, Ace, which loads from the jsDelivr CDN. Without access to it, as under
+a strict Content Security Policy, those pages cannot edit `metadata`. The admin also adds:
+
+- **A graph view** of the whole taxonomy. Drag and drop reorders the categories and items under a
+  parent, or moves them to another parent. Children load when you open a branch.
 - **A debug page** of taxomesh's diagnostic information.
 - **Two mixins for your own `ModelAdmin`s**, in `taxomesh.contrib.django.admin`:
-  `TaxomeshLinkedFKMixin` renders every foreign key to `ItemModel` or `CategoryModel` as an
-  autocomplete with a link to its taxomesh page. `ItemCategoryAssignmentMixin` adds a *categories*
-  field, which offers the enabled categories, to a model whose primary key is an item's external id.
-  The page shows the field last, or where your `fields` or `fieldsets` name it. A save changes
-  placements only when the page shows the field, and never in a category that the field does not
-  offer, such as a disabled one.
+  - `TaxomeshLinkedFKMixin` shows every foreign key to `ItemModel` or `CategoryModel` as an
+    autocomplete, with a link to its taxomesh page.
+  - `ItemCategoryAssignmentMixin` adds a *categories* field, which offers the enabled categories, to
+    a model whose primary key is the external id of an item. To use another attribute than the
+    primary key, set `taxomesh_external_id_attr`. With `fields` or `fieldsets`, the page shows the
+    field only where they name it; without them, it shows the field last. A save changes placements
+    only when the page shows the field. It changes no placement in a category that the field does
+    not offer: a placement in a disabled category stays.
 
 **Permissions and URLs.** The app label is `taxomesh_contrib_django`. Under the admin's URL, the
 graph is at `taxomesh_contrib_django/categorymodel/graph/` and the debug page at
@@ -55,9 +77,18 @@ the record whose primary key is its external id. `TAXOMESH_CATEGORY_LINKED_MODEL
 categories; while it is not set, categories use `TAXOMESH_LINKED_MODEL`. A page shows no link while
 no setting applies to its rows.
 
-## Integrate with your app models
+### Add a sort mode to the graph view
 
-Example: mirror a Django model into taxomesh by `external_id`.
+1. Subclass `CategoryModelAdmin`, and extend its `sort_modes`, a list of `(key, label, function)`.
+   The function takes a list of `GraphEntry` (`taxomesh.contrib.django.graph_types`), and returns it
+   in the order to show.
+2. taxomesh registers `CategoryModelAdmin`, which serves the graph view. Unregister it with
+   `admin.site.unregister(CategoryModel)`.
+3. Register yours with `admin.site.register(CategoryModel, YourAdmin)`.
+
+## Link your models to items
+
+This example keeps one item for each record of a Django model, linked by `external_id`.
 
 ```python
 # content_catalog/taxomesh_bridge.py
@@ -106,24 +137,14 @@ class Content(models.Model):
         return super().delete(*args, **kwargs)
 ```
 
-taxomesh does not make your model's `save` and its own write atomic together: your application
-decides that. Each taxomesh operation that writes runs in one transaction on the repository's
-database alias, and the transaction first locks the implicit root's row, so two such operations in
-two workers run one after the other. Inside a transaction that you open, the lock is held until
-yours ends, and taxomesh writes in other workers wait. On SQLite, give the database `"OPTIONS":
-{"transaction_mode": "IMMEDIATE"}`: in Django's default mode, a taxomesh write inside your
-transaction that has read already fails at once while another worker writes.
+taxomesh does not make the `save` of your model and its own write atomic together: your application
+decides that.
 
-`get_taxomesh_service_with_django(using="default")` builds a `TaxomeshService` over
-`DjangoRepository` on that alias. Building a service reads every category once, to find the implicit
-root, so the bridge builds one service for each process, at its first call, and shares it. Its
-cache serves no read made inside a transaction, yours or its own, so with `ATOMIC_REQUESTS` every
-read of a view reaches the database.
+## Mail the server errors
 
-## Logging
-
-The [HTTP error mapping](http-api-integration.md#error-mapping) logs each 500 as an `ERROR` record
-with its traceback, which this setting mails to the `ADMINS`. An outage emits one for each request.
+The [HTTP error mapping](http-api-integration.md#error-mapping) logs each 500 as an `ERROR` log
+record, with its traceback. This setting sends that log record by email to the `ADMINS`. An outage
+emits one for each request.
 
 ```python notest
 # settings.py

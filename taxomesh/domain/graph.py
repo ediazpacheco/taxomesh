@@ -122,8 +122,8 @@ class CategoryNode:
 class TaxomeshGraph:
     """A read-only snapshot of the category graph, addressed by category identifier.
 
-    ``TaxomeshService.graph()`` returns it. Subscript raises and ``get`` does not, as everywhere
-    else in the library.
+    ``TaxomeshService.graph()`` returns it. For an absent key, subscript raises and ``get`` does
+    not, as everywhere else in the library.
 
     :meth:`walk` is the only enumerator, so ``len()`` and the number of nodes it yields cannot
     disagree. There is no second one, on purpose, so ``__iter__`` and ``__reversed__`` are

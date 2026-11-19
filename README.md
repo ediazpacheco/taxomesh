@@ -11,17 +11,13 @@ taxomesh gives a multi-parent category graph a Python stdlib-style interface: ca
 ## What it is
 
 taxomesh stores a taxonomy for records that your own system keeps, such as products, articles or
-tracks. It is not a database for the records: each record stays in your system, and an item or a
-category can stand for it through its `external_id`. taxomesh stores categories with any number of
-parents, items placed in any number of categories, an order under each parent, tags, and typed
-relations between items. It also searches items and categories. The `taxomesh` command, the Django
-admin with its graph view, and the HTTP handlers, which need no web framework, call `TaxomeshService`.
+tracks. It does not store the records themselves: each record stays in your system, and an item or
+a category stands for it through its `external_id`. [LetrasTango](https://letrastango.com/) uses
+taxomesh in production to organize the categories and relations of its tango content.
 
-Use it when the taxonomy needs its own component, for example for navigation that is not a strict
-tree, one item in several places, an order that depends on the place, or one set of rules for
-scripts, admin tools and APIs. It is not needed for a flat list of choices, a tree in which each
-category has one parent, a small fixed part of one screen, or a taxonomy with no need for reusable
-validation, traversal or integrations.
+Use it when a category has several parents, an item is in several categories, or the order of the
+children depends on the parent. It also gives scripts, admin tools and APIs one set of rules. A flat
+list of choices, or a tree in which each category has one parent, does not need it.
 
 ## Installation
 
@@ -57,10 +53,10 @@ svc.items.place_in(album, jazz)
 featured = svc.tags.create(name="featured")
 svc.items.tag(album, featured)
 
-# Read it with the forms a dict has: a row, or its UUID, is the key.
+# Read it back.
 assert svc.items.get_by_external_id("catalog:42").item_id == album.item_id
 assert svc.items[album.item_id].name == "Kind of Blue"  # subscript raises when absent
-assert svc.items.get_by_slug("no-such-slug") is None  # get* never raises
+assert svc.items.get_by_slug("no-such-slug") is None  # get* returns None for a miss
 assert jazz in svc.categories and len(svc.categories) == 3
 assert [c.name for c in svc.categories.list(item=album)] == ["Jazz"]
 assert [i.name for i in svc.items.list(tag=featured)] == ["Kind of Blue"]
@@ -69,9 +65,6 @@ assert [c.name for c in svc.categories.roots()] == ["Music", "Genres"]  # in the
 node = svc.graph()[jazz]  # a read-only snapshot of the whole taxonomy
 assert sorted(parent.category.name for parent in node.parents) == ["Genres", "Music"]
 ```
-
-With no argument, `TaxomeshService()` reads `taxomesh.toml` in the working directory. Without that
-file, its store is `data/taxomesh.yaml`, which keeps the taxonomy from one run to the next.
 
 ## The collection interface
 
@@ -90,7 +83,7 @@ no slug, no external id and no search.
 | `coll.list(...)`, `coll.search(...)` | a `tuple` | `()`; a filter naming an entity that is not stored raises |
 
 The collections do not iterate ([why](https://github.com/ediazpacheco/taxomesh/blob/main/docs/design.md#the-law-subscript-raises-get-never-does)):
-`coll.list(...)` enumerates, and `len()` is the one form that reads every row.
+`coll.list(...)` lists the rows, and `len()` reads every row.
 
 ## What it does
 
@@ -98,33 +91,32 @@ The collections do not iterate ([why](https://github.com/ediazpacheco/taxomesh/b
   `TaxomeshCyclicDependencyError`.
 - **An order under each parent**: every parent link and placement carries its own `sort_index`,
   which `reorder` and `move` change.
-- **External ids**: each is a `str`, an `int` or a `UUID`, stored as text, unique within its kind,
-  and looked up one at a time or in bulk.
+- **External ids**: a `str`, an `int` or a `UUID`, stored as text and unique within its kind. You
+  look them up one at a time or in bulk.
 - **Tags and typed relations**: free-form tags, and directed item-to-item relations of types that
   you name, such as `covers` or `version_of`. `get_many_related` reads the relations of many items
   in two storage reads, in one direction or both.
-- **Fuzzy search**: ranked, typo-tolerant and accent-insensitive, on names and slugs; an external id
-  matches as a substring only. It runs in the process, with rapidfuzz, and needs no search server.
+- **Fuzzy search**: ranked, typo-tolerant and accent-insensitive, on names and slugs. An external id
+  matches as a substring only. It uses rapidfuzz and needs no search server.
 - **Graph snapshots**: `svc.graph()` holds one node per category, however many paths reach it.
-- **Frozen rows**: `update` returns a new row, and `expected_version` makes it conditional.
-- **A cache per service**: reads are cached for `cache_ttl` seconds, 5 by default, and a write
-  clears its own service's cache only.
-- **Storage**: YAML (the default), JSON or the Django ORM, chosen in code or in a `taxomesh.toml`,
-  or your own backend implementing `TaxomeshRepositoryBase`. One contract test suite checks every
-  shipped backend against that port.
-- **Errors**: a member raises a `TaxomeshError`, a not-found one also a `KeyError` and a validation
-  one also a `ValueError`, or a `TypeError` for an argument of the wrong type. Two cases take a value of
-  another type: the flags `recursive`, `fuzzy` and `include_items` are read as `if flag:`, and a
-  model's field takes what pydantic's lax mode takes, so `sort_index="5"` is 5.
-- **Logging**: log records go to the `taxomesh` logger, which has only a `NullHandler` of its own.
+- **Frozen rows**: `update` returns a new row. For a category or an item, `expected_version` makes
+  it conditional.
+- **A cache per service**: a service caches most reads for `cache_ttl` seconds, 5 by default, and a
+  write clears the cache of its own service only.
+- **Storage**: YAML, JSON or the Django ORM, chosen in code or in a `taxomesh.toml`, or your own
+  backend implementing `TaxomeshRepositoryBase`. With no argument, `TaxomeshService()` takes its
+  storage from `taxomesh.toml` in the working directory. The default store is `data/taxomesh.yaml`.
+- **Integrations**: the `taxomesh` command, the Django admin with its graph view, and HTTP handlers
+  that need no web framework. Each calls `TaxomeshService`.
+- **Errors**: every error class inherits `TaxomeshError`. A not-found error is also a `KeyError`,
+  and a validation error also a `ValueError`.
 
 ## Documentation
-
-The whole Python API is on one page ([`llms.txt`](https://github.com/ediazpacheco/taxomesh/blob/main/llms.txt)), so an AI coding agent can use taxomesh without reading its source.
 
 | Page | Covers |
 |---|---|
 | [Python API](https://github.com/ediazpacheco/taxomesh/blob/main/docs/python-api.md) | Every member, with runnable examples |
+| [`llms.txt`](https://github.com/ediazpacheco/taxomesh/blob/main/llms.txt) | The whole Python API on one page, for an AI coding agent |
 | [Repositories](https://github.com/ediazpacheco/taxomesh/blob/main/docs/repositories.md) | The three backends, and writing your own |
 | [Configuration](https://github.com/ediazpacheco/taxomesh/blob/main/docs/configuration.md) | `taxomesh.toml` |
 | [CLI reference](https://github.com/ediazpacheco/taxomesh/blob/main/docs/cli.md) | Every command and global option |
@@ -140,25 +132,9 @@ taxomesh uses [Semantic Versioning](https://semver.org/): what `taxomesh`, `taxo
 incompatibly only in a major release. The [changelog](https://github.com/ediazpacheco/taxomesh/blob/main/CHANGELOG.md)
 names every breaking change.
 
-taxomesh supports Python 3.13 and 3.14, and Django 6.x. CI checks every change to `main` with
-`ruff`, with `mypy --strict` over the package and its tests, the Django integration included, and
-with the full test suite on Python 3.13 and 3.14. The suite must cover at least 80% of the lines.
-That measure leaves out the Django integration, which has tests of its own.
-
-## Used in production
-
-taxomesh is used in production at [LetrasTango](https://letrastango.com/) to organize the categories
-and relations of its tango content.
+taxomesh supports Python 3.13 and 3.14, and Django 6.x.
 
 ## Development
-
-```bash
-uv sync --all-extras
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy --strict .
-uv run pytest
-```
 
 Contributions are welcome: see [CONTRIBUTING.md](https://github.com/ediazpacheco/taxomesh/blob/main/CONTRIBUTING.md) for the setup and the quality gates.
 Licensed under [MIT](https://github.com/ediazpacheco/taxomesh/blob/main/LICENSE).

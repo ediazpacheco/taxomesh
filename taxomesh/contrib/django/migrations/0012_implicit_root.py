@@ -25,7 +25,7 @@ from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 
 
 def _store_one_root(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    """Store the implicit root, or fold every other root into the first; then normalise the top level."""
+    """Store the implicit root, or fold every other root into the first; then normalize the top level."""
     alias = schema_editor.connection.alias
     categories = apps.get_model(APP_LABEL, "CategoryModel").objects.using(alias)
     links = apps.get_model(APP_LABEL, "CategoryParentLinkModel").objects.using(alias)

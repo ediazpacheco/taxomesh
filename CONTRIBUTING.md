@@ -11,9 +11,6 @@ welcome. There is no guaranteed response time.
   issue first.
 - The maintainer decides whether a change is accepted.
 
-A contribution needs none of the maintainer's planning documents: no specification, task list or
-planning tool.
-
 ## Development setup
 
 Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
@@ -23,14 +20,15 @@ uv sync --all-extras
 ```
 
 This installs the `cli` and `django` extras beside the `dev` dependency group. The `dev` group in
-`pyproject.toml` lists the tools below. Both extras are optional for using the library, but the
-test suite covers the command line and the Django backend, so the full suite needs them.
+`pyproject.toml` lists the tools below. Both extras are optional for using the library. The test
+suite covers the command line and the Django backend, so it needs both.
 
 ## Quality gates
 
-All four must pass before a change is merged to `main`. CI runs ruff and mypy on Python 3.13, and
-the tests on Python 3.13 and 3.14 with the Django version that `uv.lock` pins (6.0), and on Python
-3.13 with the latest Django 6.x. CI also builds the wheel and checks that it installs and imports.
+All four must pass before a change is merged to `main`. CI runs ruff and mypy on Python 3.13. It
+runs the tests on Python 3.13 and 3.14 with the Django version that `uv.lock` pins (6.0), and on
+Python 3.13 with the latest Django 6.x. CI also builds the wheel and checks that it installs and
+imports.
 
 ```bash
 uv run ruff check .
@@ -39,8 +37,8 @@ uv run mypy --strict .
 uv run pytest
 ```
 
-Line length is 119, configured in `pyproject.toml`. `uv run pre-commit install` runs ruff, at
-the version the `dev` group pins, and mypy before each commit.
+`uv run pre-commit install` installs a hook that runs `ruff check --fix`, `ruff format` and mypy
+before each commit. The hook's ruff is the lowest version that the `dev` group allows.
 
 ## Design first
 
@@ -60,14 +58,18 @@ API also keeps the signature ledger (`tests/surface/public_surface.txt`) and `ll
   Near-identical classes share an ABC or a mixin; a `Protocol` stays structural, with no
   implementation. A module-level function is correct for pure logic, an HTTP handler, a CLI command
   or the composition root.
-- **Style.** Line length 119, never 88. Target Python 3.13. ruff's `I` rules sort the imports.
+- **Style.** Line length 119, never 88, as `pyproject.toml` sets it. Target Python 3.13. ruff's `I`
+  rules sort the imports.
 - **Docstrings.** Use Google style. Every module starts with a module docstring, except an empty
   `__init__.py` and a Django migration. A public function or method has a one-line summary, then
-  `Args:`, `Returns:` and `Raises:` as needed, and an `Example::` block where the shape of the
+  `Args:`, `Returns:` and `Raises:` as needed. Add an `Example::` block where the shape of the
   return value is not obvious. A private member, whose name starts with `_`, needs no docstring, but
   complex logic deserves one.
 - **Simplicity.** Keep it simple (KISS), say each thing once (DRY), and build only what is needed
   now (YAGNI). Prefer flat code to nested code, and small functions with one purpose.
+- **History.** Code and tests say what is true now, and `CHANGELOG.md` holds the history.
+  `tests/test_no_process_ids.py` refuses ticket, task and specification identifiers in `taxomesh/`
+  and `tests/`.
 - **Language.** Code, comments, docstrings, documentation and messages are in English, written as
   [Writing](#writing) says.
 
@@ -96,8 +98,7 @@ the entries of published releases, or messages that another library writes.
    message with a capital letter, a parameter name or a value, and end it with no period.
 
 No tool checks these rules: read your change against them and against the terminology list.
-`tests/docs/` runs every example in the README and under `docs/`, and `tests/test_error_messages.py`
-checks the form of each error message.
+`tests/test_error_messages.py` checks only the form of each error message.
 
 ### Terminology
 
@@ -123,6 +124,10 @@ Each term has one meaning in the project's text.
 | top level | The categories that have no parent. `roots()` and `graph().roots` list them, and `None` stands for the top level in `move` and `reorder`. | "Top-level category". |
 | implicit root | The stored category named `__root__`. In storage, each top-level category has a parent link to it. No member returns it, and every member treats its identifier as that of a category that is not stored. | Always "the implicit root". Never "root" for a top-level category. In `svc.graph(root=…)`, `root` is the category that a smaller graph starts at. |
 | collection | `svc.categories`, `svc.items` or `svc.tags`: the object that has the members for one kind of entity. The service builds the three. | "Container" only for the forms that the collections share with the graph snapshot. |
+| subject | The entity that a member acts on, given positionally, such as the item of `items.tag(item, tag)`. | A filter is not a subject. |
+| lookup | A member that finds rows by key and answers a miss without raising: `get`, `get_by_*` and `get_many*`, and on the port `find_*` and `map_*`. | "Batch lookup" for `get_many*` and `map_*`. |
+| listing | A `list*` member, or the tuple of rows that it returns. | |
+| sort index | The position of a parent link, a placement or a relation, lower first: its `sort_index`. | |
 | category graph | The stored categories and their parent links. | |
 | graph snapshot | The `TaxomeshGraph` that `svc.graph()` returns: a read-only copy of the category graph. A later write does not change it. | "The graph" when the text is about `svc.graph()`. |
 | graph node | A `CategoryNode`: one category in a graph snapshot, with its parents, children and items. | One node for each category, however many paths reach it. |
@@ -130,6 +135,7 @@ Each term has one meaning in the project's text.
 | storage backend | A kind of storage: a YAML file, a JSON file, the Django ORM, or your own class that implements the port. | "Backend", "file backend". |
 | port | `TaxomeshRepositoryBase`, the `Protocol` that a backend implements. | |
 | repository | One object of a backend class, such as `YamlRepository("data/taxomesh.yaml")`. `svc.repository` is the repository of a service. | "Adapter" only for the three shipped repository classes, in the architecture. |
+| storage read | One call to the repository. On Django, a call with more keys than the database takes in one query runs as several queries. | For the cost of a member. |
 | service | One `TaxomeshService` object. It owns one repository, one cache and the three collections. | |
 | absent, a miss | A key that names no stored entity. A `get*` member answers a miss with `None`, with its default, or by leaving the key out. | "Absent", "a miss". Not "missing". |
 | wrong address | A subject or a filter that names an entity that is not stored. The member raises the not-found error of that entity. | A wrong address is not a miss. |
@@ -143,19 +149,19 @@ Each term has one meaning in the project's text.
 
 ## Tests
 
-The suite lives in `tests/` and mirrors the package layout. Coverage must stay at or above 80%; `pytest` enforces this via
-`--cov-fail-under=80` in `pyproject.toml`.
+The suite lives in `tests/`, and its folders follow the package layout. `pytest` fails when the
+tests cover less than 80% of the package (`--cov-fail-under=80` in `pyproject.toml`). The measure
+leaves out the Django integration, which has its own tests under `tests/contrib/django/`.
 
-Runnable examples in `README.md` and under `docs/` are executed by
-`tests/docs/test_doc_examples.py`, so a documented example that stops working will
-fail the suite. Fragments that are illustrative rather than runnable are tagged
-` ```python notest `. The test pins how many blocks each page runs: adding a page, or
-a runnable block, means updating `RUNNABLE_BLOCKS` there. Each page has a line
-budget in `tests/docs/test_page_budgets.py`.
+`tests/docs/test_doc_examples.py` runs every `python` block of `README.md` and of the pages under
+`docs/`, so an example that stops working fails the suite. Tag a block that does not run
+` ```python notest `. The test pins how many blocks each page runs: when you add a page or a runnable
+block, update `RUNNABLE_BLOCKS` there. Each user page, except `docs/cli.md` and `docs/design.md`, has
+a line budget in `tests/docs/test_page_budgets.py`.
 
-The command table in `docs/cli.md` and the signatures in `llms.txt` are generated.
-After changing a command or a public signature, regenerate them as
-`tests/docs/_reference.py` explains, and read the diff.
+A script generates the command table in `docs/cli.md` and the signatures in `llms.txt`. After you
+change a command or a public signature, regenerate them as `tests/docs/_reference.py` explains, and
+read the diff.
 
 ## Pull requests
 

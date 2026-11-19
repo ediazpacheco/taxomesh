@@ -331,7 +331,7 @@ class FileRepositoryBase(ABC):
     def _put(self, contents: _Contents) -> None:
         """Make memory hold ``contents`` as a load of a file holding them does.
 
-        A link that names a row that is not stored is dropped, and the top level is normalised, so
+        A link that names a row that is not stored is dropped, and the top level is normalized, so
         contents taken between two writes of one operation read as a new repository would read
         them.
         """

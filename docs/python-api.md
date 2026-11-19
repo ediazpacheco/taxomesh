@@ -1,30 +1,35 @@
 # Python API Reference
 
+This page describes every public member of taxomesh, with examples that run.
+
 `TaxomeshService` is the entry point: apart from a repository, if you choose one, it is the only
 class you construct. You reach everything else through it: three collections (`svc.categories`,
 `svc.items`, `svc.tags`), a graph snapshot (`svc.graph(...)`), and two properties (`svc.info`,
 `svc.repository`). One law covers the three collections and the graph:
 
-> **Subscript raises. Anything named `get*` never does.**
+> **For an absent key, subscript raises. Anything named `get*` never does.**
 
-Every parameter that names a category, an item or a tag takes the row itself or its `UUID`, as a
-path parameter takes a `str` or an `os.PathLike`: `svc.items.place_in(song, jazz)` and
-`svc.items.place_in(song.item_id, jazz.category_id)` are one call. The parameters are typed
-`CategoryRef`, `ItemRef` and `TagRef`. Only a row's identifier is read, so a row you hold that has
-since been updated still addresses the stored one. Anything else, a row of another kind included,
-raises `TypeError` before storage is read. A batch lookup takes one key or a collection of them, as
-`str.startswith` takes one prefix or a tuple: `svc.items.get_many(song)` is
-`svc.items.get_many([song])`.
+A parameter that names a category, an item or a tag takes the row or its `UUID`. A path parameter
+works the same way: it takes a `str` or an `os.PathLike`. So `svc.items.place_in(song, jazz)` and
+`svc.items.place_in(song.item_id, jazz.category_id)` are the same call. The parameters are typed
+`CategoryRef`, `ItemRef` and `TagRef`. Only the identifier of a row is read, so a row that you hold
+still names its entity after an update. Any other value raises `TypeError` before storage is read,
+and so does a row of another kind.
 
-The tables below give each signature once, without types; [`llms.txt`](../llms.txt) has every
-signature with its types, and `help()` shows each member's docstring. The models are Pydantic v2
-models, and the package passes `mypy --strict` and ships `py.typed`, so your type checker reads its
-annotations. Every example on this page runs, in order, in the test suite.
+A batch lookup takes one key or a collection of keys, as `str.startswith` takes one prefix or a
+tuple: `svc.items.get_many(song)` is `svc.items.get_many([song])`.
+
+The tables below give each signature once, without types. [`llms.txt`](../llms.txt) has every
+signature with its types, and `help()` shows the docstring of each member. The models are Pydantic
+v2 models. The package passes `mypy --strict` and ships `py.typed`, so your type checker reads its
+annotations. Every example on this page runs, in order, in the test suite, except the logging setup.
+
+This page gives some costs in storage reads. A storage read is one call to the repository. On
+Django, a call with more keys than the database takes in one query runs as several queries.
 
 ## The worked example
 
-Every example below uses this taxonomy. With no argument, `TaxomeshService()` reads `taxomesh.toml`
-in the working directory, and without one keeps its store in `data/taxomesh.yaml`, between runs.
+Every example below uses this taxonomy.
 
 ```python
 from pathlib import Path
@@ -54,7 +59,7 @@ assert [i.name for i in svc.items.list(category=jazz)] == ["Kind of Blue", "Gian
 
 ## The container law
 
-The forms below are shared by the three collections. Only the error differs:
+The three collections share the forms below. Only the error differs:
 `TaxomeshCategoryNotFoundError`, `TaxomeshItemNotFoundError` or `TaxomeshTagNotFoundError`, each a
 `KeyError`.
 
@@ -66,13 +71,14 @@ The forms below are shared by the three collections. Only the error differs:
 | `len(coll)` | `int`, every stored row | `0` |
 | `del coll[key]` | `None` | raises |
 
-A member named `list*` or `search` returns a `Sequence`, which is a tuple, and one named
-`get_many*` a `Mapping`, which is a new dict on every call; a key that finds nothing is left out of
-it. `get_by_slug` and `get_by_external_id` return the row or `None`.
+A `list*` member or `search` returns a `Sequence`: a tuple. A `get_many*` member returns a
+`Mapping`: a new dict on every call, without the keys that find nothing. `get_by_slug` and
+`get_by_external_id` return the row or `None`.
 
 A collection does not iterate ([why](design.md#the-law-subscript-raises-get-never-does)): `iter()`
-and `reversed()` raise `TypeError`, and `coll.list(...)` enumerates. `len()` is the one form that
-reads every row: it counts disabled rows too, so it is not `len(coll.list())`.
+and `reversed()` raise `TypeError`, and `coll.list(...)` lists the rows. `len()` is the one form that
+reads every row, and `if coll:` calls it too. For categories and items, it counts the disabled rows,
+so it is not `len(coll.list())`.
 
 ```python
 from uuid import uuid4
@@ -107,9 +113,10 @@ for builtin in (iter, reversed):
 ## Rows are values
 
 A row never changes in place. The seven models are frozen: assigning to a field raises pydantic's
-`ValidationError`, a `ValueError`. `metadata` is frozen all the way down: its dicts and lists raise
-`TypeError` on any change. `update` stores a new row and returns it, one `version` higher, and a
-row read before it keeps the values it was read with. No row is hashable: each holds `metadata`.
+`ValidationError`, a `ValueError`. `metadata` is frozen at every level: its dicts and lists raise
+`TypeError` on any change. `update` stores a new row and returns it, and a category or an item comes
+back one `version` higher. A row read before the update keeps the values it was read with. No row is
+hashable, since each holds `metadata`.
 
 ```python
 held = svc.categories[music]
@@ -132,18 +139,18 @@ assert tagged.version == held.version + 1
 svc.categories.update(music, metadata={})
 ```
 
-A row carries data and no behaviour. What you do with it is a member of its collection,
-`svc.categories.update(row, …)`; what it is connected to is on the graph's node,
-`svc.graph()[row].parents`. `help(Category)` says what this table does, under `Attributes:`.
+A row carries data and no behavior. What you do with a row is a member of its collection, such
+as `svc.categories.update(row, …)`. What it is connected to is on its graph node, such as
+`svc.graph()[row].parents`. The `help()` of each model lists its fields, under `Attributes:`.
 
 | Field | Type | Of | Meaning | Set by |
 |---|---|---|---|---|
 | `category_id` · `item_id` · `tag_id` | `UUID` | each its own | the identifier | `create` |
 | `name` | `str` | all three | at most 256 characters (`MAX_CATEGORY_NAME_LENGTH`, `MAX_ITEM_NAME_LENGTH`), a tag's 25 (`MAX_TAG_NAME_LENGTH`); a category's may not be `__root__` | you |
 | `description` | `str` | Category | free text, `""` unless given | you |
-| `slug` | `str` | Category, Item | a URL-friendly key, unique within its kind; `""` is no slug | you |
-| `external_id` | `str \| None` | Category, Item | your system's key, unique within its kind | you |
-| `enabled` | `bool` | Category, Item | `False` leaves the row out of what a member finds, by default | you |
+| `slug` | `str` | Category, Item | a text key, such as for a URL, unique within its kind; at most 256 characters (`MAX_SLUG_LENGTH`); `""` is no slug | you |
+| `external_id` | `str \| None` | Category, Item | your system's key, unique within its kind; at most 256 characters (`MAX_EXTERNAL_ID_STR_LENGTH`) | you |
+| `enabled` | `bool` | Category, Item | `False` leaves the row out of the members that filter, by default ([The enabled filter](#the-enabled-filter)) | you |
 | `metadata` | `dict` | all three | plain JSON, frozen | you |
 | `created_at` · `updated_at` | `datetime` | Category, Item | stamped by `create`; `update` moves `updated_at`; 1970 on a row stored without them | `create`, `update` |
 | `version` | `int` | Category, Item | 0 at `create`, one higher per `update` | storage |
@@ -162,12 +169,14 @@ category at the top level.
 
 ## External ids
 
-An external id binds a category or an item to the record it stands for in your system. It is
-given as `ExternalId`, `str | int | UUID | None`, and stored as its `str()`, by one rule shared by
-writes and lookups. So what comes back is a `str`; values with one string form, such as `42` and
-`"42"`, are one external id; and since external ids are unique within a kind, creating both raises
-`TaxomeshExternalIdConflictError`. `None` means no external id, and a lookup for it reads nothing.
-Nothing else is cleaned: whitespace, case and the empty string are part of the external id.
+An external id links a category or an item to the record that it stands for in your system. You
+give it as an `ExternalId`: a `str`, an `int` (not a `bool`), a `UUID` or `None`. taxomesh stores
+its `str()`, and writes and lookups convert it by the same rule.
+
+So a read returns a `str`, and `42` and `"42"` are the same external id. An external id is unique
+within its kind, so creating both raises `TaxomeshExternalIdConflictError`. `None` means no external
+id, and a lookup for `None` reads nothing. taxomesh changes nothing else: whitespace, case and the
+empty string are part of the external id.
 
 ```python
 from uuid import UUID
@@ -194,10 +203,11 @@ del svc.items[keyed]
 ## The enabled filter
 
 `enabled` is `True` (enabled rows only), `False` (disabled only) or `None` (all). A member that
-finds rows, `list`, `roots`, `search`, `list_related`, `get_many_related` and `svc.graph()`,
-defaults to `True`. A member handed the keys, `get_many` and `get_many_by_external_id`, defaults to
-`None`, as subscript, `get`, `in` and `len` do not filter at all. `update(enabled=…)` sets the field
-and is not a filter. `Tag` has no `enabled` field, so no tag member takes one.
+finds rows defaults to `True`: `list`, `roots`, `search`, `list_related`, `get_many_related` and
+`svc.graph()`. A member that you give the keys to defaults to `None`: `get_many` and
+`get_many_by_external_id`. Subscript, `get`, `in`, `len`, `get_by_slug` and `get_by_external_id` do
+not filter. `update(enabled=…)` sets the field and is not a filter. `Tag` has no `enabled` field, so
+no tag member takes one.
 
 ```python
 assert sorted(c.name for c in svc.categories.list(enabled=None)) == ["Blues", "Jazz", "Music", "Retired"]
@@ -212,8 +222,8 @@ assert svc.categories[retired].name == "Retired"
 A category is at the top level exactly when it has no parent. `roots()` lists the top level, in
 the same order as `svc.graph().roots`, and `None` stands for it in `move` and `reorder`. `create`
 puts a category there, `add_parent` takes it off, and losing its last parent puts it back. Storage
-holds the top level as links to the implicit root, which no signature needs: its identifier answers
-not-found wherever a member takes a category.
+holds the top level as links to the implicit root, which no signature names. Every member treats the
+identifier of the implicit root as that of a category that is not stored.
 
 ```python
 assert [c.name for c in svc.categories.roots()] == ["Music"]
@@ -222,7 +232,7 @@ assert [n.category.name for n in svc.graph().roots] == ["Music"]
 
 ---
 
-# `svc.categories`
+## `svc.categories`
 
 | Member | Returns | Does |
 |---|---|---|
@@ -241,29 +251,38 @@ assert [n.category.name for n in svc.graph().roots] == ["Music"]
 | `move(category, *, from_parent, to_parent, before=None)` | `None` | Moves it from one parent to another |
 | `reorder(parent, categories)` | `None` | Orders a parent's children, or the top level |
 
-## Writing
+### Writing
 
-`create` refuses a slug or an external id another category holds
-(`TaxomeshDuplicateSlugError`, `TaxomeshExternalIdConflictError`), and the reserved name
-`__root__` (`TaxomeshRootCategoryError`). `taxomesh.domain.constants` names each limit: a name is at
-most `MAX_CATEGORY_NAME_LENGTH` (256) characters, a description `MAX_DESCRIPTION_LENGTH` (100,000).
+`create` refuses a slug or an external id that another category holds
+(`TaxomeshDuplicateSlugError`, `TaxomeshExternalIdConflictError`), and the reserved name `__root__`
+(`TaxomeshRootCategoryError`). `taxomesh.domain.constants` names each limit. A name, a slug and an
+external id are at most 256 characters, as the table above shows, and a description at most
+`MAX_DESCRIPTION_LENGTH` (100,000).
 
-`update` leaves every field it is not given: each defaults to `UNSET`. It builds on the row as
-stored, never on a cached copy, so it keeps a change another service made. `external_id=None` clears
-the external id; `None` for any other field is the wrong type and raises `TypeError`. `metadata` is
-replaced, never merged, and it is plain JSON: dicts with text keys, lists or tuples, text, finite
-numbers, booleans and `None`. A tuple is taken as a list, and a `StrEnum` or `IntEnum` member as its
-value; for another `Enum`, pass `.value`. Anything else, such as a `datetime` or a `UUID`, raises
-`TaxomeshValidationError`. Every check comes before the save, so a refused update stores nothing.
-`expected_version` makes the update conditional: pass the `version` of the row you read, and if a
-write has stored a newer row since, the update raises `TaxomeshVersionConflictError` and stores
-nothing. The repository compares and writes in one step, so two writers holding one version cannot
-both succeed, through one repository on a file or across processes on Django; read the row again and
-retry with its version.
+`update` changes only the fields that it is given:
 
-`delete` takes the category's links with it, in the same write, on every backend: its links to
-its parents and children, and the placements of the items in it. The items and child categories
-stay stored.
+- Each field defaults to `UNSET`, which keeps the stored value. `external_id=None` clears the
+  external id. `None` for any other field is the wrong type and raises `TypeError`.
+- It reads the stored row, not a cached copy. So it keeps a change made through another service on
+  the same repository, or on Django. On a file, a change made through another repository makes the
+  update raise `TaxomeshRepositoryError` ([Storage backends](repositories.md)).
+- It replaces `metadata`, and does not merge it.
+- Every check runs before the save, so a refused update stores nothing.
+- `expected_version` makes the update conditional. Pass the `version` of the row you read. If a
+  write stored a newer row since, the update raises `TaxomeshVersionConflictError` and stores
+  nothing. The repository compares and writes in one step. So of two writers that hold the same
+  version, the second fails: through one repository on a file, or across processes on Django. Read
+  the row again, and retry with its version.
+- If the row is no longer stored, the update raises its not-found error, conditional or not.
+
+Every `metadata` argument takes plain JSON: dicts with text keys, lists or tuples, text, finite
+numbers, booleans and `None`. A tuple is stored as a list, and a `StrEnum` or `IntEnum` member as its
+value. For another `Enum`, pass `.value`. Any other value inside it, such as a `datetime` or a
+`UUID`, raises `TaxomeshValidationError`. A `metadata` that is not a mapping raises `TypeError`.
+
+`delete` also deletes the links of the category, in the same write, on every backend. These are the
+links to its parents and children, and the placements of its items. The items and the child
+categories stay stored.
 
 ```python
 from taxomesh import TaxomeshValidationError, TaxomeshVersionConflictError
@@ -292,14 +311,17 @@ del svc.categories[doomed]  # svc.categories.delete(doomed) is the same
 assert [c.name for c in svc.categories.list(item=kob)] == ["Jazz"]  # the placement went too
 ```
 
-## Reading
+### Reading
 
-`list(parent=…)` orders the children by their sort index under that parent, and `list(item=…)` the
-item's categories by the sort index of each placement. Unfiltered, `list()` holds every category
-`enabled` keeps, at every level, by name, then by identifier: `parent=None` is no filter, and
-`roots()` lists the top level, by sort index, then by identifier. Passing both filters raises
-`TaxomeshValidationError`, since they reach different reads. A filter naming an entity that is not
-stored raises the not-found error of that entity: it is a wrong address, not a miss.
+`list(parent=…)` orders the children by their sort index under that parent. `list(item=…)` orders
+the categories of the item by the sort index of each placement. With no filter, `list()` returns
+every category that `enabled` keeps, at every level, by name, then by identifier. `parent=None` is no
+filter: `roots()` lists the top level, by sort index, then by identifier. On Django, the collation of
+the database orders the names.
+
+Passing both filters raises `TaxomeshValidationError`, since they reach different reads. A filter
+that names an entity that is not stored raises the not-found error of that entity: it is a wrong
+address, not a miss.
 
 ```python
 from taxomesh import TaxomeshCategoryNotFoundError
@@ -319,18 +341,19 @@ for wrong, error in ((dict(parent=missing), TaxomeshCategoryNotFoundError), (dic
         raise AssertionError(f"list({wrong}) must raise")
 ```
 
-## Parents and order
+### Parents and order
 
-`add_parent` adds: the category keeps the parents it had. A link that would close a cycle raises
-`TaxomeshCyclicDependencyError`. `remove_parent` removes one link and is a no-op when there is none.
-`move` removes the link to `from_parent`, if any, and adds `to_parent`, before the sibling `before`
-or last. A `before` that is not stored raises its not-found error. `TaxomeshValidationError` refuses
-one that is no sibling there, the category itself included, and `to_parent=None` while the category
-keeps another parent. Every check runs before the first write, so a refused move changes nothing.
-
-`reorder` gives the categories passed positions 0, 1, 2… in that order. Pass every child: one left
-out keeps its position, which another may then share. A category that is not a child of that
-parent raises `TaxomeshValidationError`.
+- `add_parent` adds a parent: the category keeps the parents it had. A link that would close a
+  cycle raises `TaxomeshCyclicDependencyError`.
+- `remove_parent` removes one link. It is a no-op when there is none.
+- `move` removes the link to `from_parent`, if there is one, and adds `to_parent`, before the sibling
+  `before` or last. A `before` that is not stored raises its not-found error. `move` raises
+  `TaxomeshValidationError` for a `before` that is not a sibling there, the category itself included,
+  and for `to_parent=None` while the category keeps another parent. Every check runs before the
+  first write, so a refused move changes nothing.
+- `reorder` gives the categories passed positions 0, 1, 2… in that order. Pass every child: one left
+  out keeps its position, which another may then share. A category that is not a child of that
+  parent raises `TaxomeshValidationError`.
 
 ```python
 from taxomesh import TaxomeshCyclicDependencyError
@@ -365,7 +388,7 @@ else:
 
 ---
 
-# `svc.items`
+## `svc.items`
 
 | Member | Returns | Does |
 |---|---|---|
@@ -376,7 +399,7 @@ else:
 | `get_by_external_id(external_id, /)` | `Item \| None` | The item with that external id |
 | `get_many(items, /, *, enabled=None)` | `Mapping[UUID, Item]` | The items found, in one read |
 | `get_many_by_external_id(external_ids, /, *, enabled=None)` | `Mapping[str, Item]` | The same, keyed by stored external id |
-| `list(*, category=None, recursive=False, tag=None, enabled=True)` | `Sequence[Item]` | Every item; or a category's; or a tag's; or both |
+| `list(*, category=None, recursive=False, tag=None, enabled=True)` | `Sequence[Item]` | Every enabled item; or a category's; or a tag's; or both |
 | `search(query, *, limit=20, category=None, recursive=False, enabled=True, fuzzy=True)` | `Sequence[Item]` | Ranked matches: see [Search](#search) |
 | `place_in(item, category, *, sort_index=None)` | `ItemParentLink` | Places it in a category, or sets the sort index of that placement |
 | `remove_from(item, category)` | `None` | Removes one placement |
@@ -389,14 +412,16 @@ else:
 | `list_related(item, *, relation_types=None, direction="outgoing", enabled=True)` | `Sequence[Item]` | The items at the other end, in link order |
 | `get_many_related(items, /, *, relation_types=None, direction="outgoing", enabled=True)` | `Mapping[UUID, RelatedItems]` | The same for many items, in two storage reads |
 
-## Writing and reading
+### Writing and reading
 
-`create`, `update` and `delete` keep the rules of their category namesakes, except that an item's
-name may be `__root__`. Unfiltered, `list()` orders the items by name, then by identifier.
-`list(category=…)` orders them by the sort index of their placement; with `recursive=True` it takes
-the category's descendants in too, each item once, in depth-first order. `list(tag=…)` orders the
-tagged items by name, then by identifier; beside `category`, it keeps the category listing's order
-and only the tagged items. A filter naming an entity that is not stored raises its not-found error.
+`create`, `update` and `delete` follow the rules of the category members of the same name, except
+that the name of an item may be `__root__`.
+
+With no filter, `list()` orders the items by name, then by identifier. `list(category=…)` orders them
+by the sort index of their placement. With `recursive=True`, it also takes the items of the
+descendants of the category, each item once, in depth-first order. `list(tag=…)` orders the tagged
+items by name, then by identifier. With `category`, it keeps the order of the category listing, and
+only the tagged items. A filter that names an entity that is not stored raises its not-found error.
 
 ```python
 blue_train = svc.items.create(name="Blue Train", external_id=7001, metadata={"year": 1958})
@@ -414,14 +439,18 @@ recursive = svc.items.list(category=music, recursive=True)
 assert [i.name for i in recursive] == ["Kind of Blue", "Giant Steps", "Birth of the Cool"]
 ```
 
-## Placement, order and tags
+### Placement, order and tags
 
-An item may be placed in any number of categories. `place_in` again sets the sort index it is given,
-or keeps the stored one, and adds no second placement; `remove_from`, `untag` and `unrelate` are
-no-ops when there is nothing to remove, and `tag` when the tag is already there. `move` and
-`reorder` work as they do for categories, and refuse a `before`, or an item, not placed in that
-category. With no position, `place_in` reads the category's placements to find the last, so its cost
-grows with the category: a load of many items into one category passes their positions.
+An item may be placed in any number of categories.
+
+- `place_in` again sets the sort index that it is given, or keeps the stored one. It adds no second
+  placement.
+- `remove_from`, `untag` and `unrelate` are no-ops when there is nothing to remove. `tag` is a no-op
+  when the item already has the tag.
+- `move` and `reorder` work as they do for categories. They refuse a `before`, or an item, that is
+  not placed in that category.
+- With no position, `place_in` reads every placement of the category to find the last one. To load
+  many items into one category, pass their positions.
 
 ```python
 svc.items.place_in(kob, blues, sort_index=9)
@@ -446,26 +475,30 @@ svc.items.untag(steps, live)
 del svc.tags[live]  # removed from Birth of the Cool too
 ```
 
-## Relations
+### Relations
 
-A relation is directed and typed: `relate(source, target, relation_type)`. Its type is your own
-label, stripped and lowercased on write and on lookup alike, so a filter on `["COVERS"]` matches
-`"covers"`; a blank type or a self-relation raises `TaxomeshRelationError`. Each read takes a
-`direction`: `"outgoing"` (the default) where the item is the source, `"incoming"` where it is the
-target, or `"both"`, which returns each stored link once. `Direction.BOTH` and `"both"` are the same
-argument. When an item can be at either end of a relation, read its relations with `"both"`:
-`"outgoing"` leaves out the links that point at the item. A relation stored in both directions is
-two links, and `"both"` returns the two. `relation_types` takes one type or a collection of them,
-and `None`, or an empty one, reads every type.
+A relation is directed and typed: `relate(source, target, relation_type)`.
 
-`list_related` and `get_many_related` filter the related items by `enabled`, and skip, with one
-`WARNING` from the `taxomesh.application.collections.items` logger, a relation whose other end is
-not stored. In `get_many_related` the queried items are keys: one with no matching relation, or not
-stored, is left out. Each value is a `RelatedItems`:
+- The type is your own label. taxomesh strips it and makes it lowercase, on write and on lookup
+  alike, so a filter on `["COVERS"]` matches `"covers"`. `relate` refuses a blank type or a
+  self-relation with `TaxomeshRelationError`.
+- Each read takes a `direction`: `"outgoing"` (the default) where the item is the source,
+  `"incoming"` where it is the target, or `"both"`. `Direction.BOTH` and `"both"` are the same
+  argument.
+- If an item can be at either end of a relation, read its relations with `"both"`. `"outgoing"`
+  leaves out the links that point at the item. `"both"` returns each stored link once, so a
+  relation stored in both directions is two links.
+- `relation_types` takes one type or a collection of them. `None` or an empty collection reads
+  every type.
+
+`list_related` and `get_many_related` filter the related items by `enabled`. They skip a relation
+whose other end is not stored, and log a `WARNING` on the `taxomesh.application.collections.items`
+logger. In `get_many_related`, the items that you pass are the keys. An item is left out when it has
+no related item to return. Each value is a `RelatedItems`:
 
 | Member | Returns |
 |---|---|
-| `item_id` · `by_type` | the queried item's `UUID` · a read-only mapping of its related items per relation type, each a tuple |
+| `item_id` · `by_type` | the `UUID` of the item · a read-only mapping of its related items per relation type, each a tuple |
 | `of_type(t)` | that type's items, `()` for a type not present; `t` is stripped and lowercased |
 | `relation_types` | the types present, sorted |
 | `iter(related)` · `len(related)` | each related item once, by type · how many that is |
@@ -496,7 +529,7 @@ assert svc.items.list_relations(kob, direction="both") == ()
 
 ---
 
-# `svc.tags`
+## `svc.tags`
 
 | Member | Returns | Does |
 |---|---|---|
@@ -518,24 +551,32 @@ assert svc.tags.list(item=kob) == () and len(svc.tags) == 0
 
 ---
 
-# Search
+## Search
 
-`items.search` and `categories.search` rank matches on name, slug and external id, typo-tolerant
-and accent-insensitive, using [rapidfuzz](https://github.com/maxbachmann/RapidFuzz). The query and
-each field are normalised first: accents stripped, the characters `'`, `-`, `.`, `_` and `\`
-turned into spaces, lowercased, whitespace collapsed. From best to worst, a match is exact on name
-or slug, a prefix of the name, a prefix of the slug, a word prefix in the name, a substring of the
-name, of the slug, or of the external id, and last a fuzzy match scoring 70 or more out of 100;
-`fuzzy=False` stops before it. Ties go alphabetically by normalised name.
+`items.search` and `categories.search` rank matches on the name, the slug and the external id. The
+search is typo-tolerant and accent-insensitive, and uses
+[rapidfuzz](https://github.com/maxbachmann/RapidFuzz). It normalizes the query and each field first.
+It strips accents, turns the characters `'`, `-`, `.`, `_` and `\` into spaces, makes the text
+lowercase, and collapses whitespace. From best to worst, a match is:
+
+1. exact on the name or the slug;
+2. a prefix of the name;
+3. a prefix of the slug;
+4. a word prefix in the name;
+5. a substring of the name, then of the slug, then of the external id;
+6. a fuzzy match that scores 70 or more out of 100. `fuzzy=False` stops before this rank.
+
+Inside a rank, a higher fuzzy score comes first, then the normalized name, in alphabetical order.
 
 `limit` below 1 raises `TaxomeshValidationError`. `items.search(category=…)` searches the items
-placed there, and with `recursive=True` its descendants' too; `categories.search(parent=…)` searches
-that parent's children. A blank query returns `()` once the filter is checked.
+placed there, and with `recursive=True` the items of its descendants too.
+`categories.search(parent=…)` searches the children of that parent. A blank query returns `()` once
+the filter is checked.
 
-An unfiltered search ranks a corpus that the service builds once, at the first search, and holds
-for `cache_ttl`. A create, update or delete of a category drops the category corpus, and one of an
-item drops the item corpus; a write to a link drops neither. A search with `category` or `parent`
-ranks the rows of that listing instead.
+An unfiltered search ranks a corpus: the rows that the service reads at the first search, and holds
+for `cache_ttl`. A write to a category drops the category corpus, and a write to an item drops the
+item corpus. A write to a link drops neither. A search with `category` or `parent` ranks the rows of
+that listing instead.
 
 ```python
 assert [i.name for i in svc.items.search("kind of blue")] == ["Kind of Blue"]
@@ -552,19 +593,21 @@ del svc.items[magaldi]
 
 ---
 
-# The graph
+## The graph
 
 `svc.graph(*, root=None, enabled=True, include_items=True)` returns a `TaxomeshGraph`: a read-only
 snapshot, which a later write does not change. It holds one `CategoryNode` per category, however
-many paths reach it, and costs a constant number of storage reads at any size. `root` limits it to
-that category and its descendants; `include_items=False` reads no items at all.
+many paths reach it. It costs a constant number of storage reads at any size. `root` limits it to
+that category and its descendants: `roots` then holds that category alone, and a parent outside the
+limit is left out. A `root` that `enabled` leaves out raises its not-found error.
+`include_items=False` reads no items at all.
 
 | Form | Returns | On a miss |
 |---|---|---|
 | `graph[key]` | `CategoryNode` | raises `TaxomeshCategoryNotFoundError` |
 | `graph.get(key, default=None, /)` | `CategoryNode` | `default` |
 | `key in graph` · `len(graph)` | `bool` · `int` | `False` · `0` |
-| `graph.roots` | `Sequence[CategoryNode]`, the top level | empty |
+| `graph.roots` | `Sequence[CategoryNode]`, the top level, or the `root` category | empty |
 | `graph.walk()` | `Iterator[CategoryNode]` | — |
 
 | Node member | Returns |
@@ -574,9 +617,9 @@ that category and its descendants; `include_items=False` reads no items at all.
 | `node.items` | `Sequence[Item]`, by sort index; `()` in a graph built with `include_items=False` |
 | `node.descendants()` · `node.ancestors()` | `Sequence[CategoryNode]`, every level down or up, depth-first in the order of `children` or `parents`, each once, the node left out |
 
-`walk()` is the graph's only enumerator: it yields every node once, a category no top-level
-category reaches included. It and both node walks end on a cycle in stored data. The graph itself
-does not iterate.
+`walk()` is the only member that visits every node of the graph. It yields every node once,
+including a category that no top-level category reaches. `walk()` and both node walks end on a cycle
+in stored data. The graph itself does not iterate.
 
 ```python
 graph = svc.graph()
@@ -597,7 +640,7 @@ assert len(svc.graph(enabled=None)) == 5
 
 ---
 
-# `svc.info` and `svc.repository`
+## `svc.info` and `svc.repository`
 
 `svc.info` is a frozen `TaxomeshInfo`, a snapshot of the moment it is read:
 
@@ -619,33 +662,41 @@ assert svc.info.repository.backend == svc.repository.describe().backend == "Yaml
 
 ---
 
-# Caching
+## Caching
 
-Each service caches its reads in memory for `cache_ttl` seconds, 5 unless it is built with another;
-`0` caches nothing, and a negative or NaN lifetime raises `TaxomeshValidationError`. A write through
-a service clears that service's cache, and no other's: another service over the same repository, or
-over the same Django database from another process, sees the write once its own entries expire. A
-write reads what it changes from storage, never from the cache, so a service may be shared across
-threads: its writes are never stale, and its reads may be stale within `cache_ttl`. Inside a
-transaction, which only Django has, a read is neither cached nor served from the cache. A listing
-reads its links, then the rows that they name, so it may raise the not-found error of a row that
-another writer deletes between the two reads; over HTTP, that request answers 404. A YAML or JSON
-file is read when its repository is built, so it has one writer: see [Storage](repositories.md).
-The [design notes](design.md#the-per-service-cache) say why.
+Each service caches in memory what its lookups, listings, relation reads and graphs read from
+storage. An entry lasts `cache_ttl` seconds: 5, unless the service is built with another value. `0`
+caches nothing, and a negative or NaN lifetime raises `TaxomeshValidationError`. Three forms read
+storage on every call: `len()`, a lookup of one tag (subscript, `get`, `in`), and a search filtered
+by category with `recursive=True`.
+
+A write through a service clears the cache of that service, and of no other. A write reads what it
+changes from storage, never from the cache. Inside a transaction, which only Django has, a read is
+neither cached nor served from the cache. The [design notes](design.md#the-per-service-cache) say
+why the cache works this way.
 
 ```python
 uncached = TaxomeshService(svc.repository, cache_ttl=0)
 assert uncached.categories[music].name == "Music"  # read from storage every time
 ```
 
+## Several writers
+
+Threads may share a service: its writes are never stale, and its reads may be stale within
+`cache_ttl`. Another service over the same repository, or over the same Django database from another
+process, sees a write once its own cache entries expire. A listing reads its links, then the rows
+that they name. So it may raise the not-found error of a row that another writer deletes between the
+two reads. `list_related` and `get_many_related` skip that row instead, with a `WARNING`. A YAML or
+JSON file has one writer: [Storage backends](repositories.md) says why.
+
 ---
 
-# Errors
+## Errors
 
-The members raise these errors, and one more: `TypeError`, for an argument of the wrong type, as
-`int(None)` raises it; the flags `recursive`, `fuzzy` and `include_items` are read as `if flag:`. A
-value of the right type that is refused is a `TaxomeshValidationError`, as `int("ten")` raises
-`ValueError`.
+Every error class inherits `TaxomeshError`. A not-found error is also a `KeyError`, and a validation
+error also a `ValueError`. Besides these errors, a member raises `TypeError` for an argument of the
+wrong type, as `int(None)` does, and `TypeError` is not a `TaxomeshError`. A value of the right type
+that a check refuses raises `TaxomeshValidationError`, as `int("ten")` raises `ValueError`.
 
 ```
 TaxomeshError
@@ -664,14 +715,18 @@ TaxomeshError
 └── TaxomeshConfigError
 ```
 
-All of them are importable from `taxomesh`. `TaxomeshGraphTooLargeError`, which only the HTTP
-serializer raises, is a `TaxomeshError` too, in `taxomesh.contrib.api.errors`. A storage failure
-raises `TaxomeshRepositoryError` from any write. A value the model refuses raises
-`TaxomeshValidationError`, with pydantic's error chained as its cause, so no
-`pydantic.ValidationError` leaves a member. A field takes what pydantic's lax mode takes, so
-`sort_index="5"` is 5, `name=b"Jazz"` is `"Jazz"` and `sort_index="ten"` is refused; a filter
-takes only its own type, so `enabled="yes"` raises `TypeError`, which is not a `TaxomeshError`, and a
-flag is read as `if flag:`.
+You can import all of them from `taxomesh`. `TaxomeshGraphTooLargeError`, which only the HTTP
+serializer raises, is a `TaxomeshError` too, in `taxomesh.contrib.api.errors`.
+
+- **Storage.** On Django, a storage failure in any read or write raises `TaxomeshRepositoryError`.
+  A file repository raises it when it cannot read or write its file, and when another writer
+  changed the file ([Storage backends](repositories.md)).
+- **Refused values.** When the model refuses a value that you pass, the member raises
+  `TaxomeshValidationError`, with pydantic's error as its cause. So no `pydantic.ValidationError`
+  reaches you for a value that you pass.
+- **Types.** A model field takes what pydantic's lax mode takes: `sort_index="5"` is 5, and
+  `sort_index="ten"` is refused. A filter takes only its own type: `enabled="yes"` raises
+  `TypeError`. A flag (`recursive`, `fuzzy`, `include_items`) takes any value, as `if flag:` does.
 
 ```python
 for call, error in (
@@ -688,11 +743,13 @@ for call, error in (
         raise AssertionError(f"expected {error.__name__}")
 ```
 
+## Logging
+
 The library logs with the standard `logging` module, on loggers whose names start with `taxomesh`.
-`list_related` and `get_many_related` log a `WARNING`, the HTTP error mapping an `ERROR`, and the
-Django admin a `WARNING` when it cannot link an external id. The `taxomesh` logger has a
-`NullHandler`, so no log record is written until your application configures logging. To read the
-log records, attach a handler:
+`list_related` and `get_many_related` log a `WARNING` when they skip a relation. The HTTP error
+mapping logs an `ERROR` for each error that it maps to 500. The Django admin logs a `WARNING` when it
+cannot link an external id, and an `ERROR` when a graph view fails. To read the log records, attach a
+handler:
 
 ```python notest
 import logging

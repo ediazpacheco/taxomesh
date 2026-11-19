@@ -1,11 +1,9 @@
 # Design
 
-How taxomesh is built, and why its public surface looks the way it does.
-
-This page is the reference for the architecture and the API design of taxomesh. Each rule says
-what it protects and which test enforces it. When the code or a test disagrees with this page, the
-disagreement is a defect to fix, not a new rule. A rule changes on this page, in the same change as
-the code.
+This page describes how taxomesh is built, and why its public surface looks the way it does. It is
+for contributors: each rule says what it protects and which test enforces it. When the code or a
+test disagrees with this page, the disagreement is a defect to fix, not a new rule. A rule changes on
+this page, in the same change as the code.
 
 Other rules have their own pages:
 
@@ -23,13 +21,14 @@ Dependencies point inward: `adapters → application → domain`.
 
 | Module | Holds |
 |---|---|
-| `domain/` | The models (`Category`, `Item`, `Tag` and the four links), the graph read model, cycle detection (`dag.py`), the per-path drawing walk (`paths.py`), the limits (`constants.py`), and the public types (`refs.py`, `types.py`) |
+| `domain/` | The models (`Category`, `Item`, `Tag` and the four links), the read models (`graph.py`, `related.py`, `info.py`), cycle detection (`dag.py`), the per-path drawing walk (`paths.py`), the limits (`constants.py`), and the public types (`refs.py`, `types.py`) |
 | `ports/repository.py` | `TaxomeshRepositoryBase`, the storage port, a `typing.Protocol` |
 | `application/` | `TaxomeshService`, the three collections under `collections/`, and search |
 | `adapters/repositories/` | `YamlRepository`, `JsonRepository` and `DjangoRepository` |
-| `adapters/cli/` | The `taxomesh` command (Typer), installed with the `cli` extra |
-| `contrib/api/` | Framework-agnostic HTTP handlers, request schemas and error mapping |
+| `adapters/cli/` | The `taxomesh` command (Typer); the `cli` extra installs its dependencies |
+| `contrib/api/` | HTTP handlers that need no web framework, request schemas, serializers and error mapping |
 | `contrib/django/` | The ORM models, migrations and admin behind `DjangoRepository` |
+| `exceptions.py` | The error classes |
 | `_config.py` | The composition root: reads `taxomesh.toml` and builds the adapter it names |
 | `repositories.py` | Re-exports the three adapters |
 | `utils/memoize.py` | The read cache |
@@ -39,11 +38,11 @@ No module under `application/` imports an adapter or an integration, lazily or n
 only when it is given no repository.
 
 **One entry point.** `TaxomeshService(repository=None, *, config_path=None, cache_ttl=5.0)` is the
-entry point: apart from a repository, which chooses the storage, it is the only class a caller
-builds. Given no repository, the service reads `taxomesh.toml`
-([Configuration](configuration.md)). Without that file, it uses a YAML file at the YAML adapter's
-default path. The members for categories, items and tags are on `svc.categories`, `svc.items` and
-`svc.tags`, and the graph snapshot is `svc.graph()`.
+entry point. Apart from a repository, which chooses the storage, it is the only class that a caller
+builds to use the Python API. Given no repository, the service takes its storage from
+`taxomesh.toml` ([Configuration](configuration.md)), or by default from a YAML file at the YAML
+adapter's default path. The members for categories, items and tags are on `svc.categories`,
+`svc.items` and `svc.tags`, and the graph snapshot is `svc.graph()`.
 
 **An adapter keeps its own defaults.** Only `yaml_repository.py` and `json_repository.py` define a
 default file path (`DEFAULT_YAML_PATH`, `DEFAULT_JSON_PATH`). When `taxomesh.toml` names a file
@@ -52,19 +51,24 @@ its own default. `_config.py` imports the two constants only to report which pat
 resolves to. It never repeats their values. `tests/service/test_service_config.py` asserts that the
 backend gets no path argument and that `_config.py` writes no file path.
 
-**The port reports absence and the service raises.** The port, `TaxomeshRepositoryBase`, is a
-`typing.Protocol`: a backend inherits nothing, mypy checks that it has the port's members, and the
-service checks them with `isinstance` when it is built
-([Custom backends](repositories.md#custom-backends)). A port lookup is `find_*` and returns `None`
-on a miss, a keyed batch read is `map_*`, and a listing is `list_*`. No name means one thing on the
-port and another on the service. The port's `save_category` and `save_item` return the stored
-row, and `atomic()` groups writes that belong together: on Django they roll back together, while a
-file backend writes each one to disk on its own. A block also keeps every other block of its store
-out: on Django, its first statement locks the implicit root's row. Each member that writes runs in
-one block and makes its reads inside it, so no other write lands between its checks and its writes,
-and `tests/service/test_concurrent_writes.py` asserts it. Cascades on delete are part of the port
-contract, and `tests/service/test_delete_cascade.py` holds the four implementations to them:
-`YamlRepository`, `JsonRepository`, `DjangoRepository` and the tests' `InMemoryRepository`.
+**The port reports absence and the service raises.**
+
+- The port, `TaxomeshRepositoryBase`, is a `typing.Protocol`, so a backend inherits nothing. mypy
+  checks that a backend has the members of the port. The service checks them with `isinstance` when
+  it is built ([Write your own backend](repositories.md#write-your-own-backend)).
+- A port lookup is `find_*` and returns `None` on a miss. A keyed batch read is `map_*`, and a
+  listing is `list_*`. No name means one thing on the port and another on the service.
+- `save_category` and `save_item` return the stored row.
+- `atomic()` groups writes that belong together. On Django they roll back together. A file backend
+  writes each one to disk on its own.
+- A block keeps out every other block of the same repository object. On Django, it keeps out every
+  block on the database: its first statement locks the implicit root's row, or on SQLite the whole
+  database.
+- Each member that writes runs in one block and makes its reads inside it. So no other write lands
+  between its checks and its writes. `tests/service/test_concurrent_writes.py` asserts it.
+- Cascades on delete are part of the port contract. `tests/service/test_delete_cascade.py` holds the
+  four implementations to them: `YamlRepository`, `JsonRepository`, `DjangoRepository` and the
+  tests' `InMemoryRepository`.
 
 ## Names
 
@@ -88,7 +92,7 @@ handlers ([HTTP handlers](#http-handlers)).
 
 Two more rules apply to a member's name:
 
-- No public name contains `_for_`.
+- No public name of the service, its collections or the port contains `_for_`.
 - `_by_` names a unique key that a lookup addresses rows by: `_by_id`, `_by_slug` or
   `_by_external_id`. It never names a filter over a relation: the categories an item is placed in
   are `categories.list(item=…)`.
@@ -109,33 +113,40 @@ an example.
   Every member that takes one raises the not-found error of that entity.
 - `list*` returns a tuple and `get_many*` a new dict, so a name never hides the container type.
   `get_by_<key>` names a unique key and returns the row or `None`.
-- **Filters are keyword-only.** The subject is the only positional parameter.
+- **Filters and options are keyword-only.** A positional parameter is an entity that the member
+  acts on, as in `items.tag(item, tag)`. It can also be a key, the `name` of a new row, a search
+  `query` or the type of a relation. `get` takes its default positionally, as `dict.get` does.
 - **The member is on the collection of the entity it changes.** An operation that joins two
   entities is a member of the collection of the entity that it changes, and that entity comes
   first: `items.tag(item, tag)`.
-- `enabled` is one filter with one meaning on every member that takes it.
+- `enabled` is one filter with one meaning on every member that takes it as a filter.
   [The enabled filter](python-api.md#the-enabled-filter) says what each value selects and which
   default each member has.
 - Every not-found error is a `KeyError` and every validation error a `ValueError`, so a caller who
-  knows only the standard library catches them. No `pydantic.ValidationError` leaves a member. An
-  argument of the wrong type raises `TypeError`, as `int(None)` does, and is no `TaxomeshError`: it
-  is a mistake to fix, not a failure to handle. Only the flags `recursive`, `fuzzy` and
-  `include_items` are read as `if flag:`. A value of the right type that is refused raises
-  `TaxomeshValidationError`, as `int("ten")` raises `ValueError`.
+  knows only the standard library catches them. [Errors](#errors) gives the rule for an argument of
+  the wrong type.
 - A collection does not iterate, and is not a `collections.abc.Mapping`, which builds `keys()`,
-  `values()` and `==` on iteration. Iterating a collection would read every row in a loop that does
-  not show that cost, and would have to choose a meaning for `enabled` without telling the caller.
-  So `iter()` and `reversed()` raise `TypeError`, `list()` enumerates instead, and `len()` is the
-  one form that reads every row.
+  `values()` and `==` on iteration. Iterating would read every row in a loop that hides that cost. It
+  would also have to choose a meaning for `enabled` without telling the caller. So `iter()` and
+  `reversed()` raise `TypeError`, and `list()` lists the rows instead. `len()` is the one form that
+  reads every row, and a truth test calls it too.
 
 ## Errors
 
 Every error class of the library inherits `TaxomeshError`, so one `except` clause catches every
-failure the library reports. No member hides a failure: a failure that the caller is not told
-about is a defect. The one standard exception that a member raises on purpose is `TypeError`, for
-an argument of the wrong type.
+failure that a member reports. No member hides a failure: a failure that the caller is not told
+about is a defect. Two cases are documented instead of raised. `list_related` and `get_many_related`
+skip a relation whose other end is not stored, with a `WARNING`. A `config_path` that names no file
+gives the default store ([Configuration](configuration.md)).
 
-Every error class is importable from `taxomesh`, except `TaxomeshGraphTooLargeError`. Only the HTTP
+For an argument of the wrong type, a member raises `TypeError`, as `int(None)` does. `TypeError` is
+not a `TaxomeshError`: it is a mistake to fix, not a failure to handle. For a model field, pydantic's
+lax mode decides what a wrong type is. Only the flags `recursive`, `fuzzy` and `include_items` are
+read as `if flag:`. A value of the right type that a check refuses raises `TaxomeshValidationError`,
+as `int("ten")` raises `ValueError`. No `pydantic.ValidationError` from a value that the caller
+passes leaves the service, its collections or the graph.
+
+You can import every error class from `taxomesh`, except `TaxomeshGraphTooLargeError`. Only the HTTP
 serializer raises that error, so `taxomesh.contrib.api.errors` defines it, beside the serializer.
 [Errors](python-api.md#errors) shows the tree. `tests/test_exceptions.py` asserts the bases, and
 `tests/test_packaging.py` asserts where each class is importable from.
@@ -156,12 +167,13 @@ serializer raises that error, so `taxomesh.contrib.api.errors` defines it, besid
 A type that a public signature uses is exported, so a caller can write the same annotation:
 `external_id: ExternalId | UnsetType = UNSET` needs all three names. `ModelBase`, the models'
 shared base, and `normalise_external_id`, the conversion behind `ExternalId`, are in no public
-signature, so they are not exported.
+signature, so they are not exported. The collection classes are not exported either: a caller
+reaches them through the service.
 
 The storage adapters are imported from `taxomesh.repositories`, and importing that module imports
 no Django. The HTTP modules are imported from `taxomesh.contrib.api`. `taxomesh` itself re-exports
-neither. [`llms.txt`](../llms.txt) names every export, and `tests/test_packaging.py` asserts the
-list and each import.
+neither. [`llms.txt`](../llms.txt) names every export. `tests/test_packaging.py` asserts the list
+and each import, and `tests/docs/test_reference_pages.py` that `llms.txt` names them.
 
 ## Frozen rows
 
@@ -195,32 +207,27 @@ else:
 
 **Why:** a memoized read returns the same object to every caller within the cache's lifetime. If
 rows were mutable, one caller's edit would change what the next caller reads, and change the
-cache with it. With frozen rows, the mistake raises an error where it is made. Sequences come back
-as tuples, and mappings as a new dict on every call or, in `RelatedItems.by_type`, as a read-only
-mapping, for the same reason; a graph is a snapshot on every backend. No row is hashable, since each
-holds a `metadata` dict.
+cache with it. With frozen rows, the mistake raises an error where it is made.
 
-`expected_version` is optimistic concurrency. The repository compares the stored version and writes
-`version + 1` in one step. When the stored row is at another version, the update raises
-`TaxomeshVersionConflictError`, which the HTTP edge maps to 409. When the row is no longer stored,
-the update raises the not-found error of its kind, which the HTTP edge maps to 404. Of two writers
-that pass the same version, the second is refused with the conflict: through one repository on a
-YAML or JSON file, whose lock makes each call one step for every thread, or across processes on
-Django. Every write reads what it changes from storage, never from the cache: `update` builds on the
-stored row, so without `expected_version` it replaces only the fields it is given, and a write that
-names an entity that another service deleted raises its not-found error.
+For the same reason, a sequence comes back as a tuple. A mapping comes back as a new dict on every
+call, or as a read-only mapping in `RelatedItems.by_type`. A graph is a snapshot on every backend.
+No row is hashable, since each holds a `metadata` dict.
 
-`metadata` is plain JSON, checked where a caller's value comes in rather than on the model: every
-backend then stores the same thing, and a store already holding another value still loads.
+`expected_version` is optimistic concurrency: the repository compares the stored version and writes
+`version + 1` in one step. [Writing](python-api.md#writing) says what the caller sees.
+
+`metadata` is plain JSON. taxomesh checks it where a caller's value comes in, not on the model. So
+every backend stores the same values, and a store that holds another value still loads.
 [Writing](python-api.md#writing) says what plain JSON accepts.
 
-The freeze, which builds the `FrozenDict` and `FrozenList` objects of a model's `metadata`, makes
-one Python call for each dict and list. It makes none for a value whose type is exactly
-`str`, `int`, `float`, `bool` or `None`, not a subclass: it keeps that value where it reads it. The
-shipped backends read the metadata that taxomesh wrote back as dicts and lists of such values. So
-when a shipped backend reads a row or a link, the number of Python calls of the freeze depends on
-the dicts and lists of its metadata, not on how many values they hold.
-`tests/domain/test_metadata_freeze_cost.py` asserts it.
+The freeze builds the `FrozenDict` and `FrozenList` objects of a model's `metadata`. It makes one
+Python call for each dict and each list. It keeps a value of exactly `str`, `int`, `float`, `bool`
+or `None`, not a subclass, where it reads it, with no call.
+
+The shipped backends read the metadata that taxomesh wrote back as dicts and lists of such values.
+So when a shipped backend reads a row or a link, the freeze cost grows with the dicts and lists in
+its metadata. It does not grow with the number of values.
+`tests/domain/test_metadata_freeze_cost.py` asserts the cost for a model built from such values.
 
 Every `str` field of a model declares a `max_length`, as `Annotated[str, Field(max_length=N)]`, and
 `domain/constants.py` names each limit. A model therefore refuses an oversized value when it is
@@ -230,9 +237,9 @@ field. No test checks that a new field declares one.
 
 ## The root invariant
 
-Storage keeps the implicit root, a category that no member returns. A category is at the top level
-exactly when it has no other parent, and the top level is stored as a parent link to the implicit
-root:
+Storage keeps the implicit root, a category that no member of the service returns. A category is at
+the top level exactly when it has no other parent. Storage holds that as a parent link to the
+implicit root:
 
 ```python
 jazz = svc.categories.create("Jazz")
@@ -249,47 +256,45 @@ assert {c.name for c in svc.categories.roots()} == {"Recorded music", "Jazz"}
 - `add_parent` deletes the link to the implicit root inside the same `atomic()` block, which on
   Django is one transaction. When a category loses its last parent, through `remove_parent`, `move`
   or the deletion of the parent, the link to the implicit root is stored again.
-- `roots()` and `graph().roots` read the same links, so they agree on any stored data.
+- `roots()` and `graph().roots` read the same links. So, on a store that keeps the port contract,
+  they list the same categories for the same `enabled`.
 - No signature names the implicit root: `None` stands for the top level in `move` and `reorder`.
   Every member treats the identifier of the implicit root as that of a category that is not
-  stored: `get` answers `None`, and subscript or a filter raises not-found.
-- A store that breaks the invariant is repaired: the file adapters normalise it on load, and Django
-  migration `0011_root_invariant` does it once; `0012_implicit_root` stores the implicit root once.
+  stored. `get` answers `None`, and subscript or a filter raises not-found.
+- A store that breaks the invariant is repaired. A file repository repairs it when it loads a file
+  that holds the implicit root. Django migration `0011_root_invariant` repairs it once, and
+  `0012_implicit_root` stores the implicit root once and merges any duplicates.
 
 **Why:** "top level" has one meaning, which every read agrees on. To list the top level, a member
-reads the links to the implicit root and then the rows they name, rather than the parents of every
-category.
+reads the links to the implicit root, then the rows that they name. It does not read the parents of
+every category.
 
 ## The per-service cache
 
 Each `TaxomeshService` owns one `ReadCache` (`utils/memoize.py`) and gives it to the three
 collections it builds. A `@memoize` method reaches its owner's cache at call time.
 
-- `cache_ttl` (5 seconds by default) is how long an entry is served, measured from the read that
-  made it; an expired entry is dropped when its member stores the next one. `0` stores nothing,
-  and a negative or NaN lifetime is refused.
+- `cache_ttl` (5 seconds by default) is how long an entry is served, from the read that made it. An
+  expired entry is dropped when its member stores the next one.
 - A write through a service clears that service's entries, and no other service's. Each search
   corpus is held for the same lifetime.
 - There is no module-level cache registry. Nothing outside the objects that hold a cache keeps an
   entry alive.
-- A read may be stale within `cache_ttl`; a write is not, since it reads what it changes from
-  storage. On that basis, threads may share a service.
-- A read inside a transaction, the caller's or the repository's own, is neither stored in the cache
-  nor served from it: it sees the transaction's writes before they commit, and a rollback takes them
-  back. The port's `in_transaction` says when one is open on the calling thread; only Django has
-  transactions, and with `ATOMIC_REQUESTS` every read of a view is inside one.
-  `tests/contrib/django/test_transaction_cache.py` asserts it.
-- A listing reads its links, and then the rows that they name. When another writer deletes one of
-  those rows between the two reads, the listing raises that row's not-found error.
-- A collection is never constructed directly: built any other way, it would hold a cache of its
-  own and miss every entry the service's collections primed.
+- A read may be stale within `cache_ttl`. A write is not, since it reads what it changes from
+  storage, never from the cache. So threads may share a service.
+- A read inside a transaction is not cached and not served from the cache, whether the caller or the
+  repository opened the transaction. The read sees the transaction's writes before they commit, and
+  a rollback takes them back. The port's `in_transaction` says when a transaction is open on the
+  calling thread. Only Django has transactions, and with `ATOMIC_REQUESTS` every read of a view is
+  inside one. `tests/contrib/django/test_transaction_cache.py` asserts it.
+- Code never builds a collection directly. A collection built another way would hold its own cache,
+  and miss every entry that the service's collections primed.
 
 **Why:** a cache shared across services would let one service's write clear another's entries,
 and would make staleness depend on who else is running. Owned by one service, `cache_ttl` is the
-only bound on staleness a caller has to reason about: another process writing to the same Django
-database is seen once the entry expires. A YAML or JSON file is read when its repository is built
-and written whole, so a file has one writer, and a repository refuses to write over a change another
-writer made before it writes, rather than lose it.
+only bound on staleness on Django: another process's write is seen once the entry expires. A file
+repository reads its file once, so it never sees another writer's change
+([one writer](repositories.md#file-backends)).
 
 ### Why category listings prime the cache and item listings do not
 
@@ -299,9 +304,9 @@ cached row is the stored row. A filtered listing reads, in one batch, only the r
 does not hold. So a tree walk, which passes each child as the `parent` of its next call, reads one
 category through `find_category`: the category it starts at.
 
-Item listings do not prime, because the cache has no size bound and item rows are large. So an item
-read after a listing costs one read. `tests/service/test_memoize_priming.py` asserts both results
-and measures that cost.
+Item listings do not prime, because the cache has no size bound. An entry for each item would make
+it grow with every item that a listing reads. So an item read after a listing costs one read.
+`tests/service/test_memoize_priming.py` asserts both results and measures that cost.
 
 ## Entity or identifier
 
@@ -322,10 +327,10 @@ for wrong in ("Jazz", kind_of_blue):
         raise AssertionError("only a Category or a UUID names a category")
 ```
 
-- Anything that is neither a row of that kind nor a `UUID`, a row of another kind included, raises
-  `TypeError` before storage is read, as `os.fspath` does for a path.
+- Any value that is neither a row of that kind nor a `UUID` raises `TypeError` before storage is
+  read, as `os.fspath` does for a path. A row of another kind raises too.
 - The conversion happens once, at the collection boundary (`category_id_of` and its siblings in
-  `domain/refs.py`), so a memoized read is keyed by the `UUID` whichever form was passed.
+  `domain/refs.py`). So the cache keys a read by the `UUID`, whichever form the caller passed.
 - A batch lookup takes one key or a collection of them, as `str.startswith` takes one prefix or a
   tuple, and so does `relation_types`. The port takes a collection. `reorder` takes a sequence,
   because one row is not an order.
@@ -343,7 +348,7 @@ HTTP-related dependency, is a core dependency.
 
 - A handler takes the `TaxomeshService` first and calls one member of the service. It holds no
   logic of its own.
-- A handler is named `<namespace>_<member>` after that member, or `graph` for `svc.graph()`, and
+- A handler is named `<namespace>_<member>` after that member, or `graph` for `svc.graph()`. It
   keeps the member's contract: a lookup returns `None` on a miss, and the application makes its 404.
 - A handler returns what its member returns: domain models. `serializers` turns them into JSON-ready
   values, and `errors.to_tuple(exc)` is the one error mapping.
@@ -361,18 +366,14 @@ absence of logic in a handler, or the imports of `contrib/api`.
 - **Cycles are refused in the domain.** `domain/dag.py` checks every new parent link before it is
   written, and no adapter repeats the check. The check needs the whole category graph, so
   `add_parent` and `categories.move` read every parent link, in one read.
-- **A move or a reorder reads only the links it orders.** `items.move` and `items.reorder` read the
-  placements of one category, and `categories.reorder` the parent links of one parent or of the top
-  level, as `items.place_in` does. `tests/service/test_ordering_reads.py` asserts it.
+- **A reorder, and an item move, read only the links they order.** `items.move` and
+  `items.reorder` read the placements of one category, and `categories.reorder` the parent links of
+  one parent or of the top level, as `items.place_in` does. `tests/service/test_ordering_reads.py`
+  asserts it.
 - **A parent link carries its own order.** A parent link is `(category_id, parent_category_id,
-  sort_index)`, so a category under several parents has a position under each one. A new link
-  given no position goes after the last link of its parent, as `list.append` does, so a store lists
-  links in the order they were made. `tests/service/test_default_order.py` asserts it.
-- **No process in the product.** `taxomesh/` and `tests/` contain no task, specification,
-  requirement or review-finding identifier, no account of how the code changed, and no citation of
-  a planning document. The code states what is true now, and `CHANGELOG.md` holds the history.
-  `tests/test_no_process_ids.py` refuses each identifier and label by its pattern. An account of a
-  change written in plain words matches no pattern, so a review finds it, not the build.
+  sort_index)`, so a category under several parents has a position under each one. A new link with
+  no position goes after the last link of its parent, as `list.append` does. So a store lists links
+  in the order they were made. `tests/service/test_default_order.py` asserts it.
 
 ## Where the rules are enforced
 
@@ -381,7 +382,7 @@ absence of logic in a handler, or the imports of `contrib/api`.
 | The layers, and the `Base` suffix | `tests/test_architecture.py` |
 | An adapter keeps its own defaults | `tests/service/test_service_config.py` |
 | Member names, and no collection is a `Mapping` | `tests/surface/test_api_law.py` |
-| The signatures of the service, its three collections and the port, keyword-only filters included | `tests/surface/public_surface.txt`, a ledger edited only on purpose |
+| The signatures of the service, its three collections and the port, keyword-only filters included | `tests/surface/public_surface.txt`, a ledger edited only on purpose, which `tests/surface/test_public_surface.py` checks |
 | The `enabled` defaults | `tests/service/test_enabled_defaults.py` |
 | Stdlib error bases, and the wrong type's `TypeError` | `tests/test_exceptions.py`, `tests/service/test_stdlib_errors.py` |
 | The exports | `tests/test_packaging.py` |
@@ -395,16 +396,15 @@ absence of logic in a handler, or the imports of `contrib/api`.
 | A listing's wrong address | `tests/service/test_batch_placement_reads.py`, `tests/service/test_unknown_subjects.py` |
 | The root invariant | `tests/service/test_root_invariant.py`, `tests/service/test_root_invisible.py` |
 | The per-service cache | `tests/service/test_service_cache.py`, `tests/utils/test_memoize.py` |
-| A move or a reorder reads only the links it orders | `tests/service/test_ordering_reads.py` |
+| A reorder, and an item move, read only the links they order | `tests/service/test_ordering_reads.py` |
 | Category listings prime the cache, item listings do not | `tests/service/test_memoize_priming.py` |
 | The port contract | `tests/adapters/repositories/test_repository_contract.py` |
 | Cascades on delete | `tests/service/test_delete_cascade.py` |
 | A write's checks and writes are one step | `tests/service/test_concurrent_writes.py`, `tests/contrib/django/test_concurrent_writes.py` |
 | The handlers' names and contracts | `tests/contrib/test_api_handlers.py` |
-| No process in the product | `tests/test_no_process_ids.py` |
 
-Tests enforce the rules listed here, so a change that breaks one of them fails the build. The
-behavior behind the names is asserted on every backend: the port's `None` on a miss, each `get*`
-member's answer to an absent key, and what each `enabled` value selects. The port contract suite
-runs on the three adapters and the tests' `InMemoryRepository`, and so does each service test that
-uses the shared `service` fixture.
+Tests enforce the rules listed here, so a change that breaks one of them fails the build. Every
+backend runs the tests of the behavior behind the names. They check the port's `None` on a miss, the
+answer of each `get*` member to an absent key, and what each `enabled` value selects. The port
+contract suite runs on the three adapters and the tests' `InMemoryRepository`, and so does each
+service test that uses the shared `service` fixture.

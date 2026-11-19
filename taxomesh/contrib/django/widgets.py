@@ -41,7 +41,7 @@ class JsonEditorWidget(forms.Widget):
         renderer: BaseRenderer | None = None,
     ) -> SafeString:
         """Render the hidden textarea, the ``<div>`` of the Ace editor and the script that starts it."""
-        # Normalise value to a JSON string
+        # Normalize the value to a JSON string
         if value is None:
             json_str = "{}"
         elif isinstance(value, str):

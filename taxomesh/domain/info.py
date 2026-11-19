@@ -18,7 +18,8 @@ class RepositoryInfo:
 
     Frozen and slotted, because it is a read model and not an entity: the caller holds a snapshot,
     and a snapshot that accepted writes would suggest that the writes go somewhere. So it is a
-    standard dataclass and not a Pydantic model, which has no ``__slots__``.
+    standard dataclass with slots, and not a Pydantic model, which keeps its fields in a
+    ``__dict__``.
 
     It is not the type that a service reports about itself. A service reports its version and its
     corpus sizes; a repository reports where its data is. One class for both would contain an

@@ -22,7 +22,7 @@ All four gates must pass before the merge. Run each one locally, and check its b
 - [ ] `ruff check .` — no lint errors
 - [ ] `ruff format --check .` — no formatting issues
 - [ ] `mypy --strict .` — no type errors
-- [ ] `pytest --cov=taxomesh --cov-fail-under=80` — tests pass, coverage ≥ 80%
+- [ ] `pytest` — tests pass, and coverage is at least 80% (`pyproject.toml` sets the floor)
 
 ## Public API
 

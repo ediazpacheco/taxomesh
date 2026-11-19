@@ -356,7 +356,7 @@ class EntityCollectionBase[T, K](ABC):
 
     This base makes the law part of the structure:
 
-        Subscript raises. Anything named ``get*`` never does.
+        For an absent key, subscript raises. Anything named ``get*`` never does.
 
     ``get`` and ``__contains__`` are written **once, here**, both through the subclass's
     ``__getitem__``. So they cannot come to disagree, as three lookups written apart could:

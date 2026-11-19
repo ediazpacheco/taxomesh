@@ -596,7 +596,7 @@ def version_cmd() -> None:
 
 
 def _state_icon(enabled: bool) -> str:
-    """The coloured enabled mark drawn after a row."""
+    """The colored enabled mark drawn after a row."""
     return f"[green]{ENABLED_ICON}[/green]" if enabled else f"[red]{DISABLED_ICON}[/red]"
 
 
@@ -680,7 +680,7 @@ def graph_cmd(
         help="Which rows to draw: enabled (default), disabled, or all",
     ),
 ) -> None:
-    """Draw the taxonomy as a colour-coded tree, from the top-level categories down.
+    """Draw the category graph as a tree, from the top-level categories down.
 
     A category reachable through several parents is drawn under each of them.
     A category already on the path being drawn, which only a cycle in stored

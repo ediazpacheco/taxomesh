@@ -12,7 +12,7 @@ from taxomesh.contrib.api import errors       # errors.to_tuple(exc) -> (status_
 from taxomesh.contrib.api import serializers  # graph_to_dict, items_to_list, categories_to_list
 ```
 
-## The handlers, without a framework
+## Call a handler
 
 Each handler is named `<namespace>_<member>` after the member it calls, and answers what that member
 answers: `handlers.categories_get_by_slug(service, slug)` is `service.categories.get_by_slug(slug)`.
@@ -21,7 +21,7 @@ that names an entity that is not stored raises the not-found error of that entit
 arguments are typed as its member's are, so parse what arrives as text: a query string's
 `enabled="true"` is a `TypeError`, not a filter. The search schemas parse text:
 `SearchItemsRequest(query="blue", enabled="false", limit="5")` holds `False` and `5`. Over HTTP
-only, `query` is at most `MAX_SEARCH_QUERY_LENGTH` characters (`taxomesh.domain.constants`).
+only, `query` is at most `MAX_SEARCH_QUERY_LENGTH` (500) characters (`taxomesh.domain.constants`).
 
 ```python
 from pathlib import Path
@@ -40,7 +40,7 @@ handlers.items_place_in(service, item.item_id, body=schemas.PlaceItemRequest(cat
 live = handlers.tags_create(service, body=schemas.CreateTagRequest(name="live"))
 handlers.items_tag(service, item.item_id, tag_id=live.tag_id)
 
-# Listings take the member's filters, spelled with _id as HTTP names an entity.
+# Listings take the member's filters, named with _id, as HTTP names an entity.
 assert {c.name for c in handlers.categories_list(service)} == {"Music", "Jazz"}
 assert [c.name for c in handlers.categories_roots(service)] == ["Music"]
 assert [i.name for i in handlers.items_list(service, category_id=music.category_id, recursive=True)] == ["Kind of Blue"]
@@ -69,9 +69,9 @@ else:
 assert errors.to_tuple(TaxomeshVersionConflictError("stale"))[0] == 409
 ```
 
-An update request is partial: the handler forwards only the fields that the caller set, and the
-JSON Schema publishes no default for a stored field. The schema refuses a `null` on a field that
-cannot be `None`, and `"external_id": null` clears the external id.
+An update request is partial: the handler forwards only the fields that the caller set. The JSON
+Schema publishes no default for a stored field. The schema refuses a `null` on a field that cannot be
+`None`, and `"external_id": null` clears the external id.
 
 ## Available handlers
 
@@ -83,12 +83,13 @@ cannot be `None`, and `"external_id": null` clears the external id.
 | Graph | `graph`, which calls `service.graph()` |
 
 No handler calls the batch lookups (`get_many`, `get_many_by_external_id`, `get_many_related`),
-`move`, `reorder` or the relation members (`relate`, `unrelate`, `list_relations`,
-`list_related`), and `graph` takes `enabled` only, not `root` or `include_items`.
-`serializers.graph_to_dict` starts at `graph.roots`, the top-level categories, so a category that no
+`move`, `reorder` or the relation members (`relate`, `unrelate`, `list_relations`, `list_related`).
+`graph` takes `enabled` only, not `root` or `include_items`.
+
+`serializers.graph_to_dict` starts at `graph.roots`, the top-level categories. So a category that no
 top-level category reaches is not in the document, though the graph holds it and `walk()` yields it.
-A category with several parents is written once for each path to it, and past
-`serializers.MAX_EMITTED_NODES` nodes, `graph_to_dict` raises `TaxomeshGraphTooLargeError`.
+A category with several parents is written once for each path to it. Past
+`serializers.MAX_EMITTED_NODES` (100,000) nodes, `graph_to_dict` raises `TaxomeshGraphTooLargeError`.
 
 ## FastAPI example
 
@@ -144,11 +145,13 @@ def get_graph():
     return serializers.graph_to_dict(handlers.graph(service))
 ```
 
-A Django view makes the same calls. It returns `JsonResponse(row.model_dump(mode="json"))` for a
-row, and the serializers' output for a listing, a search or the graph: `graph_to_dict` returns a
-dict, `items_to_list` and `categories_to_list` a list, which needs `JsonResponse(..., safe=False)`.
+A Django view makes the same calls. For a row, it returns
+`JsonResponse(row.model_dump(mode="json"))`. For a listing, a search or the graph, it returns the
+serializers' output. `graph_to_dict` returns a dict, and `items_to_list` and `categories_to_list` a
+list, which needs `JsonResponse(..., safe=False)`.
+
 A request schema refuses bad input with `pydantic.ValidationError`. Neither that error nor a
-`TypeError` is a `TaxomeshError`, so `errors.to_tuple` does not map them. FastAPI answers 422
+`TypeError` is a `TaxomeshError`, so `errors.to_tuple` would answer 500 for them. FastAPI answers 422
 itself when the schema is a parameter of the endpoint. Where your code builds the schema, as
 `search_items` does, and in a Django view, catch the error.
 
@@ -158,15 +161,17 @@ itself when the schema is a parameter of the endpoint. Where your code builds th
 |-----------|-------------|----------|
 | `TaxomeshDuplicateSlugError`, `TaxomeshExternalIdConflictError`, `TaxomeshVersionConflictError` | 409 | the exception's message |
 | `TaxomeshNotFoundError` and its subclasses | 404 | the exception's message |
-| `TaxomeshValidationError` and its subclasses | 422 | the exception's message |
+| `TaxomeshValidationError` and its other subclasses | 422 | the exception's message |
 | any other `TaxomeshError`, `TaxomeshRepositoryError` and `TaxomeshGraphTooLargeError` included | 500 | `errors.GENERIC_SERVER_ERROR_DETAIL` |
 
-A client error's message is written by taxomesh from the caller's own input, so it is safe to show.
-A server error's is not: `TaxomeshRepositoryError` carries the backend's message verbatim, table
-names and file paths included. So a 500's body is a fixed string. The original exception and its
-traceback go to one `ERROR` log record on the `taxomesh.contrib.api.errors` logger. The log record
-propagates to `taxomesh`, which has only a `NullHandler`: attach a handler, as
-[Errors](python-api.md#errors) shows. On Django, the `django.request` log record of the same 500
-carries no traceback, and [Logging](django-integration.md#logging) mails the taxomesh log record.
+taxomesh writes the message of a client error from the caller's own input, so it is safe to show.
+The message of a server error is not: `TaxomeshRepositoryError` carries the backend's message as it
+is, table names and file paths included. So the body of a 500 is a fixed string.
+
+The original exception and its traceback go to one `ERROR` log record on the
+`taxomesh.contrib.api.errors` logger. That log record reaches your handlers as any log record does
+([Logging](python-api.md#logging)). On Django, the `django.request` log record of the same 500
+carries no traceback. [Mail the server errors](django-integration.md#mail-the-server-errors) sends
+the taxomesh log record by email.
 
 ← [Back to README](../README.md)
