@@ -124,7 +124,8 @@ categories, one branch for each path, and the drawing ends on any stored shape, 
     through those;
   - a category that passes `--state` while every parent fails it.
 
-  On YAML and JSON, a load puts a category with no parent link at the top level.
+  On YAML and JSON, a load of a file that holds the implicit root puts a category with no parent
+  link at the top level.
 
 When the graph has no top-level category to draw, `graph` prints *No categories found*.
 

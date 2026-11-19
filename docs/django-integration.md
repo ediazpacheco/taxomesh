@@ -28,11 +28,12 @@ python manage.py migrate
 
 ## Get the service
 
-`get_taxomesh_service_with_django(using="default")` builds a `TaxomeshService` over
-`DjangoRepository` on that database alias. Building a service reads every category once, to find the
-implicit root. So build one service for each process, at its first use, and share it, as the bridge
-below does. The cache of a service serves no read made inside a transaction, yours or its own. So
-with `ATOMIC_REQUESTS`, every read of a view reaches the database.
+`get_taxomesh_service_with_django(using="default")`, from `taxomesh.contrib.django`, builds a
+`TaxomeshService` over `DjangoRepository` on that database alias. Building a service reads every
+category once, to find the [implicit root](python-api.md#the-top-level). So build one service for
+each process, at its first use, and share it, as the bridge below does. The cache of a service
+serves no read made inside a transaction, yours or its own. So with `ATOMIC_REQUESTS`, every read
+of a view reaches the database.
 
 Each taxomesh write runs in one transaction on the database alias of the repository. The transaction
 first locks the implicit root's row, or on SQLite the whole database. So two taxomesh writes in two
@@ -60,8 +61,8 @@ a strict Content Security Policy, those pages cannot edit `metadata`. The admin 
     a model whose primary key is the external id of an item. To use another attribute than the
     primary key, set `taxomesh_external_id_attr`. With `fields` or `fieldsets`, the page shows the
     field only where they name it; without them, it shows the field last. A save changes placements
-    only when the page shows the field. It never places an item in a category that the field does
-    not offer, such as a disabled one.
+    only when the page shows the field. It changes no placement in a category that the field does
+    not offer: a placement in a disabled category stays.
 
 **Permissions and URLs.** The app label is `taxomesh_contrib_django`. Under the admin's URL, the
 graph is at `taxomesh_contrib_django/categorymodel/graph/` and the debug page at

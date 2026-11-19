@@ -113,8 +113,9 @@ an example.
   Every member that takes one raises the not-found error of that entity.
 - `list*` returns a tuple and `get_many*` a new dict, so a name never hides the container type.
   `get_by_<key>` names a unique key and returns the row or `None`.
-- **Filters and options are keyword-only.** A positional parameter names what the member acts on,
-  as in `items.tag(item, tag)`. `get` takes its default positionally, as `dict.get` does.
+- **Filters and options are keyword-only.** A positional parameter is an entity that the member
+  acts on, as in `items.tag(item, tag)`. It can also be a key, the `name` of a new row, a search
+  `query` or the type of a relation. `get` takes its default positionally, as `dict.get` does.
 - **The member is on the collection of the entity it changes.** An operation that joins two
   entities is a member of the collection of the entity that it changes, and that entity comes
   first: `items.tag(item, tag)`.
@@ -223,10 +224,10 @@ The freeze builds the `FrozenDict` and `FrozenList` objects of a model's `metada
 Python call for each dict and each list. It keeps a value of exactly `str`, `int`, `float`, `bool`
 or `None`, not a subclass, where it reads it, with no call.
 
-The shipped backends read metadata back as dicts and lists of such values. So when a shipped backend
-reads a row or a link, the freeze cost grows with the dicts and lists in its metadata. It does not
-grow with the number of values. `tests/domain/test_metadata_freeze_cost.py` asserts the cost for a
-model built from such values.
+The shipped backends read the metadata that taxomesh wrote back as dicts and lists of such values.
+So when a shipped backend reads a row or a link, the freeze cost grows with the dicts and lists in
+its metadata. It does not grow with the number of values.
+`tests/domain/test_metadata_freeze_cost.py` asserts the cost for a model built from such values.
 
 Every `str` field of a model declares a `max_length`, as `Annotated[str, Field(max_length=N)]`, and
 `domain/constants.py` names each limit. A model therefore refuses an oversized value when it is

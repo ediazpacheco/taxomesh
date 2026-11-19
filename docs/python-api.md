@@ -9,8 +9,8 @@ class you construct. You reach everything else through it: three collections (`s
 
 > **For an absent key, subscript raises. Anything named `get*` never does.**
 
-A parameter that names a category, an item or a tag takes the row or its `UUID`. It works as a path
-parameter, which takes a `str` or an `os.PathLike`. So `svc.items.place_in(song, jazz)` and
+A parameter that names a category, an item or a tag takes the row or its `UUID`. A path parameter
+works the same way: it takes a `str` or an `os.PathLike`. So `svc.items.place_in(song, jazz)` and
 `svc.items.place_in(song.item_id, jazz.category_id)` are the same call. The parameters are typed
 `CategoryRef`, `ItemRef` and `TagRef`. Only the identifier of a row is read, so a row that you hold
 still names its entity after an update. Any other value raises `TypeError` before storage is read,
@@ -23,6 +23,9 @@ The tables below give each signature once, without types. [`llms.txt`](../llms.t
 signature with its types, and `help()` shows the docstring of each member. The models are Pydantic
 v2 models. The package passes `mypy --strict` and ships `py.typed`, so your type checker reads its
 annotations. Every example on this page runs, in order, in the test suite, except the logging setup.
+
+This page gives some costs in storage reads. A storage read is one call to the repository. On
+Django, a call with more keys than the database takes in one query runs as several queries.
 
 ## The worked example
 
@@ -270,6 +273,7 @@ external id are at most 256 characters, as the table above shows, and a descript
   nothing. The repository compares and writes in one step. So of two writers that hold the same
   version, the second fails: through one repository on a file, or across processes on Django. Read
   the row again, and retry with its version.
+- If the row is no longer stored, the update raises its not-found error, conditional or not.
 
 Every `metadata` argument takes plain JSON: dicts with text keys, lists or tuples, text, finite
 numbers, booleans and `None`. A tuple is stored as a list, and a `StrEnum` or `IntEnum` member as its
@@ -668,9 +672,8 @@ by category with `recursive=True`.
 
 A write through a service clears the cache of that service, and of no other. A write reads what it
 changes from storage, never from the cache. Inside a transaction, which only Django has, a read is
-neither cached nor served from the cache. On this page, a storage read is one call to the
-repository. On Django, a call with more keys than the database takes in one query runs as several
-queries. The [design notes](design.md#the-per-service-cache) say why the cache works this way.
+neither cached nor served from the cache. The [design notes](design.md#the-per-service-cache) say
+why the cache works this way.
 
 ```python
 uncached = TaxomeshService(svc.repository, cache_ttl=0)
