@@ -39,7 +39,7 @@ BOOST_SUBSTRING_SLUG: Final[int] = 150
 BOOST_SUBSTRING_EXT: Final[int] = 50
 FUZZY_THRESHOLD: Final[int] = 70
 
-# The characters that normalisation replaces with a space, as word separators
+# The characters that normalization replaces with a space, as word separators
 _SEP_RE: Final[re.Pattern[str]] = re.compile(r"['\-._\\]")
 _SPACE_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
 
@@ -182,7 +182,7 @@ class SearchCorpus[T]:
 
 
 def normalize(text: str) -> str:
-    """Normalise *text* for comparison.
+    """Normalize *text* for comparison.
 
     The steps, in order:
     1. Decompose the text to Unicode NFD, then remove the combining marks (Unicode category
@@ -196,7 +196,7 @@ def normalize(text: str) -> str:
         text: The text as given.
 
     Returns:
-        The normalised text, ready for comparison.
+        The normalized text, ready for comparison.
     """
     # Remove the diacritics through the NFD decomposition
     nfd = unicodedata.normalize("NFD", text)
@@ -220,13 +220,13 @@ def score_candidate(
 
     How the score is made:
     - A fixed *boost* comes from an exact, prefix, word-prefix or substring match on the
-      normalised name, slug and external id.
+      normalized name, slug and external id.
     - When *fuzzy* is ``True``, the rapidfuzz ratios against the name and the slug add
       ``max_fuzzy − FUZZY_THRESHOLD`` to the score.
     - A candidate matches if ``boost > 0`` **or** ``max_fuzzy ≥ FUZZY_THRESHOLD``.
 
     Args:
-        query: The query, already normalised by the caller.
+        query: The query, already normalized by the caller.
         name: The name of the item or category, as stored.
         slug: The slug of the item or category, as stored.
         external_id: The external id, as stored; an empty string turns off the external-id

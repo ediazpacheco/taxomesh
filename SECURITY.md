@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Only the latest release is supported: a security fix goes into the next release, and earlier releases
-are not patched.
+Only the latest release is supported. A security fix goes into the next release, and earlier
+releases get no patch.
 
 ## Reporting a vulnerability
 

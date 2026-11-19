@@ -51,7 +51,7 @@ GENERIC_SERVER_ERROR_DETAIL: Final[str] = "An internal error occurred."
 _SERVER_ERROR_LOG_MESSAGE: Final[str] = "Mapping a taxomesh error to HTTP 500"
 
 
-# Any: a JSON response body, whose values the consuming app's response serialises.
+# Any: a JSON response body, whose values the consuming app's response serializes.
 def to_tuple(exc: TaxomeshError) -> tuple[int, dict[str, Any]]:
     """Map a ``TaxomeshError`` to an HTTP ``(status_code, body)`` pair.
 

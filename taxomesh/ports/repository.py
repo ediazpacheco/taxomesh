@@ -53,13 +53,13 @@ class TaxomeshRepositoryBase(Protocol):
         depend on, such as the row that an update builds on, the slug that a create checks, or the
         parent links that the cycle check of a new parent link reads.
 
-        While a block is open, no other block of the same store runs. A block that another thread
-        opens on the same repository, or, on a database that several processes share, a block that
-        another process opens, waits until this block ends. So no write lands between the reads of a
-        block and its writes. ``DjangoRepository`` starts each block with an ``UPDATE`` of the
-        implicit root's row, which the database makes the next block wait for. The file repositories
-        hold their lock for the block. A backend that one thread at a time uses may do nothing, as
-        ``contextlib.nullcontext()``.
+        While a block is open, no other block runs on the same repository, or on a database that
+        several processes share. A block that another thread opens on the same repository, or, on
+        such a database, a block that another process opens, waits until this block ends. So no
+        write lands between the reads of a block and its writes. ``DjangoRepository`` starts each
+        block with an ``UPDATE`` of the implicit root's row, which the database makes the next block
+        wait for. The file repositories hold their lock for the block. A backend that one thread at
+        a time uses may do nothing, as ``contextlib.nullcontext()``.
 
         What the block guarantees for a failure depends on the backend:
 

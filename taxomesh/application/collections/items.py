@@ -793,8 +793,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
 
         Args:
             category: The category whose items get the order, or its identifier.
-            items: Every item placed in that category, in the new order, each the item or its
-                identifier.
+            items: The items placed in that category, in the new order, each the item or its
+                identifier. An item left out keeps its position.
 
         Raises:
             TaxomeshCategoryNotFoundError: If the category is not stored, or is the implicit root.
@@ -995,7 +995,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         direction: Literal["outgoing", "incoming", "both"],
         /,
     ) -> Sequence[ItemRelationLink]:
-        """The cached read behind :meth:`list_relations`, keyed by the normalised arguments.
+        """The cached read behind :meth:`list_relations`, keyed by the normalized arguments.
 
         A stored link names only stored items, so the item is looked up only when the read
         returns no link, and through the cache of single items.
@@ -1056,7 +1056,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         enabled: bool | None,
         /,
     ) -> Sequence[Item]:
-        """The cached read behind :meth:`list_related`, keyed by the normalised arguments."""
+        """The cached read behind :meth:`list_related`, keyed by the normalized arguments."""
         links = self._relations(item_id, relation_types, direction)
         if not links:
             return ()
@@ -1087,13 +1087,14 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         direction: Direction | Literal["outgoing", "incoming", "both"] = "outgoing",
         enabled: bool | None = True,
     ) -> Mapping[UUID, RelatedItems]:
-        """Return the related items for many items at once, in two storage reads.
+        """Return the related items for many items at once, in two repository calls.
 
         One batch read of the links and one batch read of the items, in every direction and for
         any number of identifiers: never one read for each item. The related items are filtered
         by ``enabled``, as a listing is. A relation whose other end is not stored is skipped, with
         a ``WARNING`` that names that end as absent. No state of a related row makes this method
-        raise.
+        raise. On Django, a call with more keys than the database takes in one query runs as
+        several queries.
 
         Args:
             items: The queried item or its identifier, or a collection of them. The order and the
@@ -1160,7 +1161,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         enabled: bool | None,
         direction: Literal["outgoing", "incoming", "both"],
     ) -> dict[UUID, dict[str, tuple[Item, ...]]]:
-        """The cached read behind :meth:`get_many_related`, keyed by the normalised arguments.
+        """The cached read behind :meth:`get_many_related`, keyed by the normalized arguments.
 
         Reads every direction with **one** batch read of the links
         (:meth:`list_item_relation_links_batch`) and one batch read of the items: two repository

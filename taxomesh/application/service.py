@@ -83,8 +83,9 @@ class TaxomeshService:
 
         Building a service reads every stored category once, to find the implicit root by its
         reserved name. When no root is stored, the service reads them again inside one
-        ``atomic()`` block and stores one there, so two services built at the same moment store
-        one root. So build one service and share it, rather than one for each request.
+        ``atomic()`` block and stores one there: two services built at the same moment over one
+        repository, or over one Django database, store one root. Build one service and share it,
+        rather than one for each request.
 
         Args:
             repository: The repository to use. When it is given, the service reads no config file
@@ -93,7 +94,7 @@ class TaxomeshService:
                 ``None``, the service reads ``taxomesh.toml`` in the working directory. When the
                 file does not exist, named here or not, or has no ``[repository]`` section, the
                 repository is a ``YamlRepository`` at its default path, which creates the file and
-                its directory when they are absent. A misspelt name therefore gives that store, and
+                its directory when they are absent. A misspelled name therefore gives that store, and
                 no error.
             cache_ttl: How many seconds the service serves a read from memory: a lookup, a batch
                 lookup, a listing, the rows a graph is built from, and each search corpus. ``0``
@@ -354,7 +355,7 @@ class TaxomeshService:
             parents=parents,
             items=items,
             # The identifier breaks a tie: ``create`` puts each new category after the last, but a
-            # position given by hand, or a top level that a migration or a file load normalised at
+            # position given by hand, or a top level that a migration or a file load normalized at
             # 0, can tie. With the identifier, the order does not depend on the order in which the
             # repository lists the links: it is the port's ``(parent, sort_index, category_id)``
             # order, which ``categories.roots()`` also gives.

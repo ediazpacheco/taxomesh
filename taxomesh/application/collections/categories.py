@@ -903,8 +903,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         Args:
             parent: The parent whose children get the order, or its identifier, or ``None`` for
                 the top level.
-            categories: Every child of that parent, in the new order, each the category or its
-                identifier.
+            categories: The children of that parent, in the new order, each the category or its
+                identifier. A child left out keeps its position.
 
         Raises:
             TaxomeshCategoryNotFoundError: If the parent is not stored, or is the implicit root.

@@ -7,7 +7,7 @@ recursive item listing, the graph's ``walk()``, and a node's ``ancestors()`` and
 run it, and so does the cycle check.
 
 The walk is **iterative**, and it keeps a set of the categories it visited. Neither is an
-optimisation. Without them, a chain deeper than the interpreter's recursion limit would raise
+optimization. Without them, a chain deeper than the interpreter's recursion limit would raise
 ``RecursionError``, a builtin that a caller who catches only this library's errors does not catch.
 And stored data can contain a cycle, because ``check_no_cycle`` guards only the writes: rows also
 come from direct SQL, a migration or a restored backup.
@@ -92,7 +92,7 @@ def depth_first(seeds: Iterable[UUID], neighbours: Mapping[UUID, Sequence[UUID]]
             rather than mapped to an empty sequence.
 
     Yields:
-        Each identifier once, a category's neighbours in their stored order.
+        Each identifier once, a category's neighbors in their stored order.
 
     Example::
 
@@ -110,7 +110,7 @@ def depth_first(seeds: Iterable[UUID], neighbours: Mapping[UUID, Sequence[UUID]]
                 continue
             visited.add(category_id)
             yield category_id
-            # Reversed, so that popping restores the neighbours' stored order.
+            # Reversed, so that popping restores the neighbors' stored order.
             stack.extend(reversed(neighbours.get(category_id, ())))
 
 
