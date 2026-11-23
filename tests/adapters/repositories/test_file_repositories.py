@@ -250,3 +250,14 @@ class TestAReopenedStore:
         reopened = TaxomeshService(repository=_open(kind, path))
         with pytest.raises(TaxomeshCyclicDependencyError):
             reopened.categories.add_parent(parent.category_id, child.category_id)
+
+
+@pytest.mark.parametrize(("repository_class", "text"), [(JsonRepository, "[1, 2]"), (YamlRepository, "- 1\n- 2\n")])
+def test_a_file_that_holds_no_mapping_is_refused_with_its_path(
+    repository_class: type[JsonRepository | YamlRepository], text: str, tmp_path: Path
+) -> None:
+    path = tmp_path / "store"
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(TaxomeshRepositoryError, match=r"store: The file must hold a mapping$"):
+        repository_class(path)

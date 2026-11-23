@@ -1,9 +1,9 @@
 """The storage port: the members that a taxomesh repository implements.
 
 ``TaxomeshRepositoryBase`` is a ``typing.Protocol``. A class that has every member below, with
-compatible signatures, is a repository, and it does not need to inherit from the port. mypy checks
-that a class has the members of the port, and ``TaxomeshService`` checks, with ``isinstance``, that
-the repository it is given has them.
+compatible signatures, is a repository. It does not need to inherit from the port. The type checker
+mypy checks that a class has the members of the port. ``TaxomeshService`` checks, with
+``isinstance``, that the repository it is given has them.
 """
 
 from collections.abc import Collection, Mapping, Sequence
@@ -28,10 +28,11 @@ class TaxomeshRepositoryBase(Protocol):
     """The members that every storage backend implements: the contract of a repository.
 
     The names and the signatures below are the contract. Implement them in any class, with no
-    inheritance, and give an instance to ``TaxomeshService`` when you build it. Given an object that
-    lacks one of them, the service raises ``TypeError``. It checks with ``isinstance``, which does
-    not see a member that ``__getattr__`` gives, so a class that forwards the port that way calls
-    ``TaxomeshRepositoryBase.register`` on itself.
+    inheritance. Give an instance to ``TaxomeshService`` when you build the service.
+
+    Given an object that lacks one of them, the service raises ``TypeError``. The service checks
+    with ``isinstance``, which does not see a member that ``__getattr__`` gives. So pass a class
+    that forwards the port that way to ``TaxomeshRepositoryBase.register``.
 
     A store holds the implicit root: a ``Category`` row named ``__root__``. Its identifier can be
     any ``UUID``, because the service finds the row by its name. When the service is built over a
@@ -49,24 +50,29 @@ class TaxomeshRepositoryBase(Protocol):
         """Return a context manager that keeps every other block out, and groups writes as far as it can.
 
         Each member of the collections that writes runs its writes inside one
-        ``with repository.atomic():`` block, and makes inside the block the reads that its writes
-        depend on, such as the row that an update builds on, the slug that a create checks, or the
-        parent links that the cycle check of a new parent link reads.
+        ``with repository.atomic():`` block. Inside the block, the member also makes the reads that
+        its writes depend on, such as:
+
+        - the row that an update builds on,
+        - the slug that a create checks,
+        - the parent links that the cycle check of a new parent link reads.
 
         While a block is open, no other block runs on the same repository, or on a database that
-        several processes share. A block that another thread opens on the same repository, or, on
-        such a database, a block that another process opens, waits until this block ends. So no
-        write lands between the reads of a block and its writes. ``DjangoRepository`` starts each
-        block with an ``UPDATE`` of the implicit root's row, which the database makes the next block
-        wait for. The file repositories hold their lock for the block. A backend that one thread at
-        a time uses may do nothing, as ``contextlib.nullcontext()``.
+        several processes share. A block that another thread opens on the same repository waits
+        until this block ends. On such a database, a block that another process opens waits too. So
+        no write comes between the reads of a block and its writes.
+
+        ``DjangoRepository`` starts each block with an ``UPDATE`` of the implicit root's row, which
+        the database makes the next block wait for. The file repositories hold their lock for the
+        block. A backend that one thread at a time uses may do nothing, as
+        ``contextlib.nullcontext()`` does.
 
         What the block guarantees for a failure depends on the backend:
 
         - **A backend with transactions**, such as ``DjangoRepository``, must roll back the whole
-          block. If the body raises, every write in the block is rolled back, the inner blocks
-          that the backend's own writes open (Django savepoints) included. The data is then as it
-          was before the block.
+          block. If the body raises, the backend rolls back every write in the block. That
+          includes the inner blocks that the backend's own writes open (Django savepoints). The
+          data is then as it was before the block.
         - **A backend without transactions**, such as ``JsonRepository``, ``YamlRepository`` or
           one in memory, does **not roll back**. When the block succeeds, the writes are the same
           as without the block. After a failure in the block, the writes made before the failure
@@ -87,13 +93,13 @@ class TaxomeshRepositoryBase(Protocol):
         """Whether a transaction of this store is open on the calling thread, as ``sqlite3.Connection.in_transaction``.
 
         A read inside a transaction sees the transaction's own writes before they commit, and a
-        rollback takes them back, so the service neither caches such a read nor serves one from its
-        cache while this is ``True``. The transaction may be the caller's or one that the backend
-        opens for ``atomic()``.
+        rollback undoes them. So while this is ``True``, the service does not cache such a read,
+        and does not answer a read from its cache. The transaction may be the caller's or one that
+        the backend opens for ``atomic()``.
 
-        - A backend with transactions answers for the calling thread's connection: ``DjangoRepository``
-          answers ``True`` inside an ``atomic`` block of its database alias, and while autocommit
-          is off.
+        - A backend with transactions answers for the calling thread's connection.
+          ``DjangoRepository`` answers ``True`` inside an ``atomic`` block of its database alias,
+          and while autocommit is off.
         - A backend without transactions, such as ``JsonRepository``, ``YamlRepository`` or one in
           memory, answers ``False``, inside its ``atomic()`` too.
 
@@ -109,10 +115,11 @@ class TaxomeshRepositoryBase(Protocol):
     def save_category(self, category: Category, *, expected_version: int | None = None) -> Category:
         """Store a category row: insert it, or replace the stored row with its identifier.
 
-        The given row does not change. The repository assigns the ``version`` of the stored row:
-        an update stores the version of the row that it replaces plus one, whatever the given row
-        has. With ``expected_version``, the save is a conditional update: the comparison and the
-        write are one atomic step, so two writers that hold the same version cannot both succeed.
+        The given row does not change. The repository assigns the ``version`` of the stored row.
+        An update stores the version of the row that it replaces, plus one, whatever version the
+        given row has. With ``expected_version``, the save is a conditional update. The comparison
+        and the write are one atomic step, so two writers that hold the same version cannot both
+        succeed.
 
         Args:
             category: The category row to store.
@@ -124,10 +131,10 @@ class TaxomeshRepositoryBase(Protocol):
 
         Raises:
             TaxomeshVersionConflictError: If ``expected_version`` is given and the stored row is
-                not at it, or no row is stored; nothing is written.
+                not at it, or no row is stored. Nothing is written.
             TaxomeshExternalIdConflictError: If ``category.external_id`` is not ``None`` and
                 another category already has it.
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -148,7 +155,7 @@ class TaxomeshRepositoryBase(Protocol):
     def list_categories(self, *, enabled: bool | None = True) -> Sequence[Category]:
         """Return the stored categories, ordered by name and then by identifier.
 
-        The order is ascending by ``name``, and two categories with the same name are in ascending
+        The order is ascending by ``name``. Two categories with the same name are in ascending
         order of ``category_id``, so the order is always the same. ``Category`` has no
         ``sort_index`` field of its own, so a listing of every category is ordered by ``name``.
 
@@ -157,7 +164,7 @@ class TaxomeshRepositoryBase(Protocol):
                 disabled ones, and ``None`` all of them.
 
         Returns:
-            The matching categories, ordered by ``(name ASC, category_id ASC)``; empty when none
+            The matching categories, ordered by ``(name ASC, category_id ASC)``. Empty when none
             match.
 
         Raises:
@@ -175,10 +182,11 @@ class TaxomeshRepositoryBase(Protocol):
             category_id: The identifier of the category to delete.
 
         Returns:
-            True if the category was found and deleted; False if it did not exist.
+            ``True`` if the repository found and deleted the category. ``False`` if the category
+            was not stored.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -187,10 +195,11 @@ class TaxomeshRepositoryBase(Protocol):
     def save_item(self, item: Item, *, expected_version: int | None = None) -> Item:
         """Store an item row: insert it, or replace the stored row with its identifier.
 
-        The given row does not change. The repository assigns the ``version`` of the stored row:
-        an update stores the version of the row that it replaces plus one, whatever the given row
-        has. With ``expected_version``, the save is a conditional update: the comparison and the
-        write are one atomic step, so two writers that hold the same version cannot both succeed.
+        The given row does not change. The repository assigns the ``version`` of the stored row.
+        An update stores the version of the row that it replaces, plus one, whatever version the
+        given row has. With ``expected_version``, the save is a conditional update. The comparison
+        and the write are one atomic step, so two writers that hold the same version cannot both
+        succeed.
 
         Args:
             item: The item row to store.
@@ -202,10 +211,10 @@ class TaxomeshRepositoryBase(Protocol):
 
         Raises:
             TaxomeshVersionConflictError: If ``expected_version`` is given and the stored row is
-                not at it, or no row is stored; nothing is written.
+                not at it, or no row is stored. Nothing is written.
             TaxomeshExternalIdConflictError: If ``item.external_id`` is not ``None`` and another
                 item already has it.
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -226,7 +235,7 @@ class TaxomeshRepositoryBase(Protocol):
     def list_items(self, *, enabled: bool | None = True) -> Sequence[Item]:
         """Return the stored items, ordered by name and then by identifier.
 
-        The order is ascending by ``name``, and two items with the same name are in ascending order
+        The order is ascending by ``name``. Two items with the same name are in ascending order
         of ``item_id``, so the order is always the same. ``Item`` has no ``sort_index`` field of its
         own, so a listing of every item is ordered by ``name``.
 
@@ -235,7 +244,7 @@ class TaxomeshRepositoryBase(Protocol):
                 disabled ones, and ``None`` all of them.
 
         Returns:
-            The matching items, ordered by ``(name ASC, item_id ASC)``; empty when none match.
+            The matching items, ordered by ``(name ASC, item_id ASC)``. Empty when none match.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -252,10 +261,11 @@ class TaxomeshRepositoryBase(Protocol):
             item_id: The identifier of the item to delete.
 
         Returns:
-            True if the item was found and deleted; False if it did not exist.
+            ``True`` if the repository found and deleted the item. ``False`` if the item
+            was not stored.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -268,7 +278,7 @@ class TaxomeshRepositoryBase(Protocol):
             tag: The tag row to store.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -290,7 +300,7 @@ class TaxomeshRepositoryBase(Protocol):
         """Return every stored tag.
 
         Returns:
-            Every tag row; empty when no tag is stored.
+            Every tag row. Empty when no tag is stored.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -307,8 +317,8 @@ class TaxomeshRepositoryBase(Protocol):
                 mapping.
 
         Returns:
-            A mapping from the identifier of each stored tag to its row. An identifier that names
-            no stored tag is left out of the mapping, and no error is raised.
+            A mapping from the identifier of each stored tag to its row. The mapping leaves out an
+            identifier that names no stored tag, and the member raises no error.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -325,7 +335,7 @@ class TaxomeshRepositoryBase(Protocol):
             tag_id: The identifier of the tag.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -337,10 +347,11 @@ class TaxomeshRepositoryBase(Protocol):
             tag_id: The identifier of the tag.
 
         Returns:
-            True if the link was found and deleted; False if it did not exist.
+            ``True`` if the repository found and deleted the link. ``False`` if the link
+            was not stored.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -356,16 +367,16 @@ class TaxomeshRepositoryBase(Protocol):
         identifiers are the whole order. Every combination of filters keeps this order.
 
         Args:
-            item_ids: When given, only the links whose ``item_id`` is in it are returned. An
-                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
+            item_ids: When given, the repository returns only the links whose ``item_id`` is in
+                it. An **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
                 default) applies no item filter.
-            tag_ids: When given, only the links whose ``tag_id`` is in it are returned. An
-                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
+            tag_ids: When given, the repository returns only the links whose ``tag_id`` is in it.
+                An **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
                 default) applies no tag filter. When both filters are given, a link must match
                 both.
 
         Returns:
-            The matching links, ordered by ``(item_id ASC, tag_id ASC)``; empty when none match.
+            The matching links, ordered by ``(item_id ASC, tag_id ASC)``. Empty when none match.
             With both filters ``None``, every stored link.
 
         Raises:
@@ -378,14 +389,14 @@ class TaxomeshRepositoryBase(Protocol):
     def save_category_parent_link(self, link: CategoryParentLink) -> None:
         """Store a parent link: insert it, or update the stored one.
 
-        When a link with the same ``(category_id, parent_category_id)`` is stored, its
-        ``sort_index`` is updated. No second link is created.
+        When a link with the same ``(category_id, parent_category_id)`` is stored, the repository
+        updates its ``sort_index``. The repository creates no second link.
 
         Args:
             link: The parent link to store.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -398,22 +409,22 @@ class TaxomeshRepositoryBase(Protocol):
         """Return the stored parent links, filtered by either end when a filter is given.
 
         The order is ``(parent_category_id ASC, sort_index ASC, category_id ASC)``. So the children
-        of one parent are together, in the order of their ``sort_index``, and two links with the
-        same parent and ``sort_index`` are in the order of ``category_id``. Every combination of
-        filters keeps this order.
+        of one parent are together, in the order of their ``sort_index``. Two links with the same
+        parent and ``sort_index`` are in the order of ``category_id``. Every combination of filters
+        keeps this order.
 
         Args:
-            category_ids: When given, only the links whose ``category_id`` is in it are returned. An
-                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
-                default) applies no child filter.
-            parent_category_ids: When given, only the links whose ``parent_category_id`` is in it are returned. An
-                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
-                default) applies no parent filter. When both
+            category_ids: When given, the repository returns only the links whose ``category_id``
+                is in it. An **empty** collection returns ``[]``: it is **not** "no filter".
+                ``None`` (the default) applies no child filter.
+            parent_category_ids: When given, the repository returns only the links whose
+                ``parent_category_id`` is in it. An **empty** collection returns ``[]``: it is
+                **not** "no filter". ``None`` (the default) applies no parent filter. When both
                 filters are given, a link must match both.
 
         Returns:
             The matching links, ordered by ``(parent_category_id ASC, sort_index ASC,
-            category_id ASC)``; empty when none match. With both filters ``None``, every stored
+            category_id ASC)``. Empty when none match. With both filters ``None``, every stored
             link.
 
         Raises:
@@ -432,10 +443,11 @@ class TaxomeshRepositoryBase(Protocol):
             tag_id: The identifier of the tag to delete.
 
         Returns:
-            True if the tag was found and deleted; False if it did not exist.
+            ``True`` if the repository found and deleted the tag. ``False`` if the tag
+            was not stored.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -444,14 +456,14 @@ class TaxomeshRepositoryBase(Protocol):
     def save_item_parent_link(self, link: ItemParentLink) -> None:
         """Store a placement: insert it, or update the stored one.
 
-        When a placement with the same ``(item_id, category_id)`` is stored, its ``sort_index`` is
-        updated. No second placement is created.
+        When a placement with the same ``(item_id, category_id)`` is stored, the repository
+        updates its ``sort_index``. The repository creates no second placement.
 
         Args:
             link: The placement to store.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -464,22 +476,22 @@ class TaxomeshRepositoryBase(Protocol):
         """Return the stored placements, filtered by either end when a filter is given.
 
         The order is ``(category_id ASC, sort_index ASC, item_id ASC)``. So the items of one
-        category are together, in the order of their ``sort_index``, and two placements with the
-        same category and ``sort_index`` are in the order of ``item_id``. Every combination of
-        filters keeps this order.
+        category are together, in the order of their ``sort_index``. Two placements with the same
+        category and ``sort_index`` are in the order of ``item_id``. Every combination of filters
+        keeps this order.
 
         Args:
-            item_ids: When given, only the links whose ``item_id`` is in it are returned. An
-                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
-                default) applies no item filter.
-            category_ids: When given, only the links whose ``category_id`` is in it are returned. An
-                **empty** collection returns ``[]``: it is **not** "no filter". ``None`` (the
-                default) applies no category filter. When both
-                filters are given, a link must match both.
+            item_ids: When given, the repository returns only the placements whose ``item_id`` is
+                in it. An **empty** collection returns ``[]``: it is **not** "no filter". ``None``
+                (the default) applies no item filter.
+            category_ids: When given, the repository returns only the placements whose
+                ``category_id`` is in it. An **empty** collection returns ``[]``: it is **not** "no
+                filter". ``None`` (the default) applies no category filter. When both filters are
+                given, a placement must match both.
 
         Returns:
-            The matching placements, ordered by ``(category_id ASC, sort_index ASC, item_id ASC)``;
-            empty when none match. With both filters ``None``, every stored placement.
+            The matching placements, ordered by ``(category_id ASC, sort_index ASC, item_id ASC)``.
+            Empty when none match. With both filters ``None``, every stored placement.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -489,7 +501,7 @@ class TaxomeshRepositoryBase(Protocol):
     # --- External-ID lookup ---
 
     def find_item_by_external_id(self, external_id: str) -> Item | None:
-        """Return the item with the given external_id, or None.
+        """Return the item with the given external id, or ``None``.
 
         Args:
             external_id: The external id to look up, in its stored form: a ``str``, never ``None``.
@@ -503,7 +515,7 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def find_category_by_external_id(self, external_id: str) -> Category | None:
-        """Return the category with the given external_id, or None.
+        """Return the category with the given external id, or ``None``.
 
         Args:
             external_id: The external id to look up, in its stored form: a ``str``, never ``None``.
@@ -534,8 +546,8 @@ class TaxomeshRepositoryBase(Protocol):
                 ``None`` (the default) every matching item.
 
         Returns:
-            A mapping from the identifier of each stored item to its row. An identifier that names
-            no stored item is left out of the mapping, and no error is raised.
+            A mapping from the identifier of each stored item to its row. The mapping leaves out
+            an identifier that names no stored item, and the member raises no error.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -555,13 +567,14 @@ class TaxomeshRepositoryBase(Protocol):
 
         Args:
             category_ids: The identifiers of the categories to look up, with no duplicates. An
-                empty collection returns an empty mapping, and storage is not read.
+                empty collection returns an empty mapping, and the repository does not read
+                storage.
             enabled: ``True`` returns only the enabled categories, ``False`` only the disabled
                 ones, and ``None`` (the default) every matching category.
 
         Returns:
-            A mapping from the identifier of each stored category to its row. An identifier that
-            names no stored category is left out of the mapping, and no error is raised.
+            A mapping from the identifier of each stored category to its row. The mapping leaves
+            out an identifier that names no stored category, and the member raises no error.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -587,8 +600,8 @@ class TaxomeshRepositoryBase(Protocol):
                 ``None`` (the default) every matching item.
 
         Returns:
-            A mapping from the external id of each stored item to its row. An external id that no
-            stored item has is left out of the mapping, and no error is raised.
+            A mapping from the external id of each stored item to its row. The mapping leaves out
+            an external id that no stored item has, and the member raises no error.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -617,8 +630,8 @@ class TaxomeshRepositoryBase(Protocol):
                 ones, and ``None`` (the default) every matching category.
 
         Returns:
-            A mapping from the external id of each stored category to its row. An external id that
-            no stored category has is left out of the mapping, and no error is raised.
+            A mapping from the external id of each stored category to its row. The mapping leaves
+            out an external id that no stored category has, and the member raises no error.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -626,13 +639,13 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def find_item_by_slug(self, slug: str) -> Item | None:
-        """Return the item with the given non-empty slug, or None.
+        """Return the item with the given non-empty slug, or ``None``.
 
         Args:
             slug: A non-empty slug string to look up.
 
         Returns:
-            The matching Item, or None if no item has this slug.
+            The item row, or ``None`` when no item has this slug.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -640,13 +653,13 @@ class TaxomeshRepositoryBase(Protocol):
         ...
 
     def find_category_by_slug(self, slug: str) -> Category | None:
-        """Return the category with the given non-empty slug, or None.
+        """Return the category with the given non-empty slug, or ``None``.
 
         Args:
             slug: A non-empty slug string to look up.
 
         Returns:
-            The matching Category, or None if no category has this slug.
+            The category row, or ``None`` when no category has this slug.
 
         Raises:
             TaxomeshRepositoryError: On storage failure.
@@ -667,8 +680,8 @@ class TaxomeshRepositoryBase(Protocol):
           or masks each sensitive value.
 
         Returns:
-            A description of the configuration of the repository, not empty, for a person to read:
-            for example, the path of the storage file, a connection string without its secrets, or
+            A description of the configuration of the repository, not empty, for a person to read.
+            Examples are the path of the storage file, a connection string without its secrets, and
             the name of a data source.
         """
         ...
@@ -690,10 +703,11 @@ class TaxomeshRepositoryBase(Protocol):
             parent_category_id: The identifier of the parent category.
 
         Returns:
-            True if the link was found and deleted; False if it did not exist.
+            ``True`` if the repository found and deleted the link. ``False`` if the link
+            was not stored.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -705,10 +719,11 @@ class TaxomeshRepositoryBase(Protocol):
             category_id: The identifier of the category.
 
         Returns:
-            True if the placement was found and deleted; False if it did not exist.
+            ``True`` if the repository found and deleted the placement. ``False`` if the placement
+            was not stored.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -718,13 +733,14 @@ class TaxomeshRepositoryBase(Protocol):
         """Store a relation: insert it, or update the stored one.
 
         When a relation with the same ``(source_item_id, target_item_id, relation_type)`` is
-        stored, its ``sort_index`` and ``metadata`` are updated. No second relation is created.
+        stored, the repository updates its ``sort_index`` and ``metadata``. The repository creates
+        no second relation.
 
         Args:
             link: The relation to store.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...
 
@@ -745,13 +761,14 @@ class TaxomeshRepositoryBase(Protocol):
             relation_types: The relation types to keep, already stripped and in lowercase, as
                 :meth:`list_item_relation_links_batch` takes them. ``None`` or an empty collection
                 is no filter.
-            direction: ``"outgoing"`` returns the links whose ``source_item_id`` is ``item_id``;
-                ``"incoming"`` the links whose ``target_item_id`` is ``item_id``; ``"both"`` the
-                links whose source *or* target is ``item_id``, each link at most once.
+            direction: ``"outgoing"`` returns the links whose ``source_item_id`` is ``item_id``.
+                ``"incoming"`` returns the links whose ``target_item_id`` is ``item_id``.
+                ``"both"`` returns the links whose source *or* target is ``item_id``, each link at
+                most once.
 
         Returns:
             The matching relations, ordered by ``(sort_index ASC, source_item_id ASC,
-            target_item_id ASC)``; empty when none match.
+            target_item_id ASC)``. Empty when none match.
 
         Raises:
             TypeError: If ``relation_types`` is a ``str``: one type goes in a list.
@@ -770,8 +787,8 @@ class TaxomeshRepositoryBase(Protocol):
 
         One call replaces a loop of :meth:`list_item_relation_links` calls, one for each item: the
         N+1 query pattern. The repository reads every given item in one query, whatever the
-        *direction*: ``"both"`` also uses one ``source OR target`` query, and not two. When its
-        storage limits the number of parameters in one query, the repository may cut ``item_ids``
+        *direction*: ``"both"`` also uses one ``source OR target`` query, and not two. The storage
+        may limit the number of parameters in one query. The repository may then cut ``item_ids``
         into parts that fit, and read each part in one such query, as ``DjangoRepository`` does.
 
         What each direction selects, and its fixed order:
@@ -785,14 +802,14 @@ class TaxomeshRepositoryBase(Protocol):
 
         Args:
             item_ids: The identifiers of the items. An empty collection returns ``[]`` at once,
-                and storage is not read.
-            relation_types: The relation types to keep. ``None`` or ``[]`` is no filter: every type
-                is returned.
+                and the repository does not read storage.
+            relation_types: The relation types to keep. ``None`` or ``[]`` is no filter: the
+                repository returns every type.
             direction: The end of the link that the given items are matched on.
 
         Returns:
             The matching :class:`~taxomesh.domain.models.ItemRelationLink` relations, in the fixed
-            order above; empty when *item_ids* is empty or no link matches.
+            order above. Empty when *item_ids* is empty or no link matches.
 
         Example::
 
@@ -829,9 +846,10 @@ class TaxomeshRepositoryBase(Protocol):
             relation_type: The relation type exactly as stored: stripped and in lowercase.
 
         Returns:
-            True if the relation was found and deleted; False if it did not exist.
+            ``True`` if the repository found and deleted the relation. ``False`` if the relation
+            was not stored.
 
         Raises:
-            TaxomeshRepositoryError: On storage failure; nothing is written.
+            TaxomeshRepositoryError: On storage failure. Nothing is written.
         """
         ...

@@ -31,7 +31,7 @@ from taxomesh.utils.memoize import ReadCache, memoize
 __all__ = ["DEFAULT_CACHE_TTL", "TaxomeshService"]
 
 DEFAULT_CACHE_TTL: Final[float] = 5.0
-"""Seconds a service serves a cached read from memory, unless it is built with another ``cache_ttl``."""
+"""Seconds a service serves a cached read from memory, unless the caller builds it with another ``cache_ttl``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,18 +40,18 @@ class _GraphRows:
 
     The service caches these, and not the assembled graph, as :meth:`TaxomeshService.graph` says.
 
-    Every field is declared ``Sequence``, not ``list``, and the code depends on it. Every assembly
-    within one cache lifetime reads the same instance, so an assembler that sorted or filtered a
-    field in place would change what the next caller reads. With the annotation, mypy refuses such
-    a change; a comment could only ask for care.
+    The class declares every field as ``Sequence``, not ``list``, and the code depends on that.
+    Every assembly within one cache lifetime reads the same instance. So an assembler that sorted
+    or filtered a field in place would change what the next caller reads. With the annotation, mypy
+    refuses such a change. A comment could only ask for care.
 
     Attributes:
         categories: Every category row that the ``enabled`` filter selects. It includes the implicit
             root when the filter selects it, and the assembler leaves the implicit root out.
         category_links: Every parent link, unfiltered.
-        item_links: The item placements, or empty when the graph is built without items.
-        items: The item rows that the ``enabled`` filter selects, or empty when the graph is built
-            without items.
+        item_links: The item placements, or empty when the service builds the graph without items.
+        items: The item rows that the ``enabled`` filter selects, or empty when the service builds
+            the graph without items.
     """
 
     categories: Sequence[Category]
@@ -64,12 +64,12 @@ class TaxomeshService:
     """The one entry point for the categories, items and tags of taxomesh.
 
     The operations on one kind of entity are on the three collections that the service builds:
-    ``svc.categories``, ``svc.items`` and ``svc.tags``. What does not belong to one kind of entity
-    stays on the service: the graph snapshot (:meth:`graph`), the diagnostic information
+    ``svc.categories``, ``svc.items`` and ``svc.tags``. The service keeps what does not belong to
+    one kind of entity. That is the graph snapshot (:meth:`graph`), the diagnostic information
     (:attr:`info`) and the repository (:attr:`repository`).
 
-    The service caches its reads for ``cache_ttl`` seconds, in a cache of its own: a write
-    through it clears that cache, and no other service's.
+    The service caches its reads for ``cache_ttl`` seconds, in a cache of its own. A write through
+    the service clears that cache, and no other service's.
     """
 
     def __init__(
@@ -82,30 +82,32 @@ class TaxomeshService:
         """Build the service over one repository, and store the implicit root if it is absent.
 
         Building a service reads every stored category once, to find the implicit root by its
-        reserved name. When no root is stored, the service reads them again inside one
-        ``atomic()`` block and stores one there: two services built at the same moment over one
-        repository, or over one Django database, store one root. Build one service and share it,
-        rather than one for each request.
+        reserved name. When no root is stored, the service reads the categories again inside one
+        ``atomic()`` block and stores one root there. So two services built at the same moment over
+        one repository, or over one Django database, store one root. Build one service and share
+        it, rather than one for each request.
 
         Args:
-            repository: The repository to use. When it is given, the service reads no config file
-                and ignores ``config_path``.
-            config_path: The ``taxomesh.toml`` to read when no repository is given. When it is
-                ``None``, the service reads ``taxomesh.toml`` in the working directory. When the
-                file does not exist, named here or not, or has no ``[repository]`` section, the
-                repository is a ``YamlRepository`` at its default path, which creates the file and
-                its directory when they are absent. A misspelled name therefore gives that store, and
-                no error.
-            cache_ttl: How many seconds the service serves a read from memory: a lookup, a batch
-                lookup, a listing, the rows a graph is built from, and each search corpus. ``0``
-                caches nothing, so every read reaches storage.
+            repository: The repository to use. When the caller gives one, the service reads no
+                config file and ignores ``config_path``.
+            config_path: The ``taxomesh.toml`` to read when the caller gives no repository. When it
+                is ``None``, the service reads ``taxomesh.toml`` in the working directory. When the
+                file does not exist or has no ``[repository]`` section, the repository is a
+                ``YamlRepository`` at its default path. That is so for a file that ``config_path``
+                names and for the file in the working directory. The ``YamlRepository`` creates its
+                file and the directory of that file when they are absent. A misspelled name
+                therefore gives that store, and no error.
+            cache_ttl: How many seconds the service serves a read from memory. That covers a lookup,
+                a batch lookup, a listing, the rows that the service builds a graph from, and each
+                search corpus. ``0`` caches nothing, so every read reaches storage.
 
         Raises:
-            TypeError: If ``repository`` is given and is not a ``TaxomeshRepositoryBase``, such as a
-                path or an object that lacks a member of the port, or if ``cache_ttl`` is not a
-                number. The service checks the repository with ``isinstance``, which does not see a
-                member that ``__getattr__`` gives: a class that forwards the port that way calls
-                ``TaxomeshRepositoryBase.register`` on itself.
+            TypeError: If the caller gives a ``repository`` that is not a
+                ``TaxomeshRepositoryBase``, or if ``cache_ttl`` is not a number. A path is not a
+                ``TaxomeshRepositoryBase``, and neither is an object that lacks a member of the
+                port. The service checks the repository with ``isinstance``. That check does not
+                see a member that ``__getattr__`` gives. Pass a class that forwards the port that way
+                to ``TaxomeshRepositoryBase.register``.
             TaxomeshValidationError: If ``cache_ttl`` is negative or NaN. The service checks it
                 before it reads the config file or storage.
             TaxomeshConfigError: If the config file exists but cannot be read or parsed, or names a
@@ -145,9 +147,9 @@ class TaxomeshService:
         self.tags = TagCollection(self, cache=self._cache)
 
     def __repr__(self) -> str:
-        """Render as the constructor call over this service's repository, reading no storage.
+        """Return the constructor call over this service's repository, as text.
 
-        ``cache_ttl`` is shown only when it is not the default.
+        The method reads no storage. The text shows ``cache_ttl`` only when it is not the default.
         """
         lifetime = "" if self._cache.ttl == DEFAULT_CACHE_TTL else f", cache_ttl={self._cache.ttl!r}"
         return f"{type(self).__name__}({self._repo!r}{lifetime})"
@@ -162,10 +164,11 @@ class TaxomeshService:
         """Return diagnostic information about this service, its repository and the installed version.
 
         Returns:
-            A :class:`~taxomesh.domain.info.TaxomeshInfo` snapshot: the installed version, the
-            config name, the size of each search corpus, and the repository's own
-            :class:`~taxomesh.domain.info.RepositoryInfo`, which names the repository class and
-            its path. A corpus size is ``None`` when the service holds no corpus of that kind.
+            A :class:`~taxomesh.domain.info.TaxomeshInfo` snapshot. It holds the installed version,
+            the config name, the size of each search corpus, and the repository's own
+            :class:`~taxomesh.domain.info.RepositoryInfo`. The ``RepositoryInfo`` names the
+            repository class and its path. A corpus size is ``None`` when the service holds no
+            corpus of that kind.
         """
         import importlib.metadata  # noqa: PLC0415
 
@@ -184,13 +187,16 @@ class TaxomeshService:
     def _ensure_root(self) -> UUID:
         """Make sure that the implicit root is stored, and return its identifier.
 
-        Reads every stored category to find the implicit root by its reserved name. ``__init__``
-        calls it once, and on a store that holds the root it is the one read of the repository that
-        building a service makes, because the port has no lookup by name. When the root is absent,
-        the method reads again inside one ``atomic()`` block and stores the root only if it is still
-        absent: a service that another thread or worker builds at the same moment waits for the
-        block, and then finds the root that this one stored. On Django, migration ``0012`` stores the
-        root, so the block opens only on a store that the migration has not reached.
+        The method reads every stored category to find the implicit root by its reserved name.
+        ``__init__`` calls the method once. On a store that holds the root, this is the one storage
+        read that building a service makes. The service needs that read because the port has no
+        lookup by name.
+
+        When the root is absent, the method reads again inside one ``atomic()`` block, and stores
+        the root only if it is still absent. A service that another thread or worker builds at the
+        same moment waits for the block, and then finds the root that this one stored. On Django,
+        migration ``0012`` stores the root, so the block opens only on a store that the migration
+        has not reached.
         """
         root_id = self._find_root()
         if root_id is not None:
@@ -214,17 +220,17 @@ class TaxomeshService:
     def _load_graph_rows(self, *, enabled: bool | None, include_items: bool) -> _GraphRows:
         """Read the flat rows a graph is assembled from, and cache them.
 
-        The cached half of the graph read. Its key is ``(enabled, include_items)``, so it holds at
-        most six entries, however many graphs are assembled from them.
+        This method is the cached half of the graph read. Its key is ``(enabled, include_items)``,
+        so it holds at most six entries, however many graphs the service assembles from them.
 
         Neither parameter has a default. ``memoize`` builds the key from the arguments as the call
         passes them, and adds no defaults. So a call that omitted one would store the same read
-        under a second key, and would not find the entry that a call of the other form stored.
+        under a second key. It would not find the entry that a call of the other form stored.
 
         Args:
             enabled: ``True`` enabled only, ``False`` disabled only, ``None`` all.
             include_items: Whether to read the item placements and the items. When it is ``False``,
-                the method makes neither read: the purpose is to save the two reads, not to return
+                the method makes neither read. The purpose is to save the two reads, not to return
                 empty fields.
 
         Returns:
@@ -260,7 +266,7 @@ class TaxomeshService:
         enabled: bool | None = True,
         include_items: bool = True,
     ) -> TaxomeshGraph:
-        """Build and return a graph snapshot of the whole taxonomy, or of one category and its descendants.
+        """Build and return a snapshot of the whole category graph, or of one category and its descendants.
 
         The service reads, from the repository, the categories and items that the ``enabled``
         filter selects, every parent link and every item placement. With ``include_items=False``,
@@ -268,18 +274,19 @@ class TaxomeshService:
         whatever its state. The snapshot holds each of its categories as one node, however many
         paths reach it. The implicit root is never one of them.
 
-        The assembly is **not** cached; the flat rows behind it are (:meth:`_load_graph_rows`). So
-        a repeated call reads no storage, but builds the nodes again: it uses a bounded amount of
-        CPU on each call, and not an unbounded amount of memory. For the same reason, a graph
-        limited by ``root`` costs no more memory: every such graph is assembled from the same
-        cached rows, so the cache holds one copy of the taxonomy, and not one snapshot for each
-        category that a caller asks for.
+        The service does **not** cache the assembly. It caches the flat rows behind the assembly
+        (:meth:`_load_graph_rows`). So a repeated call reads no storage, but builds the nodes
+        again. It uses a bounded amount of CPU on each call, and not an unbounded amount of memory.
+
+        For the same reason, a graph limited by ``root`` costs no more memory. The service assembles
+        every such graph from the same cached rows. So the cache holds one copy of the taxonomy, and
+        not one snapshot for each category that a caller asks for.
 
         Args:
-            root: When it is given, the snapshot holds only that category and its descendants, and
-                that category is the only node in ``roots``. The category or its identifier: the
-                result is the same for both. When it is ``None`` (the default), the snapshot holds
-                the whole taxonomy.
+            root: When the caller gives it, the snapshot holds only that category and its
+                descendants, and that category is the only node in ``roots``. The category or its
+                identifier: the result is the same for both. When it is ``None`` (the default), the
+                snapshot holds the whole category graph.
             enabled: ``True`` (the default) includes only enabled categories and items, ``False``
                 only disabled ones, and ``None`` all of them.
             include_items: ``True`` (the default) gives each node its items. ``False`` reads no item
@@ -287,15 +294,15 @@ class TaxomeshService:
                 then empty, as it is for a category that has no items.
 
         Returns:
-            A ``TaxomeshGraph`` snapshot. Its ``roots`` is empty when no category is stored. The
+            A ``TaxomeshGraph`` snapshot. Its ``roots`` is empty when the graph holds no top-level category. The
             nodes in ``roots`` are ordered by the ``sort_index`` of their link to the implicit root,
             then by identifier. In a graph limited by ``root``, the only node in ``roots`` is
             ``root``.
 
         Raises:
-            TaxomeshCategoryNotFoundError: If ``root`` names a category that is not stored, names
-                the implicit root, or names a category that the ``enabled`` filter of this
-                snapshot leaves out.
+            TaxomeshCategoryNotFoundError: If ``root`` names a category that is not stored, or names
+                the implicit root. Also if ``root`` names a category that the ``enabled`` filter of
+                this snapshot leaves out.
             TaxomeshRepositoryError: If the repository cannot read its storage.
             TypeError: If ``root`` is neither a ``Category`` nor a ``UUID``, or ``enabled`` neither
                 a ``bool`` nor ``None``.
@@ -372,14 +379,14 @@ class TaxomeshService:
     ) -> TaxomeshGraph:
         """Assemble a snapshot of one category and its descendants.
 
-        To change ``roots`` alone is not enough. ``len()`` counts the flat maps and ``walk()``
-        goes through all of them, so a graph that kept them whole would report the size of the
-        whole taxonomy and walk out of the subtree, while every assertion about ``roots`` still
-        passed.
+        To change ``roots`` alone is not enough. ``len()`` counts the flat maps, and ``walk()``
+        goes through all of them. So a graph that kept them whole would report the size of the
+        whole category graph, and would walk out of the subtree. Every assertion about ``roots``
+        would still pass.
 
         Args:
             root_id: The category that the snapshot starts at. The caller checked that it is
-                stored; the check below decides whether this snapshot holds it.
+                stored. The check below decides whether this snapshot holds it.
             categories: Every category that the snapshot would hold without ``root``, keyed by
                 identifier.
             children: The child identifiers of each category, in display order.

@@ -1,8 +1,8 @@
 """How the command line reads its configuration and builds its service.
 
-:func:`build` finds the path of ``taxomesh.toml``, lets ``TaxomeshService`` build the repository
-that the file names, and returns a :class:`BuildResult` with the service and the facts that the
-``--verbose`` block prints.
+:func:`build` finds the path of ``taxomesh.toml``, and lets ``TaxomeshService`` build the
+repository that the file names. It returns a :class:`BuildResult` with the service and the facts
+that the ``--verbose`` block prints.
 
 ``CONFIG_KEYS`` and :func:`dump_config` serve ``--show-config``. That option prints the repository
 configuration that ``taxomesh._config`` finds, the defaults included, and builds no repository and
@@ -36,8 +36,9 @@ _TOML_SHORT_ESCAPES: Final[dict[str, str]] = {"\b": "\\b", "\t": "\\t", "\n": "\
 def _toml_string(value: str) -> str:
     """Return ``value`` as a TOML basic string, which ``tomllib`` reads back as the same text.
 
-    ``\\`` and ``"`` are escaped, a control character by its short name or as ``\\uXXXX``, and every
-    other character, one outside the Basic Multilingual Plane included, is written as it is.
+    The function escapes ``\\`` and ``"``. It writes a control character by its short name or as
+    ``\\uXXXX``. It writes every other character as it is, one outside the Basic Multilingual Plane
+    included.
     """
     out = []
     for char in value:
@@ -56,7 +57,8 @@ def dump_config(repo_type: str, repo_detail: str, name: str | None = None) -> st
     """Return the effective configuration as an annotated TOML string.
 
     The output is valid TOML, which ``tomllib.loads()`` reads. Above each key, comments say what
-    the key controls, the values that it accepts and its default. The key names come from
+    the key controls. They also give the default of a key that has one, and the values that ``type``
+    accepts. The key names come from
     ``CONFIG_KEYS``, so this function holds no key name as a literal.
 
     Args:
@@ -64,8 +66,8 @@ def dump_config(repo_type: str, repo_detail: str, name: str | None = None) -> st
             ``"json"`` or ``"django"``.
         repo_detail: The path of the file for ``yaml`` and ``json``, or the database alias for
             ``django``.
-        name: The ``[taxomesh] name`` that the configuration declares, or ``None``. A ``[taxomesh]``
-            section with the name is printed only when there is one.
+        name: The ``[taxomesh] name`` that the configuration declares, or ``None``. The function
+            writes a ``[taxomesh]`` section with the name only when there is one.
 
     Returns:
         The TOML text, which ends with a newline.
@@ -117,7 +119,7 @@ class BuildResult:
         service: The service, built from the configuration.
         config_file_path: The absolute path of the config file. The file need not exist.
         config_file_exists: ``True`` if the file at ``config_file_path`` existed when
-            :func:`build` ran; ``False`` otherwise.
+            :func:`build` ran, and ``False`` otherwise.
     """
 
     service: TaxomeshService
@@ -128,7 +130,7 @@ class BuildResult:
 def _set_up_django(config_file_path: Path) -> None:
     """Set Django up when the file names the Django repository and ``DJANGO_SETTINGS_MODULE`` is set.
 
-    The command is the entry point of its process, so it sets Django up; the library's service
+    The command is the entry point of its process, so it sets Django up. The library's service
     never does.
 
     Raises:

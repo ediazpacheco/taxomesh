@@ -39,8 +39,8 @@ def row_to_store[R: (Category, Item)](
 ) -> R:
     """Return the row a save stores, after comparing the expected version with the stored one.
 
-    The given row is never changed. An insert stores it as it is; an update stores a copy carrying
-    the replaced row's version plus one.
+    The function never changes the given row. An insert stores it as it is. An update stores a copy
+    that has the version of the replaced row plus one.
 
     Args:
         row: The row being saved.

@@ -11,6 +11,17 @@ The full entries of that series are in
 The changes of 1.0.0 were first dated as 0.2.0 in this file, on 2026-10-12; that version was never
 tagged or published.
 
+## [Unreleased]
+
+### Changed
+
+- The docstrings of the package, which `help()` shows, are in shorter sentences with plainer words.
+  Sentences that said less or more than the code does are corrected. No signature changes.
+- The help of the `taxomesh` command has no repeated "(default)", and says "Identifier of the
+  category" where it said "Category UUID".
+- Five messages have a new text: a negative `--max-depth`, a graph too large to draw, a graph too
+  large to serialize, a file that another writer changed, and a file that holds no mapping.
+
 ## [1.0.3] — 2026-10-21
 
 1.0.3 builds a row with metadata in less time. No public name or signature changes.

@@ -2,15 +2,15 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    """Add composite index on (source_item_id, relation_type, sort_index, target_item_id).
+    """Add a composite index on (source_item_id, relation_type, sort_index, target_item_id).
 
-    Covers:
-    - Outgoing queries filtered by both source_item_id and relation_type
-      (the unique_together index cannot serve this: target_item_id sits between them)
-    - Batch outgoing queries (list_item_relation_links_batch, direction="outgoing") with
-      optional relation_type__in filter
-    - Full ORDER BY (source_item_id, relation_type, sort_index, target_item_id) used by
-      that read — index scan replaces filesort
+    The index serves:
+    - Outgoing queries filtered by both source_item_id and relation_type. The unique_together
+      index cannot serve them, because target_item_id is between the two columns.
+    - Batch outgoing queries (list_item_relation_links_batch, direction="outgoing") with an
+      optional relation_type__in filter.
+    - The full ORDER BY (source_item_id, relation_type, sort_index, target_item_id) of that
+      read: an index scan replaces the filesort.
     """
 
     dependencies = [

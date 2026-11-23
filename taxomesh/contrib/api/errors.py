@@ -23,9 +23,9 @@ class TaxomeshGraphTooLargeError(TaxomeshError):
     """Raised when the serialization of a graph would emit more nodes than ``MAX_EMITTED_NODES``.
 
     :func:`taxomesh.contrib.api.serializers.graph_to_dict` raises it, and no module of the core
-    does, so it is defined here. It is a ``TaxomeshError`` and not a validation error: the request
-    is valid, and the stored data is what cannot be rendered. So it is for the operator: it maps to
-    HTTP 500, and its message goes to the log and not to the client.
+    does, so this module defines it. It is a ``TaxomeshError`` and not a validation error. The
+    request is valid, and the stored data is what the serializer cannot convert. So it is for the
+    operator: it maps to HTTP 500, and its message goes to the log and not to the client.
     """
 
 
@@ -55,19 +55,19 @@ _SERVER_ERROR_LOG_MESSAGE: Final[str] = "Mapping a taxomesh error to HTTP 500"
 def to_tuple(exc: TaxomeshError) -> tuple[int, dict[str, Any]]:
     """Map a ``TaxomeshError`` to an HTTP ``(status_code, body)`` pair.
 
-    The order of the checks matters: a subclass is checked before its parent.
+    The order of the checks matters: the function checks a subclass before its parent.
     ``TaxomeshDuplicateSlugError`` and ``TaxomeshExternalIdConflictError`` are validation errors,
-    but they map to 409 (Conflict) and not to 422 (Unprocessable Entity): both are conflicts on a
+    but they map to 409 (Conflict) and not to 422 (Unprocessable Entity). Both are conflicts on a
     unique value, and they get the same status. ``TaxomeshVersionConflictError`` maps to 409 too:
     the stored row changed after the caller read it. To continue, the caller reads the row again
     and updates it with its new version.
 
-    A client error (404, 409 or 422) carries the exception's own message: taxomesh writes it from
-    the caller's input, and it tells the caller what to correct. A server error (500) carries
-    ``GENERIC_SERVER_ERROR_DETAIL`` instead, because ``TaxomeshRepositoryError`` carries the
-    backend's message as it is: the names of a constraint, a table or a column from the ORM, or the
-    path of a data file. The exception is logged at level ``ERROR`` on the logger
-    ``taxomesh.contrib.api.errors``, which propagates to ``taxomesh``.
+    A client error (404, 409 or 422) carries the exception's own message. taxomesh writes that
+    message from the caller's input, and it tells the caller what to correct. A server error (500)
+    carries ``GENERIC_SERVER_ERROR_DETAIL`` instead, because ``TaxomeshRepositoryError`` carries
+    the backend's message as it is. That message holds the names of a constraint, a table or a
+    column from the ORM, or the path of a data file. The function logs the exception at level
+    ``ERROR`` on the logger ``taxomesh.contrib.api.errors``, which propagates to ``taxomesh``.
 
     Args:
         exc: The error to map.

@@ -465,7 +465,7 @@ class TestTheDrawingHasANodeBudget:
 
         assert result.exit_code == 1
         assert "Taxonomy" not in result.stdout
-        assert "--max-depth" in result.stderr
+        assert "give a smaller --max-depth" in " ".join(result.stderr.split())
 
     def test_within_the_budget_the_same_store_is_drawn(self) -> None:
         """The default depth draws nine branches of the same store."""

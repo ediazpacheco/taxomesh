@@ -17,7 +17,7 @@ ACE_EDITOR_BASE_PATH: Final[str] = "https://cdn.jsdelivr.net/npm/ace-builds@1.43
 class JsonEditorWidget(forms.Widget):
     """The Ace editor for a ``JSONField``: JSON highlighting, and a check of the JSON as you type.
 
-    It renders a hidden ``<textarea>``, which the form submits, beside a ``<div>`` with the Ace
+    Its HTML is a hidden ``<textarea>``, which the form submits, beside a ``<div>`` with the Ace
     editor. The editor highlights and indents the JSON, and its web worker marks invalid JSON as
     you type. A ``submit`` listener stops the submission while the editor holds invalid JSON.
 
@@ -40,7 +40,7 @@ class JsonEditorWidget(forms.Widget):
         attrs: dict[str, Any] | None = None,
         renderer: BaseRenderer | None = None,
     ) -> SafeString:
-        """Render the hidden textarea, the ``<div>`` of the Ace editor and the script that starts it."""
+        """Return the hidden textarea, the ``<div>`` of the Ace editor and the script that starts it."""
         # Normalize the value to a JSON string
         if value is None:
             json_str = "{}"
@@ -109,7 +109,7 @@ class JsonEditorWidget(forms.Widget):
 
 
 class JsonEditorFormField(forms.JSONField):
-    """The form field of ``metadata``: an empty submission is ``{}``, and only a JSON object is accepted."""
+    """The form field of ``metadata``: an empty submission is ``{}``, and the field accepts only a JSON object."""
 
     def clean(self, value: object) -> object:
         """Convert an empty or blank submission to ``{}``, and refuse JSON that is not an object.
@@ -128,13 +128,13 @@ class JsonEditorFormField(forms.JSONField):
 class TaxomeshLinkedFKWidget(AutocompleteSelect):
     """An ``AutocompleteSelect`` that adds a '↗' link to the admin page of the selected object.
 
-    It renders the Select2 autocomplete of a foreign key, and a link to the admin change page of
-    the selected object. The widget builds the change URL from the ``_meta`` of the related model,
-    so it works for any model that the admin registers, and names no model in its code.
+    Its HTML is the Select2 autocomplete of a foreign key, and a link to the admin change page of
+    the selected object. The widget builds the change URL from the ``_meta`` of the related model.
+    So it works for any model that the admin registers, and its code names no model.
 
-    The server renders the link: it shows the value that was stored when the page loaded, and
-    changes after the form is saved. When no value is selected, or when the change URL cannot be
-    built, the widget renders as the standard ``AutocompleteSelect`` does.
+    The server builds the link: it shows the value that was stored when the page loaded, and
+    changes after the form is saved. When no value is selected, or when the widget cannot build
+    the change URL, it returns what the standard ``AutocompleteSelect`` returns.
 
     Usage (per-field widget override)::
 
@@ -160,7 +160,7 @@ class TaxomeshLinkedFKWidget(AutocompleteSelect):
         attrs: dict[str, Any] | None = None,
         renderer: BaseRenderer | None = None,
     ) -> SafeString:
-        """Render the autocomplete select and, when a value is selected, the '↗' change link.
+        """Return the autocomplete select and, when a value is selected, the '↗' change link.
 
         Args:
             name: The ``name`` attribute of the HTML input.
@@ -170,8 +170,9 @@ class TaxomeshLinkedFKWidget(AutocompleteSelect):
             renderer: The Django form renderer, passed to the parent widget.
 
         Returns:
-            Safe HTML: the Select2 widget and, when a value is selected and its change URL can be
-            built, the link to the admin change page of the selected object.
+            Safe HTML: the Select2 widget, then the link to the admin change page of the selected
+            object. The link is present only when a value is selected and the widget can build its
+            change URL.
         """
         output = super().render(name, value, attrs, renderer)
         if not value:

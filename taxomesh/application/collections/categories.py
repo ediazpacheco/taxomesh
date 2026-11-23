@@ -50,14 +50,14 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle broken for type checking on
 
 
 class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
-    """Categories, reached as a container on the service.
+    """The category collection of a service.
 
-    The category reads and writes are here: subscript and the other lookups, the count,
+    The category reads and writes are here: subscript, the lookups, the count,
     listing, search, creation, update, deletion and parent links.
 
-    Reached as ``service.categories`` and never constructed directly: every memoized read below
-    keeps its entries in the service's cache, which the service gives to this collection when it
-    builds it.
+    A caller reaches it as ``service.categories`` and never constructs it, because every memoized
+    read below keeps its entries in the service's cache. The service gives that cache to this
+    collection when it builds it.
     """
 
     _not_found: ClassVar[type[TaxomeshNotFoundError]] = TaxomeshCategoryNotFoundError
@@ -73,15 +73,18 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             service: The owning service.
             cache: The service's cache, which holds the memoized reads below.
             root_id: The identifier of the implicit root, which the service finds once.
-            corpus: The category search corpus. The service holds it; this collection fills it on
-                search and drops it whenever it creates, updates or deletes a category.
+            corpus: The category search corpus. The service holds it. This collection fills it on
+                search, and drops it whenever it creates, updates or deletes a category.
         """
         super().__init__(service, cache=cache)
         self._root_id = root_id
         self._corpus = corpus
 
     def _is_root(self, category_id: UUID, /) -> bool:
-        """Return whether this is the identifier of the implicit root, which every member treats as not stored."""
+        """Return whether this is the identifier of the implicit root.
+
+        Every member treats that identifier as that of a category that is not stored.
+        """
         return category_id == self._root_id
 
     def _holder_of_slug(self, slug: str) -> UUID | None:
@@ -102,9 +105,9 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         The service finds the implicit root by this name (``_ensure_root``). If a caller's category
         had the name, the next service built over the same store could take that category as the
-        implicit root: no member would return the category, and members would return the real
+        implicit root. Then no member would return the category, and members would return the real
         implicit root as a row. The check reads the name of the built row, as the model decoded
-        it, so ``b"__root__"`` is refused too.
+        it, so it refuses ``b"__root__"`` too.
 
         Args:
             name: The name of a built category row.
@@ -119,14 +122,15 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """Return the category this names, or raise.
 
         Args:
-            key: The category, or its identifier. Only the identifier is read.
+            key: The category, or its identifier. The method reads only the identifier.
 
         Returns:
             The stored ``Category``.
 
         Raises:
             TaxomeshCategoryNotFoundError: If no category with this identifier is stored, or if
-                the identifier is that of the implicit root, which is not a row in this container.
+                the identifier is that of the implicit root. Every member treats its identifier
+                as that of a category that is not stored.
             TypeError: If ``key`` is neither a ``Category`` nor a ``UUID``.
         """
         category_id = category_id_of(key)
@@ -139,12 +143,12 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """Read one category through the cache: the entry that every listing primes.
 
         The one cached read of a single row behind subscript, ``get`` and ``in``. It is
-        positional-only on purpose: ``memoize`` builds the key from the arguments as the call
-        passes them, so a keyword call would build a different key and miss every primed entry.
+        positional-only because ``memoize`` builds the key from the arguments as the call passes
+        them. So a keyword call would build a different key and would miss every primed entry.
 
         A listing primes this entry with each row that it reads, before it applies its ``enabled``
-        filter. So the cached row is the stored row, and a category that the filter left out is
-        still found by its identifier.
+        filter. So the cached row is the stored row, and subscript, ``get`` and ``in`` still find a
+        category that the filter left out.
 
         Raises:
             TaxomeshCategoryNotFoundError: If no category with this identifier is stored.
@@ -170,21 +174,23 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """Return the categories these name, keyed by identifier.
 
         Args:
-            categories: The category or identifier to look up, or a collection of them. An absent
-                key is left out of the result: it does not raise, and it does not appear with a
-                ``None`` value. The identifier of the implicit root is an absent key here, and
-                subscript raises not-found for it.
+            categories: The category or identifier to look up, or a collection of them. The method
+                leaves an absent key out of the result: the key does not raise, and it does not
+                appear with a ``None`` value. The identifier of the implicit root is an absent key
+                here, and subscript raises not-found for it.
             enabled: ``True`` enabled only, ``False`` disabled only, ``None`` (the default) all.
                 The default agrees with subscript and :meth:`get`, which do not filter.
 
         Returns:
-            A mapping of category identifier to ``Category``, with only the categories that were
-            found. An empty request is answered without a storage read. The answer is cached, and
-            calls that name the same categories share one entry, in any order and with any repeats.
+            A mapping of category identifier to ``Category``, with only the categories that the
+            method found. The method answers an empty request without a storage read. It caches the
+            answer. Calls that name the same categories and the same ``enabled`` share one entry,
+            in any order and with any repeats.
 
         Raises:
-            TypeError: If ``categories`` is neither one key nor a collection, a key is neither a
-                ``Category`` nor a ``UUID``, or ``enabled`` is neither a ``bool`` nor ``None``.
+            TypeError: If ``categories`` is neither one key nor a collection, or a key is neither
+                a ``Category`` nor a ``UUID``. Also if ``enabled`` is neither a ``bool`` nor
+                ``None``.
         """
         _require_enabled(enabled)
         keys = (categories,) if isinstance(categories, (Category, UUID)) else categories
@@ -203,7 +209,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     def _top_level_links(self, category_ids: Sequence[UUID], /) -> list[CategoryParentLink]:
         """Return the links that put these categories at the top level, after its last category, in this order.
 
-        A category holds such a link exactly when it holds no other parent link, so :meth:`create`
+        A category holds such a link exactly when it holds no other parent link. So :meth:`create`
         stores one, and every write that takes a category's last parent stores it again. The method
         reads the top level's links, so the caller calls it inside its block.
         """
@@ -217,16 +223,17 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     def delete(self, key: CategoryRef, /) -> None:
         """Delete a category, with its links to its parents and its children and its placements.
 
-        The items that were placed in it, and the categories under it, are not deleted. A child
-        left with no other parent moves to the top level, after its last category, in the same
-        ``atomic()`` block.
+        The method does not delete the items that were placed in it, or the categories under it. A
+        child left with no other parent moves to the top level, after its last category, in the
+        same ``atomic()`` block.
 
         Args:
             key: The category to delete, or its identifier.
 
         Raises:
             TaxomeshCategoryNotFoundError: If no category with this identifier is stored, or if the
-                identifier is that of the implicit root, which is not a row in this container.
+                identifier is that of the implicit root. Every member treats its identifier as that
+                of a category that is not stored.
             TypeError: If ``key`` is neither a ``Category`` nor a ``UUID``.
         """
         category_id = category_id_of(key)
@@ -254,8 +261,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         Returns:
             The matching ``Category``, or ``None`` when no category has this slug. An empty slug
-            is no slug: it answers ``None`` without a storage read, however many categories were
-            created without one. The implicit root is never returned.
+            is no slug: the method answers ``None`` without a storage read, however many categories
+            were created without one. The method never returns the implicit root.
 
         Raises:
             TypeError: If ``slug`` is not a ``str``.
@@ -276,8 +283,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     def get_by_external_id(self, external_id: ExternalId, /) -> Category | None:
         """Return the category with this external id, or ``None``.
 
-        Answers ``None`` for an external id of ``None`` without a storage read. The implicit root
-        is never returned. The external id is converted to its stored form before the cached
+        The method answers ``None`` for an external id of ``None`` without a storage read. It never
+        returns the implicit root. It converts the external id to its stored form before the cached
         read, so ``42`` and ``"42"`` share one cache entry.
 
         Args:
@@ -313,24 +320,26 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     ) -> Mapping[str, Category]:
         """Return the categories for these external ids, keyed by external id.
 
-        Each value is converted to its stored text by the rule that writes use, and by nothing
-        else: the surrounding whitespace and the empty string are kept, as a write keeps them.
-        ``None`` is left out and a duplicate counts once, so calls that differ only in these
-        respects share one cache entry. The implicit root is never in the result.
+        The method converts each value to its stored text by the rule that writes use, and by
+        nothing else. So it keeps the surrounding whitespace and the empty string, as a write keeps
+        them. It leaves out ``None`` and counts a duplicate once, so calls that differ only in
+        these respects share one cache entry. The implicit root is never in the result.
 
         Args:
-            external_ids: The external id to look up, or a collection of them. Text, integers and
-                UUIDs can be mixed: values with the same string form name the same row, and a
-                ``None`` adds nothing. An absent external id is left out of the result.
+            external_ids: The external id to look up, or a collection of them. A collection can
+                mix text, integers and UUIDs: values with the same string form name the same row,
+                and a ``None`` adds nothing. The method leaves an absent external id out of the
+                result.
             enabled: ``True`` enabled only, ``False`` disabled only, ``None`` (the default) all.
 
         Returns:
             A mapping of external id, as stored, to ``Category``, with only the categories that
-            were found.
+            the method found.
 
         Raises:
-            TypeError: If an external id is not text, an integer, a UUID or ``None``,
-                ``external_ids`` is bytes or neither one external id nor a collection, or
+            TypeError: If an external id is not text, an integer, a UUID or ``None``. Also if
+                ``external_ids`` is bytes, a bytearray or a memoryview, or is neither one external id nor a
+                collection. Also if
                 ``enabled`` is neither a ``bool`` nor ``None``.
             TaxomeshRepositoryError: If the repository raises it.
         """
@@ -355,12 +364,14 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     ) -> Sequence[Category]:
         """Return categories: every one, or the children of a parent, or those an item is placed in.
 
-        Each row is primed into the cache of single rows, whatever the filter, so a category
-        returned here costs no read when it is next checked through that cache: by subscript,
-        ``get`` or ``in``, or as a filter or a location that a member checks by subscript. This
-        method's ``parent`` is one of them, and a tree walk passes it at every level.
+        The method primes each row into the cache of single rows, whatever the filter. So a
+        category returned here costs no read at its next check through that cache. Subscript,
+        ``get`` and ``in`` check through it. So does a member that checks a filter or a location by
+        subscript. This method's ``parent`` is such a filter, and a tree walk passes it at every
+        level.
+
         :meth:`get_many`, and the members that read a stored row directly, read the row again. A
-        filtered call takes the rows that the cache holds and reads the rest in one batch; an
+        filtered call takes the rows that the cache holds and reads the rest in one batch. An
         unfiltered call reads every row, and primes what it read.
 
         Args:
@@ -373,23 +384,24 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         Returns:
             The matching categories, empty when there are none. With neither ``parent`` nor
-            ``item``, every stored category that the ``enabled`` filter keeps (the enabled ones,
-            by default), at every level, ordered by name, then by identifier.
+            ``item``, every stored category that the ``enabled`` filter keeps, at every level. By
+            default, the filter keeps the enabled ones. The order is by name, then by identifier.
 
         Raises:
             TaxomeshValidationError: If both ``parent`` and ``item`` are given. They need
-                different reads, so the method cannot apply both, and to apply only one, with no
+                different reads, so the method cannot apply both. To apply only one, with no
                 error, would ignore an argument that the caller gave.
             TaxomeshCategoryNotFoundError: If ``parent`` is given and names a category that is not
-                stored, or the implicit root, or if a parent link or a placement names a category
+                stored, or the implicit root. Also if a parent link or a placement names a category
                 that is not stored, as when another writer deletes it during the call.
             TaxomeshItemNotFoundError: If ``item`` is given and names an item that is not stored.
             TypeError: If ``parent`` is neither a ``Category`` nor a ``UUID``, ``item`` neither an
                 ``Item`` nor a ``UUID``, or ``enabled`` neither a ``bool`` nor ``None``.
 
         Note:
-            The implicit root is never returned, with any filter: it is not a row in this
-            container (:meth:`_is_root`). :meth:`roots` lists the top level.
+            The method never returns the implicit root, with any filter. Every member treats its
+            identifier as that of a category that is not stored (:meth:`_is_root`). :meth:`roots`
+            lists the top level.
         """
         _require_enabled(enabled)
         parent_id = None if parent is None else category_id_of(parent)
@@ -430,7 +442,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         return [lnk.category_id for lnk in children]
 
     def _every_category(self, *, enabled: bool | None) -> Sequence[Category]:
-        """Return every stored category except the implicit root, priming each row it returns.
+        """Return every stored category except the implicit root, priming each row it reads.
 
         The unfiltered path of :meth:`list`. It reads every row with no filter and primes it, as
         :meth:`_lookup` says, and then applies the ``enabled`` filter. The cost is that a SQL
@@ -452,11 +464,11 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         The port's batch read is not memoized, so this method gives it the two things that a
         memoized read would give:
 
-        * **Read-through.** An identifier that the cache holds is served from it. One batch read
-          gets the rest, so a call with an empty cache makes exactly one, and a call with no miss
-          makes none.
+        * **Read-through.** The cache serves each identifier that it holds. One batch read gets
+          the rest. So a call with an empty cache and at least one identifier makes exactly one
+          read, and a call with no miss makes none.
         * **Priming.** Each row that the batch read returns primes the entry that :meth:`_lookup`
-          reads, so a row returned as a *result* is a cache hit when it is next passed as an
+          reads. So a row returned as a *result* is a cache hit when a caller next passes it as an
           *argument*. A tree walk depends on this: each child becomes the ``parent`` of the next
           call.
 
@@ -483,8 +495,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     def roots(self, *, enabled: bool | None = True) -> Sequence[Category]:
         """Return the top level: the categories that have no parent.
 
-        The same categories, in the same order, as ``service.graph(enabled=enabled).roots``. Each
-        row is primed into the cache of single rows, as :meth:`list` primes it.
+        The same categories, in the same order, as ``service.graph(enabled=enabled).roots``. The
+        method primes each row into the cache of single rows, as :meth:`list` primes it.
 
         Args:
             enabled: ``True`` (the default) enabled only, ``False`` disabled only, ``None`` all.
@@ -498,8 +510,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             TypeError: If ``enabled`` is neither a ``bool`` nor ``None``.
 
         Note:
-            A category whose parents the ``enabled`` filter all leaves out still has them, so it
-            is not listed here.
+            A category whose parents the ``enabled`` filter all leaves out still has them, so the
+            method does not list it.
         """
         _require_enabled(enabled)
         return self._roots(enabled)
@@ -528,7 +540,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         Args:
             query: The text to match against the name, the slug and the external id.
-            limit: The maximum number of results; at least 1.
+            limit: The maximum number of results, at least 1.
             parent: When it is given, the search covers only the direct children of this parent.
                 The category or its identifier.
             enabled: ``True`` (the default) enabled only, ``False`` disabled only, ``None`` all.
@@ -540,9 +552,9 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         Raises:
             TaxomeshValidationError: If ``limit`` is less than 1.
             TaxomeshCategoryNotFoundError: If ``parent`` is given and names a category that is not
-                stored, or the implicit root; or if the query is not blank, ``parent`` is given,
-                and a link to one of its children names a category that is not stored, as
-                :meth:`list` raises.
+                stored, or the implicit root. Also if the query is not blank, ``parent`` is given,
+                and a link to one of its children names a category that is not stored. For that
+                link, :meth:`list` raises the same error.
             TypeError: If ``query`` is not a ``str``, ``limit`` not an ``int``, ``parent``
                 neither a ``Category`` nor a ``UUID``, or ``enabled`` neither a ``bool`` nor ``None``.
         """
@@ -580,10 +592,10 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             name: The name of the category.
             description: An optional longer description.
             slug: An optional slug: a text key for URLs, unique among categories.
-            external_id: The optional external id, the key of your record; unique among
-                categories when it is given. Text, an integer or a UUID: the string form is
-                stored, so the value read back is a string even when an ``int`` or a ``UUID`` was
-                given, and values with the same string form name the same row.
+            external_id: The optional external id, the key of your record. It is unique among
+                categories when it is given. Text, an integer or a UUID. The method stores its
+                string form, so a read returns a string even when the caller gave an ``int`` or a
+                ``UUID``. Values with the same string form name the same row.
             metadata: Optional data of your own, stored with the category.
 
         Returns:
@@ -594,14 +606,14 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             TaxomeshExternalIdConflictError: If another category already has the external id.
             TaxomeshRootCategoryError: If the name is the reserved name of the implicit root.
             TaxomeshValidationError: If the model refuses a value, such as a name over its maximum
-                length, or ``metadata`` is not plain JSON: a mapping whose keys are text and whose
-                values are text, finite numbers, booleans, ``None``, lists or tuples, and such
-                dicts. A tuple is taken as a list, and a ``StrEnum`` or ``IntEnum`` member as its
-                value; for another ``Enum``, pass ``.value``.
+                length, or ``metadata`` is not plain JSON. Plain JSON is a mapping whose keys are
+                text and whose values are text, finite numbers, booleans, ``None``, lists or
+                tuples, and such dicts. The method takes a tuple as a list, and a ``StrEnum`` or
+                ``IntEnum`` member as its value. For another ``Enum``, pass ``.value``.
             TaxomeshRepositoryError: If storage fails while writing the category or its link to the
                 top level.
-            TypeError: If an argument is of a type the model does not take, ``description`` is
-                ``None``, or ``external_id`` is not text, an integer, a UUID or ``None``.
+            TypeError: If an argument is of a type the model does not take, or ``description`` is
+                ``None``. Also if ``external_id`` is not text, an integer, a UUID or ``None``.
         """
         if description is None:
             raise TypeError('description cannot be None: pass "" for no description')
@@ -642,37 +654,45 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """Update a category, and keep every field that the call does not give.
 
         Every field defaults to ``UNSET``, which keeps it as it is, and any other value replaces
-        it. ``None`` clears ``external_id``, the one nullable field, and is refused for the others.
+        it. ``None`` clears ``external_id``, the one nullable field. The method refuses ``None`` for
+        the others.
 
-        The repository replaces the row with a new one, which this method returns; a row that a
-        caller already holds keeps the values it was read with. Every check comes before the save:
-        the name against the reserved name of the implicit root, the slug and the external id
-        against storage, and each new value against the model. The read, the checks and the save
-        run in one ``atomic()`` block, so no write of another block lands between them. The save
-        checks the external id again, for what this check cannot see: a write made outside a
-        block, or another stored category that already has the external id that this category
-        keeps. A refused update stores nothing.
+        The repository replaces the row with a new one, which this method returns. A row that a
+        caller already holds keeps the values it was read with.
+
+        Every check comes before the save. The method checks the name against the reserved name of
+        the implicit root, and each new value against the model. It checks the slug and the
+        external id against storage.
+
+        The read, the checks and the save run in one ``atomic()`` block, so no write of another
+        block comes between them. The save checks the external id again, for two cases that the
+        method's own check does not cover. One is a write made outside a block. The other is another
+        stored category that already has the external id that this category keeps. A refused update
+        stores nothing.
 
         Args:
-            category: The category to update, or its identifier. Only the identifier is read:
-                the update applies to the stored row.
+            category: The category to update, or its identifier. The method reads only the
+                identifier: the update applies to the stored row.
             name: The new name.
             description: The new description.
-            slug: The new slug; ``""`` clears it.
+            slug: The new slug. ``""`` clears it.
             external_id: The new external id: text, an integer or a UUID, stored as its string
                 form. ``None`` clears it.
             enabled: The new enabled state.
-            metadata: The new metadata. It replaces the stored dict; it is not merged into it.
+            metadata: The new metadata. It replaces the stored dict, and the method does not merge
+                it into that dict.
             expected_version: The ``version`` of the row that the caller read. When it is given,
-                the update is made only if the stored row is still at that version; the repository
-                compares and writes in one step. ``None`` (the default) makes no comparison.
+                the repository makes the update only if the stored row is still at that version.
+                The repository compares and writes in one step. ``None`` (the default) makes no
+                comparison.
 
         Returns:
             The updated ``Category`` as stored, its version one higher than the row it replaced.
 
         Raises:
             TaxomeshCategoryNotFoundError: If no category with this identifier is stored, or if the
-                identifier is that of the implicit root, which is not a row in this container.
+                identifier is that of the implicit root. Every member treats its identifier as that
+                of a category that is not stored.
             TaxomeshRootCategoryError: If the new name is the reserved name of the implicit root.
             TaxomeshDuplicateSlugError: If another category already has the new slug.
             TaxomeshExternalIdConflictError: If another category already has the new external id,
@@ -681,9 +701,9 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 maximum length, ``metadata`` is not plain JSON, or ``expected_version`` is below 0.
             TaxomeshVersionConflictError: If ``expected_version`` is given and the stored row is
                 no longer at it.
-            TypeError: If ``category`` is neither a ``Category`` nor a ``UUID``, a field other than
-                ``external_id`` is ``None``, a new value is of a type the model does not take, or
-                ``expected_version`` is neither an ``int`` nor ``None``.
+            TypeError: If ``category`` is neither a ``Category`` nor a ``UUID``, or a field other
+                than ``external_id`` is ``None``. Also if a new value is of a type the model does
+                not take, or ``expected_version`` is neither an ``int`` nor ``None``.
         """
         category_id = category_id_of(category)
         _require_version(expected_version)
@@ -711,7 +731,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
     ) -> CategoryParentLink:
         """Give a category an additional parent.
 
-        A category with a parent is not at the top level, so a category that was at the top
+        A category with a parent is not at the top level. So a category that was at the top
         level leaves it, in the same ``atomic()`` block.
 
         Args:
@@ -725,13 +745,14 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         Raises:
             TaxomeshCategoryNotFoundError: If either category is not stored, or if either
-                identifier is that of the implicit root, which is not a row in this container.
+                identifier is that of the implicit root. Every member treats its identifier as that
+                of a category that is not stored.
             TaxomeshCyclicDependencyError: If the link would make a cycle. A category given as its
-                own parent is one, and it is refused before either identifier is looked up.
+                own parent is one, and the method refuses it before it looks up either identifier.
             TaxomeshValidationError: If ``sort_index`` is a value the link refuses, such as text
                 that is not a number.
             TypeError: If either is neither a ``Category`` nor a ``UUID``, or ``sort_index`` is of
-                a type the link does not take. Both are refused before anything is read.
+                a type the link does not take. The method refuses both before it reads anything.
         """
         category_id = category_id_of(category)
         parent_id = category_id_of(parent)
@@ -771,7 +792,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         Raises:
             TaxomeshCategoryNotFoundError: If either category is not stored, or if either
-                identifier is that of the implicit root, which is not a row in this container.
+                identifier is that of the implicit root. Every member treats its identifier as that
+                of a category that is not stored.
             TypeError: If either is neither a ``Category`` nor a ``UUID``.
         """
         category_id = category_id_of(category)
@@ -795,7 +817,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """Move a category from one parent to another, onto the top level, or off it.
 
         ``None`` on either side is the top level. Every check comes before the first write, so a
-        refused move changes nothing. Each category is given as itself or as its identifier.
+        refused move changes nothing. The caller gives each category as the row or as its
+        identifier.
 
         Args:
             category: The category to move.
@@ -812,8 +835,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
                 descendants.
             TaxomeshValidationError: If ``to_parent`` is ``None`` and the category keeps another
                 parent: a category with a parent is not at the top level. Also if ``before`` is the
-                category that moves, or a category that is not a child of ``to_parent``, or, for
-                ``None``, not at the top level.
+                category that moves, or is not a child of ``to_parent``, or, for ``None``, is not
+                at the top level.
             TaxomeshRepositoryError: If storage fails while writing the move.
             TypeError: If one of them is neither a ``Category`` nor a ``UUID``.
 
@@ -870,8 +893,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
         """Return the position of ``before`` among the children of the parent that a category joins.
 
         A parent link names only a stored category, so a ``before`` among the siblings costs no
-        read. Only a refused ``before`` is read, to choose its error: not-found when no category is
-        stored with its identifier, a validation error otherwise.
+        read. The method reads only a refused ``before``, to choose its error: not-found when no
+        category is stored with its identifier, a validation error otherwise.
 
         Args:
             before_id: The category that the moving category goes before.
@@ -911,8 +934,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             TaxomeshValidationError: If a category is not a child of that parent, or, for ``None``,
                 not at the top level.
             TaxomeshRepositoryError: If storage fails while writing the order.
-            TypeError: If the parent or a category is neither a ``Category`` nor a ``UUID``, or
-                ``categories`` is not a sequence: a set, a mapping or an iterator.
+            TypeError: If the parent or a category is neither a ``Category`` nor a ``UUID``. Also
+                if ``categories`` is not a sequence, such as a set, a mapping or an iterator.
         """
         parent_id = None if parent is None else category_id_of(parent)
         _require_sequence("categories", categories)

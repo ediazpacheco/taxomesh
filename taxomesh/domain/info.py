@@ -16,13 +16,13 @@ from dataclasses import dataclass
 class RepositoryInfo:
     """What a repository reports about itself.
 
-    Frozen and slotted, because it is a read model and not an entity: the caller holds a snapshot,
-    and a snapshot that accepted writes would suggest that the writes go somewhere. So it is a
+    Frozen and slotted, because it is a read model and not an entity. The caller holds a snapshot,
+    and a snapshot that accepted writes would suggest that the writes have an effect. So it is a
     standard dataclass with slots, and not a Pydantic model, which keeps its fields in a
     ``__dict__``.
 
     It is not the type that a service reports about itself. A service reports its version and its
-    corpus sizes; a repository reports where its data is. One class for both would contain an
+    corpus sizes. A repository reports where its data is. One class for both would contain an
     object of its own class.
 
     Attributes:
@@ -45,22 +45,24 @@ class TaxomeshInfo:
     """What a ``TaxomeshService`` reports about itself.
 
     Frozen and slotted, and a standard dataclass, for the same reasons as :class:`RepositoryInfo`.
-    The corpus sizes show why. They are true at one moment: the next create, update or delete of a
-    category or an item through the service drops the corpus of that kind, and changes its size.
-    An object that accepted writes would suggest that it changes with the service; it does not.
+    The corpus sizes show why. They are true at one moment. The next create, update or delete of a
+    category or an item through the service drops the corpus of that kind. That changes its size.
 
-    ``repository`` contains the model of the repository, and this model does not copy its fields:
-    the name and the path of the backend are ``repository.backend`` and ``repository.path``.
+    An object that accepted writes would suggest that it changes with the service. It does not.
+
+    ``repository`` contains the model of the repository, and this model does not copy its fields.
+    The name and the path of the backend are ``repository.backend`` and ``repository.path``.
 
     Attributes:
         version: The version of the installed distribution.
-        config_name: The name that the ``taxomesh.toml`` of this service declares, or ``None``
-            when the service was given a repository, found no config file, or read one that
-            declares no name.
+        config_name: The name that the ``taxomesh.toml`` of this service declares. ``None`` when
+            the service was given a repository, found no config file, or read one that declares no
+            name.
         item_corpus_size: How many items the held search corpus holds, or ``None`` when no corpus
-            is held: it was not built, its lifetime (the service's ``cache_ttl``) ended, or a
-            create, update or delete of an item through this service dropped it. ``0`` means that
-            the corpus is built and empty. That is a different state, so the type is ``int | None``.
+            is held. The service holds no corpus when it built none, or when the lifetime of the
+            corpus (the service's ``cache_ttl``) ended. It also holds none after a create, update
+            or delete of an item through this service dropped the corpus. ``0`` means that the
+            corpus is built and empty. That is a different state, so the type is ``int | None``.
         category_corpus_size: The same, for the category corpus, which a create, update or delete
             of a category through this service drops.
         repository: What the repository of the service reports about itself.

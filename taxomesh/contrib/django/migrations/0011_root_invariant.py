@@ -1,12 +1,15 @@
 """Migration 0011: bring every category to the top-level invariant.
 
-A category holds a link to the implicit root exactly when it holds no other parent link, and no item
-is placed in the root. This deletes a root link held beside another parent, gives a category holding
-no parent link a root link at sort index 0, and deletes every item placement in the root. A store
-that already holds the invariant is not changed. It changes the database being migrated, as
-``migrate --database`` names it.
+The invariant has two parts. A category holds a link to the implicit root, a root link, exactly when
+it holds no other parent link. No item is placed in the implicit root.
 
-Reverse: a no-op. The schema is unchanged, so migrating back needs no data restored.
+The migration deletes a root link that a category holds beside another parent link. It gives a
+category that holds no parent link a root link at sort index 0. It deletes every placement of an item
+in the implicit root. It changes nothing in a database that already holds the invariant. It changes
+the database being migrated, as ``migrate --database`` names it.
+
+The reverse migration does nothing. This migration does not change the schema, so the reverse
+migration does not need to restore data.
 """
 
 from django.db import migrations

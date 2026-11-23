@@ -1,26 +1,28 @@
 """The read cache: one ``ReadCache`` for each service, and a decorator that keeps its entries there.
 
-A service builds one :class:`ReadCache` with its lifetime and gives it to its collections, and
-each of them keeps it as ``_cache``. ``@memoize`` on a method of such an object returns a
+A service builds one :class:`ReadCache` with its lifetime and gives it to its collections. Each
+of them keeps it as ``_cache``. ``@memoize`` on a method of such an object returns a
 :class:`MemoizedFunction`. That class has ``__get__``, so it is a descriptor and binds as a
 method. So ``prime`` and ``cached`` are typed methods of the bound member, and not a module-level
 helper that reads a closure.
 
 The rest of the library depends on six invariants:
 
-* **The entries belong to the cache.** They are keyed by the member and the arguments, so
-  ``ReadCache.clear()`` reaches every entry of every member, and nothing outside the objects that
-  hold the cache keeps one alive.
+* **The entries belong to the cache.** The cache keys them by the member and the arguments. So
+  ``ReadCache.clear()`` reaches every entry of every member. Nothing outside the objects that
+  hold the cache keeps an entry alive.
 * **``cached`` never writes**: not the value, and not the timestamp. The lifetime of an entry
   starts at the read that made it, and a later lookup never extends it. So a lookup that runs
   often cannot turn the lifetime into a sliding expiry.
-* **An expired entry is dropped when its member stores the next one.** So a member holds the keys
-  of one lifetime at most, however many keys it is asked about over time.
-* **A lifetime of zero stores nothing.** Every call is computed, ``prime`` stores nothing and
-  ``cached`` answers :data:`MISS`.
+* **The cache drops an expired entry when its member stores the next one.** So a member holds the
+  keys of one lifetime at most, however many keys its callers ask it about over time.
+* **A lifetime of zero stores nothing.** Every call computes its result, ``prime`` stores nothing
+  and ``cached`` answers :data:`MISS`.
 * **A suspended cache stores and serves nothing.** While the predicate that the owner gives the
-  cache answers ``True``, it behaves as a lifetime of zero, and keeps its entries for later.
-* **``time`` is read through the module global at call time**, so a test can replace the clock.
+  cache answers ``True``, the cache behaves as one with a lifetime of zero. It keeps its entries
+  for later.
+* **The cache reads ``time`` through the module global at call time**, so a test can replace the
+  clock.
 """
 
 import threading
@@ -34,9 +36,9 @@ from typing import Any, Concatenate, Final, Protocol, Self, overload
 class Miss(Enum):
     """The type of :data:`MISS`, the one object that marks the absence of a fresh cache entry.
 
-    :meth:`MemoizedMethod.cached` returns it instead of ``None``, so that a cached ``None``, or
-    any other falsy value, is not taken for a miss. It is an ``Enum`` with one member, for the
-    reasons that :class:`~taxomesh.domain.types.UnsetType` gives.
+    :meth:`MemoizedMethod.cached` returns it instead of ``None``. So a caller does not read a
+    cached ``None``, or any other falsy value, as a miss. It is an ``Enum`` with one member, for
+    the reasons that :class:`~taxomesh.domain.types.UnsetType` gives.
     """
 
     MISS = "MISS"
@@ -54,17 +56,17 @@ MISS: Final[Miss] = Miss.MISS
 class ReadCache:
     """The memoized reads of one service: their lifetime, and one clear that reaches them all.
 
-    The service builds it and gives it to each of its collections, so a write through any of
-    them clears every read the service cached, and no other service's.
+    The service builds it and gives it to each of its collections. So a write through any of
+    them clears every read that the service cached, and no other service's.
     """
 
     def __init__(self, ttl: float, *, suspended: Callable[[], bool] = lambda: False) -> None:
         """Start empty.
 
         Args:
-            ttl: Seconds an entry is served from memory. Zero or less stores nothing.
-            suspended: Asked at each read: while it answers ``True``, the cache neither stores nor
-                serves an entry. A service passes its repository's ``in_transaction``.
+            ttl: Seconds that the cache serves an entry from memory. Zero or less stores nothing.
+            suspended: The cache asks it at each read. While it answers ``True``, the cache neither
+                stores nor serves an entry. A service passes its repository's ``in_transaction``.
         """
         self._ttl = ttl
         self._suspended = suspended
@@ -80,7 +82,7 @@ class ReadCache:
 
     @property
     def ttl(self) -> float:
-        """Return the seconds an entry is served from memory."""
+        """Return the seconds that the cache serves an entry from memory."""
         return self._ttl
 
     @property
@@ -92,7 +94,7 @@ class ReadCache:
         return self._ttl > 0 and not self._suspended()
 
     def now(self) -> float:
-        """Return the clock reading an entry is stamped with."""
+        """Return the clock reading that the cache stamps an entry with."""
         return time.monotonic()
 
     def is_fresh(self, stamp: float) -> bool:
@@ -101,14 +103,14 @@ class ReadCache:
 
     # Any: the member's owner and parameters; only its return type reaches the store.
     def entries[R](self, member: "MemoizedFunction[Any, ..., R]", /) -> dict[Hashable, tuple[float, R]]:
-        """Return this member's entries, keyed by its arguments, each with the time it was stored.
+        """Return this member's entries, keyed by its arguments, each with the time when the cache stored it.
 
         Args:
             member: The memoized member, as its class holds it.
 
         Returns:
-            The member's own store, created empty the first time it is asked for, in the order its
-            entries were stored.
+            The member's own store, in the order in which the cache stored its entries. The cache
+            creates the store empty at the first call for that member.
         """
         return self._entries.setdefault(member, {})
 
@@ -117,7 +119,7 @@ class ReadCache:
         """Store ``value`` as this member's entry for ``key``, and drop the member's expired entries.
 
         The entry goes to the end of the member's store, so the store stays in the order of its
-        stamps, and every expired entry is at the front, where this method drops it.
+        stamps. Every expired entry is therefore at the front, where this method drops it.
 
         Args:
             member: The memoized member, as its class holds it.
@@ -150,14 +152,14 @@ class CacheOwnerBase(Protocol):
 class MemoizedMethod[S: CacheOwnerBase, **P, R]:
     """A :class:`MemoizedFunction` seen through an instance.
 
-    Holds no entries of its own: they are in the instance's :class:`ReadCache`, under the member
-    of this view.
+    It holds no entries of its own. They are in the instance's :class:`ReadCache`, under the
+    member of this view.
 
-    It shows the method it wraps, as a bound method does: its ``__name__``, ``__qualname__`` and
-    ``__doc__``, and as ``__wrapped__`` the function bound to the instance, through which
-    ``inspect.signature`` reports the method's parameters without ``self``. ``help()``, an IDE and
-    ``inspect.signature`` get this view and not the class member, so without these attributes
-    each would describe the cache class.
+    It shows the method that it wraps, as a bound method does. It has the ``__name__``,
+    ``__qualname__`` and ``__doc__`` of that method. Its ``__wrapped__`` is the function bound to
+    the instance, through which ``inspect.signature`` reports the method's parameters without
+    ``self``. ``help()``, an IDE and ``inspect.signature`` get this view and not the class member.
+    So without these attributes each would describe the cache class.
     """
 
     def __init__(self, member: "MemoizedFunction[S, P, R]", instance: S) -> None:
@@ -170,15 +172,15 @@ class MemoizedMethod[S: CacheOwnerBase, **P, R]:
         self.__wrapped__ = MethodType(member.__wrapped__, instance)
 
     def __repr__(self) -> str:
-        """Render as a bound method does, naming the method and the instance it is bound to."""
+        """Return a text like that of a bound method, which names the method and the instance it is bound to."""
         return f"<memoized bound method {self.__qualname__} of {self._instance!r}>"
 
     def _key(self, args: tuple[object, ...], kwargs: dict[str, object]) -> Hashable | None:
-        """Build the entry's key, or ``None`` when nothing may be stored for these arguments.
+        """Build the entry's key, or ``None`` when the cache may store nothing for these arguments.
 
-        The one place that builds the key: a call, an insert and a lookup must agree on the key,
-        and a disagreement would cost a read and raise no error. Nothing is stored when the
-        cache's lifetime is not positive, or when the arguments cannot be hashed.
+        This is the one place that builds the key. A call, an insert and a lookup must agree on the
+        key. A disagreement would cost a read and raise no error. The cache stores nothing when its
+        lifetime is not positive, while it is suspended, or when the arguments cannot be hashed.
         """
         if not self._cache.enabled:
             return None
@@ -211,16 +213,16 @@ class MemoizedMethod[S: CacheOwnerBase, **P, R]:
     def prime(self, value: R, /, *args: P.args, **kwargs: P.kwargs) -> None:
         """Insert ``value`` as the cached result of calling this method with these arguments.
 
-        A caller that read rows in one batch puts them in the cache of the per-row accessor, so
-        a later lookup of one of those rows is served from memory and does not read storage.
+        A caller that read rows in one batch puts them in the cache of the per-row accessor. The
+        cache then serves a later lookup of one of those rows from memory, with no storage read.
 
-        The entry is the same as one that a call would store: the same key, the same lifetime,
-        cleared by the same :meth:`ReadCache.clear`, and stored the same way, so it also drops
-        the member's expired entries. So priming makes no read staler than a call does, and
-        stores nothing where a call would store nothing.
+        The entry is the same as one that a call would store. It has the same key and the same
+        lifetime, and the same :meth:`ReadCache.clear` clears it. The cache stores it the same way,
+        so the insert also drops the member's expired entries. So priming makes no read staler than
+        a call does, and stores nothing where a call would store nothing.
 
         Args:
-            value: The value to cache. Type-checked against this method's return type.
+            value: The value to cache. The type checker checks it against this method's return type.
             *args: The positional arguments that identify the entry, as a call would pass them.
             **kwargs: The keyword arguments that identify the entry.
         """
@@ -231,9 +233,9 @@ class MemoizedMethod[S: CacheOwnerBase, **P, R]:
     def cached(self, *args: P.args, **kwargs: P.kwargs) -> R | Miss:
         """Return the fresh cached value for these arguments, or :data:`MISS`.
 
-        Read-only: it never writes, refreshes or drops an entry, so a lookup cannot extend the
-        lifetime of an entry. An expired entry is a miss, and so are arguments that the cache
-        cannot use as a key.
+        The method is read-only. It never writes, refreshes or drops an entry, so a lookup cannot
+        extend the lifetime of an entry. An expired entry is a miss, and so are arguments that the
+        cache cannot use as a key.
 
         Args:
             *args: The positional arguments that identify the entry.
@@ -248,14 +250,14 @@ class MemoizedMethod[S: CacheOwnerBase, **P, R]:
         return MISS if key is None else self._fresh_value(key)
 
     def clear_cache(self) -> None:
-        """Discard this member's entries in the instance's cache, leaving every other member's."""
+        """Discard this member's entries in the instance's cache, and leave every other member's."""
         self._cache.entries(self._member).clear()
 
 
 class MemoizedFunction[S: CacheOwnerBase, **P, R]:
     """A method whose results are held in its instance's :class:`ReadCache`.
 
-    Returned by :func:`memoize`. Read on an instance, it returns a :class:`MemoizedMethod` bound
+    :func:`memoize` returns it. Read on an instance, it returns a :class:`MemoizedMethod` bound
     to that instance. Read on the class, it returns this object, which is the key of the member's
     entries in the instance's cache.
     """
@@ -287,9 +289,10 @@ class MemoizedFunction[S: CacheOwnerBase, **P, R]:
 def memoize[S: CacheOwnerBase, **P, R](func: Callable[Concatenate[S, P], R], /) -> MemoizedFunction[S, P, R]:
     """Decorate a method so its results are held in its instance's :class:`ReadCache`.
 
-    The instance keeps the cache as ``_cache``. Entries are keyed by the positional and keyword
-    arguments; a call with arguments that cannot be hashed is computed and not cached. Each entry
-    is served for the cache's lifetime, which is read when the call is made.
+    The instance keeps the cache as ``_cache``. The cache keys the entries by the positional and
+    keyword arguments. A call with arguments that cannot be hashed runs the method, and the cache
+    does not store its result. The cache serves each entry for the cache's lifetime, and reads that
+    lifetime at the time of the call.
 
     The bound member gets :meth:`~MemoizedMethod.prime`, :meth:`~MemoizedMethod.cached` and
     :meth:`~MemoizedMethod.clear_cache`, and keeps its own name, docstring and signature.

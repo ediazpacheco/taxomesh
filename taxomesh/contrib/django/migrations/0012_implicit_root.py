@@ -1,17 +1,23 @@
 """Migration 0012: store the implicit root once.
 
-A database that holds no row named ``__root__`` gets one. A database that holds more than one, as two
-services that started at the same moment could leave it, keeps the one with the lowest key, which
-``0011`` and every service pick: each other root's child links move to it, a link that it already
-holds or that would link it to itself is dropped, and the other root is deleted, its own links and
-placements with it. Then the store
-is brought to the top-level invariant, as ``0011`` brings it. A store that holds one root and the
-invariant is not changed. It changes the database being migrated, as ``migrate --database`` names it.
+The migration stores a row named ``__root__`` in a database that holds none. A database can hold
+more than one. Two services that started at the same moment could leave it in that state. In such a
+database, the migration keeps the row with the lowest key, which ``0011`` and every service pick.
+For each other root, the migration does three things:
 
-With the root stored here, a service never has to store it on Django, so two services that start at
-the same moment on a new database find the same root.
+- It moves the child links of that root to the kept root.
+- It drops a link that the kept root already holds, or that would link the kept root to itself.
+- It deletes that root, and its own links and placements with it.
 
-Reverse: a no-op. The schema is unchanged, and the root is a row that every store needs.
+Then the migration brings the database to the top-level invariant, as ``0011`` does. It changes
+nothing in a database that holds one root and the invariant. It changes the database being migrated,
+as ``migrate --database`` names it.
+
+Because this migration stores the implicit root, a service never has to store it on Django. So two
+services that start at the same moment on a new database find the same root.
+
+The reverse migration does nothing. This migration does not change the schema, and every database
+needs the row of the implicit root.
 """
 
 from uuid import uuid4
@@ -25,7 +31,7 @@ from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 
 
 def _store_one_root(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    """Store the implicit root, or fold every other root into the first; then normalize the top level."""
+    """Store the implicit root, or merge every other root into the first. Then normalize the top level."""
     alias = schema_editor.connection.alias
     categories = apps.get_model(APP_LABEL, "CategoryModel").objects.using(alias)
     links = apps.get_model(APP_LABEL, "CategoryParentLinkModel").objects.using(alias)

@@ -1,16 +1,16 @@
 """The cycle check and the depth-first walk of the category graph.
 
 The parent links of the categories form a directed acyclic graph (DAG). This module has the cycle
-check that the category collection runs before it stores a new parent link: the domain owns that
-check, and no adapter repeats it. It also has the one depth-first walk. ``svc.graph(root=…)``, a
-recursive item listing, the graph's ``walk()``, and a node's ``ancestors()`` and ``descendants()``
-run it, and so does the cycle check.
+check that the category collection runs before it stores a new parent link. The domain owns that
+check, and no adapter repeats it. The module also has the one depth-first walk.
+``svc.graph(root=…)``, a recursive item listing, the graph's ``walk()``, and a node's
+``ancestors()`` and ``descendants()`` run it, and so does the cycle check.
 
 The walk is **iterative**, and it keeps a set of the categories it visited. Neither is an
 optimization. Without them, a chain deeper than the interpreter's recursion limit would raise
-``RecursionError``, a builtin that a caller who catches only this library's errors does not catch.
-And stored data can contain a cycle, because ``check_no_cycle`` guards only the writes: rows also
-come from direct SQL, a migration or a restored backup.
+``RecursionError``. That error is a builtin, and a caller who catches only this library's errors
+does not catch it. And stored data can contain a cycle, because ``check_no_cycle`` guards only the
+writes. Rows also come from direct SQL, a migration or a restored backup.
 """
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -45,8 +45,8 @@ def check_no_cycle(
 ) -> None:
     """Raise TaxomeshCyclicDependencyError if the link category_id → parent_id makes a cycle.
 
-    Builds the parent graph from ``existing_links``, and checks whether ``category_id`` can be
-    reached from ``parent_id``. If it can, the new link would close a cycle.
+    The function builds the parent graph from ``existing_links``, and checks whether ``parent_id``
+    reaches ``category_id``. If it does, the new link would close a cycle.
 
     Args:
         category_id: The child category that would get a new parent.
@@ -81,15 +81,15 @@ def depth_first(seeds: Iterable[UUID], neighbours: Mapping[UUID, Sequence[UUID]]
     ``TaxomeshGraph.walk`` and a node's ``ancestors()`` and ``descendants()`` all run it, over the
     children or over the parents. So they cannot disagree about cycles or about the order.
 
-    One visited set is shared by every seed. A category that a seed reached is not yielded again
-    from a later seed, and a later seed that was already reached is skipped. So a stored cycle
-    ends the walk.
+    Every seed shares one visited set. The walk does not yield again, from a later seed, a category
+    that an earlier seed reached. The walk skips a later seed that it already reached. So a stored
+    cycle ends the walk.
 
     Args:
         seeds: The categories to walk from, in order. Each is yielded before what it reaches.
         neighbours: The identifiers to go on to from each category, in their stored order: its
             children to walk down, or its parents to walk up. A category with none may be absent
-            rather than mapped to an empty sequence.
+            instead of mapped to an empty sequence.
 
     Yields:
         Each identifier once, a category's neighbors in their stored order.
@@ -122,7 +122,8 @@ def collect_subtree(root_id: UUID, children_map: Mapping[UUID, Sequence[UUID]]) 
     Args:
         root_id: The category to go down from. It is the first identifier of the result. This
             function does not check that it is stored: the caller does.
-        children_map: Child identifiers per category. A category with no children may be absent.
+        children_map: The child identifiers of each category. A category with no children may be
+            absent.
 
     Returns:
         The subtree's identifiers, depth-first, children in their stored order.

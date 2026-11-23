@@ -52,15 +52,18 @@ class CreateCategoryRequest(BaseModel):
 class UpdateCategoryRequest(BaseModel):
     """Request body for partially updating an existing category.
 
-    One rule applies: an omitted field carries no instruction and leaves the stored
-    value untouched; a present field means "assign exactly this value" and is rejected if that
-    value is invalid for the field. Optionality is expressed by an inert default, never by
-    widening a field's type — so a non-nullable field rejects an explicit null. The JSON Schema
-    publishes no default for a stored field, since omitting it sets nothing. ``external_id``
-    is the sole stored field whose value domain includes null, so it alone accepts an explicit
-    null, which clears the stored external id. ``expected_version`` is a condition rather
-    than a stored field: given, the update is made only if the stored row is at that version;
-    omitted or null, no comparison is made.
+    One rule applies. An omitted field carries no instruction, and the stored value stays as it
+    is. A present field means "assign exactly this value". The request fails if that value is
+    invalid for the field.
+
+    A field is optional through an inert default, never through a wider type. So a non-nullable
+    field rejects an explicit null. The JSON Schema publishes no default for a stored field,
+    because omitting the field sets nothing. ``external_id`` is the only stored field whose value
+    can be null. So it alone accepts an explicit null, which clears the stored external id.
+
+    ``expected_version`` is a condition, and not a stored field. When the request gives it, the
+    update succeeds only if the stored row is at that version. When the request omits it or gives
+    null, the update makes no comparison.
     """
 
     name: Annotated[str, Field(max_length=MAX_CATEGORY_NAME_LENGTH, json_schema_extra=_inert)] = ""
@@ -84,15 +87,18 @@ class CreateItemRequest(BaseModel):
 class UpdateItemRequest(BaseModel):
     """Request body for partially updating an existing item.
 
-    One rule applies: an omitted field carries no instruction and leaves the stored
-    value untouched; a present field means "assign exactly this value" and is rejected if that
-    value is invalid for the field. Optionality is expressed by an inert default, never by
-    widening a field's type — so a non-nullable field rejects an explicit null. The JSON Schema
-    publishes no default for a stored field, since omitting it sets nothing. ``external_id``
-    is the sole stored field whose value domain includes null, so it alone accepts an explicit
-    null, which clears the stored external id. ``expected_version`` is a condition rather
-    than a stored field: given, the update is made only if the stored row is at that version;
-    omitted or null, no comparison is made.
+    One rule applies. An omitted field carries no instruction, and the stored value stays as it
+    is. A present field means "assign exactly this value". The request fails if that value is
+    invalid for the field.
+
+    A field is optional through an inert default, never through a wider type. So a non-nullable
+    field rejects an explicit null. The JSON Schema publishes no default for a stored field,
+    because omitting the field sets nothing. ``external_id`` is the only stored field whose value
+    can be null. So it alone accepts an explicit null, which clears the stored external id.
+
+    ``expected_version`` is a condition, and not a stored field. When the request gives it, the
+    update succeeds only if the stored row is at that version. When the request omits it or gives
+    null, the update makes no comparison.
     """
 
     name: Annotated[str, Field(max_length=MAX_ITEM_NAME_LENGTH, json_schema_extra=_inert)] = ""
@@ -113,11 +119,11 @@ class CreateTagRequest(BaseModel):
 class UpdateTagRequest(BaseModel):
     """Request body for partially updating an existing tag.
 
-    One rule applies: an omitted field carries no instruction; a present field is
-    assigned or rejected. Neither field is nullable, so an explicit null is rejected, and not
-    ignored. The JSON Schema publishes no default for either, since omitting a
-    field sets nothing. As in the item and category updates, a present ``metadata``
-    dict **replaces** what was stored.
+    One rule applies. An omitted field carries no instruction. The update assigns the value of a
+    present field, or the request fails. Neither field is nullable, so the schema rejects an
+    explicit null, and does not ignore it. The JSON Schema publishes no default for either,
+    because omitting a field sets nothing. As in the item and category updates, a present
+    ``metadata`` dict **replaces** what was stored.
     """
 
     name: Annotated[str, Field(max_length=MAX_TAG_NAME_LENGTH, json_schema_extra=_inert)] = ""
@@ -139,9 +145,9 @@ class PlaceItemRequest(BaseModel):
 
 
 class SearchItemsRequest(BaseModel):
-    """Request parameters for searching items via the HTTP API.
+    """Request parameters for searching items through the HTTP API.
 
-    ``query`` carries the name ``svc.items.search`` gives it, so the schema and the member spell
+    ``query`` has the name that ``svc.items.search`` gives it, so the schema and the member spell
     the argument the same way.
     """
 
@@ -154,9 +160,9 @@ class SearchItemsRequest(BaseModel):
 
 
 class SearchCategoriesRequest(BaseModel):
-    """Request parameters for searching categories via the HTTP API.
+    """Request parameters for searching categories through the HTTP API.
 
-    ``query`` carries the name ``svc.categories.search`` gives it, so the schema and the member
+    ``query`` has the name that ``svc.categories.search`` gives it, so the schema and the member
     spell the argument the same way.
     """
 

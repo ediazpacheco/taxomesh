@@ -1,8 +1,9 @@
 """File-backed YAML repository for taxomesh.
 
-The store is one YAML document in one file, read once when the repository is built and written
-whole after every write. :class:`~taxomesh.adapters.repositories._file.FileRepositoryBase` holds the
-port; this module says how YAML text becomes data and back.
+The store is one YAML document in one file. The repository reads the file once, when it is built,
+and writes it whole after every write.
+:class:`~taxomesh.adapters.repositories._file.FileRepositoryBase` holds the port. This module says
+how YAML text becomes data and back.
 """
 
 from collections.abc import Mapping
@@ -26,12 +27,13 @@ class YamlRepository(FileRepositoryBase):
     is built, and writes the file atomically after every write.
 
     It reads and writes only with PyYAML's safe loader and dumper, so the content of a file cannot
-    make it build an arbitrary Python object. It uses libyaml's, ``CSafeLoader`` and ``CSafeDumper``,
-    when PyYAML has libyaml, as its wheels do: they are many times faster on a large store.
+    make it build an arbitrary Python object. It uses the loader and the dumper of libyaml,
+    ``CSafeLoader`` and ``CSafeDumper``, when PyYAML has libyaml, as its wheels do. They are many
+    times faster on a large store.
 
     Args:
         path: The path of the storage file. The default is ``data/taxomesh.yaml`` in the working
-            directory. The repository creates the parent directories that are missing.
+            directory. The repository creates the parent directories that do not exist.
 
     Raises:
         TaxomeshRepositoryError: If ``path`` is a directory, if the file exists but cannot be
@@ -52,7 +54,7 @@ class YamlRepository(FileRepositoryBase):
         super().__init__(path)
 
     def _parse(self, text: str) -> object:
-        """Return the document a YAML text holds; an empty file holds an empty store."""
+        """Return the document a YAML text holds. An empty file holds an empty store."""
         loader = yaml.CSafeLoader if yaml.__with_libyaml__ else yaml.SafeLoader
         document: object = yaml.load(text, Loader=loader)
         return {} if document is None else document

@@ -1,11 +1,11 @@
-"""Resolve the repository a service uses when it is given none.
+"""Resolve the repository that a service uses when the caller gives it none.
 
 ``taxomesh.toml`` names the storage backend and where it keeps its data. Without the file, a YAML
-file in ``./data/`` holds the taxonomy. This is the one module that reads the file:
-``TaxomeshService`` imports it only when it is given no repository, and the command line reads the
-file through it for ``--show-config``.
+file in ``./data/`` holds the taxonomy. This is the one module that reads the file.
+``TaxomeshService`` imports this module only when the caller gives it no repository. The command
+line reads the file through this module for ``--show-config``.
 
-This module imports every adapter, so it is outside ``taxomesh.application``: the service depends
+This module imports every adapter, so it is outside ``taxomesh.application``. The service depends
 on the repository port, and this module chooses the adapter that the configuration names.
 """
 
@@ -32,11 +32,11 @@ _BUILDERS: Final[Mapping[str, Callable[[Mapping[str, Any]], TaxomeshRepositoryBa
 }
 
 SUPPORTED_REPO_TYPES: Final[tuple[str, ...]] = tuple(_BUILDERS)
-"""The values ``[repository] type`` accepts."""
+"""The values that ``[repository] type`` accepts."""
 
 
 def config_file(config_path: Path | str | None) -> Path:
-    """Return the config file to read: the one named, else ``taxomesh.toml`` in the working directory."""
+    """Return the config file to read: ``config_path``, else ``taxomesh.toml`` in the working directory."""
     return Path(config_path) if config_path is not None else Path.cwd() / CONFIG_FILENAME
 
 
@@ -90,7 +90,7 @@ def _repository_section(document: Mapping[str, Any], path: Path) -> tuple[Mappin
 
     Raises:
         TaxomeshConfigError: If the section holds a ``type``, a ``path`` or a ``using`` that is not a
-            string, or names a repository type that taxomesh does not support.
+            string. Also if the section names a repository type that taxomesh does not support.
     """
     section = _table(document, "repository", path)
     _check_text(section, "repository", "type", path)
@@ -119,11 +119,11 @@ def _name(document: Mapping[str, Any], path: Path) -> str | None:
 
 
 def resolve_repository(config_path: Path | str | None) -> tuple[TaxomeshRepositoryBase, str | None]:
-    """Build the repository the config file names, with the name the file declares.
+    """Build the repository that the config file names, and return it with the name that the file declares.
 
     Args:
-        config_path: The config file to read. When ``None``, ``taxomesh.toml`` in the working
-            directory, which need not exist.
+        config_path: The config file to read. When it is ``None``, the function reads
+            ``taxomesh.toml`` in the working directory, which need not exist.
 
     Returns:
         The repository, and the file's ``[taxomesh] name``, or ``None`` when it declares none.
@@ -133,7 +133,7 @@ def resolve_repository(config_path: Path | str | None) -> tuple[TaxomeshReposito
     Raises:
         TaxomeshConfigError: If the file cannot be read or parsed, or names a repository type that
             taxomesh does not support.
-        TaxomeshRepositoryError: If the repository cannot be built.
+        TaxomeshRepositoryError: If the build of the repository fails.
     """
     path = config_file(config_path)
     document = _read(path)
@@ -144,20 +144,21 @@ def resolve_repository(config_path: Path | str | None) -> tuple[TaxomeshReposito
 def effective_config(config_path: Path | str | None) -> tuple[str, str, str | None]:
     """Return what the config file resolves to: the repository type, its path or alias, and the name.
 
-    Builds nothing, and does not read or write storage. A file backend given no path reports the
-    default path of its adapter, and a Django backend given no alias reports the default alias.
+    The function builds nothing, and does not read or write storage. A file backend given no path
+    reports the default path of its adapter. A Django backend given no alias reports the default
+    alias.
 
     Args:
-        config_path: The config file to read. When ``None``, ``taxomesh.toml`` in the working
-            directory, which need not exist.
+        config_path: The config file to read. When it is ``None``, the function reads
+            ``taxomesh.toml`` in the working directory, which need not exist.
 
     Returns:
         ``(repository type, path or alias, name)``, as the file states them or as they default. The
         name is the file's ``[taxomesh] name``, or ``None`` when it declares none.
 
     Raises:
-        TaxomeshConfigError: If the file cannot be read or parsed, names a repository type that
-            taxomesh does not support, or holds a name that is not text.
+        TaxomeshConfigError: If the file cannot be read or parsed, or names a repository type that
+            taxomesh does not support. Also if the file holds a name that is not text.
     """
     path = config_file(config_path)
     document = _read(path)
