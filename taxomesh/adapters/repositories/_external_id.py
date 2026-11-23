@@ -62,8 +62,8 @@ def bulk_lookup_by_external_id[T: _HasExternalIdAndEnabled](
             ``None`` every matching row.
 
     Returns:
-        A dict from the external id of each matching row to the row. An external id that no row
-        has is left out.
+        A dict from the external id of each matching row to the row. The dict leaves out an
+        external id that no row has.
     """
     target = set(external_ids)
     result: dict[str, T] = {}

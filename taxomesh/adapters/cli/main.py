@@ -39,19 +39,19 @@ MAX_DEPTH_UNLIMITED: Final[int] = 0
 GRAPH_DEFAULT_MAX_DEPTH: Final[int] = 3
 CYCLE_MARK: Final[str] = "↻ cycle"
 """What ``graph`` draws after a category already on the path being drawn: a cycle in stored data."""
-DIRECTION_HELP: Final[str] = "Which relations to read: outgoing (default), incoming, or both"
-EXTERNAL_ID_HELP: Final[str] = "External id, stored as written; optional"
-ENABLED_HELP: Final[str] = "Enable or disable; when both are omitted, the state stays"
-RELATION_TYPE_HELP: Final[str] = "Only this relation type; repeat the option for several"
-CATEGORY_STATE_HELP: Final[str] = "Which categories to list: enabled (default), disabled, or all"
+DIRECTION_HELP: Final[str] = "Which relations to read: outgoing, incoming or both"
+EXTERNAL_ID_HELP: Final[str] = "External id, stored as written"
+ENABLED_HELP: Final[str] = "Enable or disable (with neither, the state stays)"
+RELATION_TYPE_HELP: Final[str] = "Only this relation type (repeat the option for several)"
+CATEGORY_STATE_HELP: Final[str] = "Which categories to list: enabled, disabled or all"
 
 
 class EnabledState(StrEnum):
     """Which rows a listing returns, by their enabled state.
 
-    A ``StrEnum`` and not a plain ``Enum``, so that the members are ordinary strings: Typer shows
-    them as the choices of ``--state``, refuses any other value, and passes the member itself to
-    the command.
+    It is a ``StrEnum`` and not a plain ``Enum``, so that the members are ordinary strings. Typer
+    shows them as the choices of ``--state`` and refuses any other value. It passes the member
+    itself to the command.
 
     This is how the command line names the three values of the service's ``enabled`` filter. The
     domain has no such type: it takes ``bool | None``. So this class is here, and not beside
@@ -98,8 +98,8 @@ def _print_verbose(result: BuildResult) -> None:
     """Print the repository block to stdout.
 
     The block is three aligned lines: the class of the repository, its ``config_summary``, and
-    the path of the config file, with ``[not found]`` after it when the file does not exist. Each
-    command calls this before its own output, so the block comes first, also when the command
+    the path of the config file. ``[not found]`` follows the path when the file does not exist.
+    Each command calls this before its own output, so the block comes first, also when the command
     fails after it.
     """
     repository = result.service.repository
@@ -156,7 +156,7 @@ def _echo_rows(title: str, rows: Sequence[object]) -> None:
 def main(
     ctx: typer.Context,
     config: Path | None = typer.Option(
-        None, "--config", help="Path of the config file; by default taxomesh.toml in the working directory"
+        None, "--config", help="Path of the config file (by default, taxomesh.toml in the working directory)"
     ),
     verbose: bool = typer.Option(
         False, "--verbose", help="Print the repository, its configuration and the config file before the output"
@@ -210,9 +210,9 @@ def category_roots(
 @category_app.command("create")
 def category_create(
     ctx: typer.Context,
-    name: str = typer.Option(..., "--name", help="Category name"),
-    description: str = typer.Option("", "--description", help="Category description"),
-    slug: str = typer.Option("", "--slug", help="Optional slug (unique when non-empty)"),
+    name: str = typer.Option(..., "--name", help="Name of the category"),
+    description: str = typer.Option("", "--description", help="Description of the category"),
+    slug: str = typer.Option("", "--slug", help="Slug, unique within its kind (by default, none)"),
     external_id: str | None = typer.Option(None, "--external-id", help=EXTERNAL_ID_HELP),
 ) -> None:
     """Create a category at the top level."""
@@ -225,13 +225,13 @@ def category_create(
 @category_app.command("add-parent")
 def category_add_parent(
     ctx: typer.Context,
-    category_id: UUID = typer.Argument(..., help="Category UUID"),
-    parent_id: UUID = typer.Option(..., "--parent-id", help="Parent category UUID to add"),
+    category_id: UUID = typer.Argument(..., help="Identifier of the category"),
+    parent_id: UUID = typer.Option(..., "--parent-id", help="Identifier of the parent to add"),
     sort_index: int | None = typer.Option(
-        None, "--sort-index", help="Sort index within the parent; without it, after the last child"
+        None, "--sort-index", help="Sort index within the parent (by default, after the last child)"
     ),
 ) -> None:
-    """Add a parent to a category; a category with a parent leaves the top level."""
+    """Add a parent to a category. A category with a parent is not at the top level."""
     svc = _service(ctx)
     with _cli_errors():
         link = svc.categories.add_parent(category_id, parent_id, sort_index=sort_index)
@@ -243,10 +243,10 @@ def category_add_parent(
 @category_app.command("remove-parent")
 def category_remove_parent(
     ctx: typer.Context,
-    category_id: UUID = typer.Argument(..., help="Category UUID"),
-    parent_id: UUID = typer.Option(..., "--parent-id", help="Parent category UUID to remove"),
+    category_id: UUID = typer.Argument(..., help="Identifier of the category"),
+    parent_id: UUID = typer.Option(..., "--parent-id", help="Identifier of the parent to remove"),
 ) -> None:
-    """Remove one parent from a category; its other parents stay (idempotent).
+    """Remove one parent from a category. Its other parents stay (idempotent).
 
     \f
     Args:
@@ -264,13 +264,13 @@ def category_remove_parent(
 @category_app.command("update")
 def category_update(
     ctx: typer.Context,
-    category_id: UUID = typer.Argument(..., help="Category UUID to update"),
+    category_id: UUID = typer.Argument(..., help="Identifier of the category to update"),
     name: str | None = typer.Option(None, "--name", help="New name"),
     description: str | None = typer.Option(None, "--description", help="New description"),
-    slug: str | None = typer.Option(None, "--slug", help="New slug (empty string to clear)"),
+    slug: str | None = typer.Option(None, "--slug", help="New slug (an empty string clears it)"),
     enabled: bool | None = typer.Option(None, "--enable/--disable", help=ENABLED_HELP),
 ) -> None:
-    """Update a category's name, description, slug or enabled state; an omitted option keeps the stored value."""
+    """Update a category's name, description, slug or enabled state. An omitted option keeps the stored value."""
     if name is None and description is None and slug is None and enabled is None:
         _err("At least one of --name, --description, --slug or --enable/--disable is required")
     svc = _service(ctx)
@@ -288,7 +288,7 @@ def category_update(
 @category_app.command("delete")
 def category_delete(
     ctx: typer.Context,
-    category_id: UUID = typer.Argument(..., help="Category UUID to delete"),
+    category_id: UUID = typer.Argument(..., help="Identifier of the category to delete"),
 ) -> None:
     """Delete a category, and every link that names it."""
     svc = _service(ctx)
@@ -311,7 +311,7 @@ def item_list(
     ),
     tag_id: UUID | None = typer.Option(None, "--tag-id", help="Only the items with this tag"),
     state: EnabledState = typer.Option(
-        EnabledState.ENABLED, "--state", help="Which items to list: enabled (default), disabled, or all"
+        EnabledState.ENABLED, "--state", help="Which items to list: enabled, disabled or all"
     ),
 ) -> None:
     """List items: every one, the items in a category, the items with a tag, or both."""
@@ -324,8 +324,8 @@ def item_list(
 @item_app.command("create")
 def item_create(
     ctx: typer.Context,
-    name: str = typer.Option(..., "--name", help="Item name"),
-    slug: str = typer.Option("", "--slug", help="Optional slug (unique when non-empty)"),
+    name: str = typer.Option(..., "--name", help="Name of the item"),
+    slug: str = typer.Option("", "--slug", help="Slug, unique within its kind (by default, none)"),
     external_id: str | None = typer.Option(None, "--external-id", help=EXTERNAL_ID_HELP),
 ) -> None:
     """Create an item."""
@@ -338,12 +338,12 @@ def item_create(
 @item_app.command("update")
 def item_update(
     ctx: typer.Context,
-    item_id: UUID = typer.Argument(..., help="Item UUID to update"),
+    item_id: UUID = typer.Argument(..., help="Identifier of the item to update"),
     name: str | None = typer.Option(None, "--name", help="New name"),
-    slug: str | None = typer.Option(None, "--slug", help="New slug (empty string to clear)"),
+    slug: str | None = typer.Option(None, "--slug", help="New slug (an empty string clears it)"),
     enabled: bool | None = typer.Option(None, "--enable/--disable", help=ENABLED_HELP),
 ) -> None:
-    """Update an item's name, slug or enabled state; an omitted option keeps the stored value."""
+    """Update an item's name, slug or enabled state. An omitted option keeps the stored value."""
     if name is None and slug is None and enabled is None:
         _err("At least one of --name, --slug or --enable/--disable is required")
     svc = _service(ctx)
@@ -355,7 +355,7 @@ def item_update(
 @item_app.command("delete")
 def item_delete(
     ctx: typer.Context,
-    item_id: UUID = typer.Argument(..., help="Item UUID to delete"),
+    item_id: UUID = typer.Argument(..., help="Identifier of the item to delete"),
 ) -> None:
     """Delete an item, and every link that names it."""
     svc = _service(ctx)
@@ -367,10 +367,10 @@ def item_delete(
 @item_app.command("place-in")
 def item_place_in(
     ctx: typer.Context,
-    item_id: UUID = typer.Argument(..., help="Item UUID"),
-    category_id: UUID = typer.Option(..., "--category-id", help="Category UUID"),
+    item_id: UUID = typer.Argument(..., help="Identifier of the item"),
+    category_id: UUID = typer.Option(..., "--category-id", help="Identifier of the category"),
     sort_index: int | None = typer.Option(
-        None, "--sort-index", help="Sort index within the category; without it, after the last item"
+        None, "--sort-index", help="Sort index within the category (by default, after the last item)"
     ),
 ) -> None:
     """Place an item in a category (idempotent)."""
@@ -383,10 +383,10 @@ def item_place_in(
 @item_app.command("remove-from")
 def item_remove_from(
     ctx: typer.Context,
-    item_id: UUID = typer.Argument(..., help="Item UUID"),
-    category_id: UUID = typer.Option(..., "--category-id", help="Category UUID"),
+    item_id: UUID = typer.Argument(..., help="Identifier of the item"),
+    category_id: UUID = typer.Option(..., "--category-id", help="Identifier of the category"),
 ) -> None:
-    """Remove an item from one category; its other placements stay (idempotent).
+    """Remove an item from one category. Its other placements stay (idempotent).
 
     \f
     Args:
@@ -403,8 +403,8 @@ def item_remove_from(
 @item_app.command("tag")
 def item_tag(
     ctx: typer.Context,
-    item_id: UUID = typer.Argument(..., help="Item UUID"),
-    tag_id: UUID = typer.Option(..., "--tag-id", help="Tag UUID"),
+    item_id: UUID = typer.Argument(..., help="Identifier of the item"),
+    tag_id: UUID = typer.Option(..., "--tag-id", help="Identifier of the tag"),
 ) -> None:
     """Tag an item (idempotent)."""
     svc = _service(ctx)
@@ -416,8 +416,8 @@ def item_tag(
 @item_app.command("untag")
 def item_untag(
     ctx: typer.Context,
-    item_id: UUID = typer.Argument(..., help="Item UUID"),
-    tag_id: UUID = typer.Option(..., "--tag-id", help="Tag UUID"),
+    item_id: UUID = typer.Argument(..., help="Identifier of the item"),
+    tag_id: UUID = typer.Option(..., "--tag-id", help="Identifier of the tag"),
 ) -> None:
     """Remove a tag from an item (idempotent).
 
@@ -447,15 +447,17 @@ def _parse_metadata(raw: list[str]) -> dict[str, str]:
 @item_app.command("relate")
 def item_relate(
     ctx: typer.Context,
-    source_item_id: UUID = typer.Argument(..., help="Source item UUID"),
-    target_item_id: UUID = typer.Argument(..., help="Target item UUID"),
+    source_item_id: UUID = typer.Argument(..., help="Identifier of the source item"),
+    target_item_id: UUID = typer.Argument(..., help="Identifier of the target item"),
     relation_type: str = typer.Argument(..., help="Relation type, such as related_to"),
     sort_index: int | None = typer.Option(
         None,
         "--sort-index",
-        help="Sort index among the relations of the source item; without it, after the last relation",
+        help="Sort index among the relations of the source item (by default, after the last relation)",
     ),
-    metadata: list[str] | None = typer.Option(None, "--metadata", help="KEY=VALUE pairs (repeatable)"),
+    metadata: list[str] | None = typer.Option(
+        None, "--metadata", help="A KEY=VALUE pair (repeat the option for several)"
+    ),
 ) -> None:
     """Create or update a directed relation between two items."""
     svc = _service(ctx)
@@ -468,8 +470,8 @@ def item_relate(
 @item_app.command("unrelate")
 def item_unrelate(
     ctx: typer.Context,
-    source_item_id: UUID = typer.Argument(..., help="Source item UUID"),
-    target_item_id: UUID = typer.Argument(..., help="Target item UUID"),
+    source_item_id: UUID = typer.Argument(..., help="Identifier of the source item"),
+    target_item_id: UUID = typer.Argument(..., help="Identifier of the target item"),
     relation_type: str = typer.Argument(..., help="Relation type"),
 ) -> None:
     """Remove a directed relation between two items (idempotent)."""
@@ -482,7 +484,7 @@ def item_unrelate(
 @item_app.command("list-relations")
 def item_list_relations(
     ctx: typer.Context,
-    item_id: UUID = typer.Argument(..., help="Item UUID"),
+    item_id: UUID = typer.Argument(..., help="Identifier of the item"),
     relation_types: list[str] | None = typer.Option(None, "--relation-type", help=RELATION_TYPE_HELP),
     direction: Direction = typer.Option(Direction.OUTGOING, "--direction", help=DIRECTION_HELP),
 ) -> None:
@@ -504,11 +506,11 @@ def item_list_relations(
 @item_app.command("list-related")
 def item_list_related(
     ctx: typer.Context,
-    item_id: UUID = typer.Argument(..., help="Item UUID"),
+    item_id: UUID = typer.Argument(..., help="Identifier of the item"),
     relation_types: list[str] | None = typer.Option(None, "--relation-type", help=RELATION_TYPE_HELP),
     direction: Direction = typer.Option(Direction.OUTGOING, "--direction", help=DIRECTION_HELP),
     state: EnabledState = typer.Option(
-        EnabledState.ENABLED, "--state", help="Which related items to list: enabled (default), disabled, or all"
+        EnabledState.ENABLED, "--state", help="Which related items to list: enabled, disabled or all"
     ),
 ) -> None:
     """List the items related to an item."""
@@ -555,7 +557,7 @@ def tag_create(
 @tag_app.command("update")
 def tag_update(
     ctx: typer.Context,
-    tag_id: UUID = typer.Argument(..., help="Tag UUID to update"),
+    tag_id: UUID = typer.Argument(..., help="Identifier of the tag to update"),
     name: str | None = typer.Option(None, "--name", help="New name"),
 ) -> None:
     """Rename a tag."""
@@ -570,7 +572,7 @@ def tag_update(
 @tag_app.command("delete")
 def tag_delete(
     ctx: typer.Context,
-    tag_id: UUID = typer.Argument(..., help="Tag UUID to delete"),
+    tag_id: UUID = typer.Argument(..., help="Identifier of the tag to delete"),
 ) -> None:
     """Delete a tag, and every link that names it."""
     svc = _service(ctx)
@@ -608,21 +610,22 @@ def _draw_graph(
 ) -> list[tuple[Tree, Item]]:
     """Draw the categories reachable from ``roots`` onto ``tree``, and return each drawn item.
 
-    Each category is a bold cyan branch, and each of its items a yellow leaf, both followed by
-    their enabled mark. A category deeper than ``max_depth`` is drawn without its items or
-    children; ``0`` (``MAX_DEPTH_UNLIMITED``) sets no limit.
+    Each category is a bold cyan branch, and each of its items a yellow leaf. The enabled mark
+    follows both. A category deeper than ``max_depth`` is drawn without its items or children.
+    ``0`` (``MAX_DEPTH_UNLIMITED``) sets no limit.
 
     :func:`~taxomesh.domain.paths.walk_paths` makes the descent, as it does for the HTTP
-    serializer: a category reachable through several parents is drawn under each of them, and a
-    category already on the path being drawn, which only a cycle in stored data produces, is drawn
-    with :data:`CYCLE_MARK` and its items, and not descended into. So the drawing ends on any stored
-    shape at every ``max_depth``, and no chain is too deep for it. Drawing once per path is
-    exponential in shared parents, so it keeps the serializer's budget too.
+    serializer. A category that several parents share is drawn under each of them. A category that
+    is already on the path being drawn is drawn with :data:`CYCLE_MARK` and its items, and its
+    children are not drawn. Only a cycle in stored data produces such a category. So the drawing
+    ends on any stored shape at every ``max_depth``, and no chain is too deep for it. Drawing once
+    for each path is exponential in shared parents, so the drawing keeps the serializer's budget
+    too.
 
     Args:
         tree: The Rich tree to draw onto.
         roots: The categories to draw from, in order.
-        max_depth: Maximum depth to draw; 0 means unlimited.
+        max_depth: Maximum depth to draw. ``0`` sets no limit.
 
     Returns:
         Each drawn item with the leaf it was drawn as, in drawing order. An item drawn under
@@ -637,8 +640,8 @@ def _draw_graph(
     for emitted, visit in enumerate(walk_paths(roots, tree), 1):
         if emitted > MAX_EMITTED_NODES:
             _err(
-                f"This graph would draw more than {MAX_EMITTED_NODES} categories: a category reachable through "
-                "several parents is drawn once per path, so give a smaller --max-depth"
+                f"This graph would draw more than {MAX_EMITTED_NODES} categories: a category appears once for "
+                "each path to it, so give a smaller --max-depth"
             )
         category = visit.node.category
         label = f"[bold cyan]{category}[/bold cyan]  {_state_icon(category.enabled)}"
@@ -671,41 +674,41 @@ def graph_cmd(
         True, "--show-relations/--no-show-relations", help="Draw each item's outgoing relations"
     ),
     max_depth: int = typer.Option(
-        GRAPH_DEFAULT_MAX_DEPTH, "--max-depth", help="Maximum depth to draw; 0 draws every level"
+        GRAPH_DEFAULT_MAX_DEPTH, "--max-depth", help="Maximum depth to draw (0 draws every level)"
     ),
     state: EnabledState = typer.Option(
         EnabledState.ENABLED,
         "--state",
         metavar="STATE",
-        help="Which rows to draw: enabled (default), disabled, or all",
+        help="Which rows to draw: enabled, disabled or all",
     ),
 ) -> None:
     """Draw the category graph as a tree, from the top-level categories down.
 
-    A category reachable through several parents is drawn under each of them.
-    A category already on the path being drawn, which only a cycle in stored
-    data produces, is marked ↻ cycle and is not descended into. A drawing with
-    too many categories stops with an error that gives the limit and asks for
-    a smaller --max-depth.
+    A category that several parents share is drawn under each of them. A
+    category that is already on the path being drawn is marked ↻ cycle, and
+    its children are not drawn. Only a cycle in stored data produces one. A
+    drawing with too many categories stops with an error. The error gives the
+    limit and asks for a smaller --max-depth.
 
     \f
     Args:
         ctx: Typer context carrying verbose flag and config path.
         show_relations: When True, draw each drawn item's outgoing relations as dim leaves. They
             are read in one batch for every item drawn.
-        max_depth: Maximum depth to render; 0 means unlimited.
-        state: Which rows to draw: enabled only (default), disabled only, or all. A filtered
-            tree is not the whole tree with rows hidden: a link is kept only when both of its
-            ends pass the filter, so a disabled category under an enabled parent loses that
-            link. It stays under any parent that the filter keeps; with none, it is not drawn.
-            A relation is drawn when its related item passes the filter too.
+        max_depth: Maximum depth to draw. ``0`` sets no limit.
+        state: Which rows to draw: enabled only (the default), disabled only, or all. A filtered
+            tree is not the whole tree with rows hidden. The graph keeps a link only when both of
+            its ends pass the filter, so a disabled category under an enabled parent loses that
+            link. The category stays under any parent that the filter keeps. With no such parent,
+            it is not drawn. A relation is drawn when its related item passes the filter too.
 
     Raises:
         typer.BadParameter: If ``max_depth`` is negative: a usage error, before anything is read.
     """
     # Checked here rather than with ``min=0``, which would widen the help past 80 columns.
     if max_depth < 0:
-        raise typer.BadParameter(f"{max_depth} is negative; 0 draws every level", param_hint="'--max-depth'")
+        raise typer.BadParameter(f"{max_depth} is negative: 0 draws every level", param_hint="'--max-depth'")
     svc = _service(ctx)
     enabled = STATE_FILTERS[state]
     try:

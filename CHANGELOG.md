@@ -13,6 +13,17 @@ tagged or published.
 
 ## [Unreleased]
 
+### Changed
+
+- The docstrings of the package, which `help()` shows, are in shorter sentences with plainer words.
+  Sentences that said less or more than the code does are corrected. No signature changes. The
+  JSON Schema of a request model of `taxomesh.contrib.api.schemas` gives the class docstring as its
+  `description`, so that text changes too.
+- The help of the `taxomesh` command has no repeated "(default)", and says "Identifier of the
+  category" where it said "Category UUID".
+- Five messages have a new text: a negative `--max-depth`, a graph too large to draw, a graph too
+  large to serialize, a file that another writer changed, and a file that holds no mapping.
+
 ### Fixed
 
 - A YAML or JSON file can hold categories and no implicit root: a file written by hand is such a

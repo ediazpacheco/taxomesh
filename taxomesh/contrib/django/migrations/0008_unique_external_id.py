@@ -7,7 +7,7 @@ Operations:
 
 Reverse, in the opposite order:
 1. AlterField operations drop the unique constraint.
-2. RunPython — convert NULL back to "" (best-effort; data may differ from original).
+2. RunPython — convert NULL back to "". The data can differ from the original.
 3. AlterField operations revert to blank=True, not null, db_index=True.
 
 The data steps run on the database being migrated, the schema editor's connection.

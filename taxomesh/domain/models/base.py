@@ -9,8 +9,8 @@ def _build_str_repr(name: str, id_value: object, slug: str = "", external_id: st
     Args:
         name: The row's name.
         id_value: The row's identifier.
-        slug: The row's slug; left out when empty, which is no slug.
-        external_id: The row's external id; left out when ``None``.
+        slug: The row's slug. The label leaves it out when it is empty, which is no slug.
+        external_id: The row's external id. The label leaves it out when it is ``None``.
 
     Returns:
         ``<name> (slug: …, id: …, external_id: …)``, with the slug and the external id only when

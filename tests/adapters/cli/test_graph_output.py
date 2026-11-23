@@ -265,6 +265,7 @@ class TestMaxDepth:
 
         assert result.exit_code == 2
         assert "--max-depth" in click.unstyle(result.output)
+        assert "-1 is negative: 0 draws every level" in click.unstyle(result.output)
         assert list(tmp_path.iterdir()) == []
 
     def test_graph_max_depth_zero_shows_all_nodes(self) -> None:
@@ -465,7 +466,9 @@ class TestTheDrawingHasANodeBudget:
 
         assert result.exit_code == 1
         assert "Taxonomy" not in result.stdout
-        assert "--max-depth" in result.stderr
+        assert "a category appears once for each path to it, so give a smaller --max-depth" in " ".join(
+            result.stderr.split()
+        )
 
     def test_within_the_budget_the_same_store_is_drawn(self) -> None:
         """The default depth draws nine branches of the same store."""

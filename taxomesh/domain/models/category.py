@@ -30,12 +30,12 @@ class Category(MetadataModelBase):
         enabled: ``False`` leaves the category out of listings, searches, ``roots()`` and the
             graph, at the default of their ``enabled`` filter.
         external_id: The key of the record of yours that the category stands for, stored as text
-            and unique among categories; ``None`` when there is none.
-        slug: A text key for URLs, unique among categories; ``""`` is no slug.
-        metadata: Plain JSON, frozen all the way down.
-        created_at: When ``create`` stored the row; the audit epoch, 1970-01-01 UTC, on a row
+            and unique among categories. ``None`` when the category stands for no record.
+        slug: A text key for URLs, unique among categories. ``""`` is no slug.
+        metadata: Plain JSON. It is frozen at every level.
+        created_at: When ``create`` stored the row. The audit epoch, 1970-01-01 UTC, on a row
             stored without one.
-        updated_at: When ``create`` or the latest ``update`` stored the row; the audit epoch on a
+        updated_at: When ``create`` or the latest ``update`` stored the row. The audit epoch on a
             row stored without one.
         version: 0 at ``create``, one higher on each ``update``. The repository assigns it, and
             compares it with the ``expected_version`` of a conditional update.

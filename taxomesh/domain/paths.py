@@ -1,11 +1,13 @@
 """The walk that draws the category graph once for each path.
 
-The graph holds one node for each category, but a drawing is a *tree*: a category that several
-parents reach is drawn once **for each path**, because a nested ``children`` document or a branch of
-a tree means that. So the guard of :func:`walk_paths` is **path-local**, not global: it holds the
-ancestors of the category that it visits, and nothing else. A global set would stop the second visit
-of a shared subtree, and change the drawing that the tests pin. :func:`~taxomesh.domain.dag.depth_first`
-and ``TaxomeshGraph.walk`` use a global set for the opposite reason: they yield each category exactly
+The graph holds one node for each category, but a drawing is a *tree*. A drawing shows a category
+once **for each path** when several parents reach it. A nested ``children`` document or a branch of
+a tree means that.
+
+So the guard of :func:`walk_paths` is **path-local**, not global: it holds the ancestors of the
+category that it visits, and nothing else. A global set would stop the second visit of a shared
+subtree, and change the drawing that the tests check. :func:`~taxomesh.domain.dag.depth_first` and
+``TaxomeshGraph.walk`` use a global set for the opposite reason: they yield each category exactly
 once. One guard cannot replace the other.
 
 The walk is iterative, as :func:`~taxomesh.domain.dag.depth_first` is, for the reason that
@@ -31,7 +33,7 @@ class PathVisit[S]:
 
     Attributes:
         node: The category to draw.
-        depth: How many categories are above it on this path; ``0`` for a top-level category.
+        depth: How many categories are above it on this path. ``0`` for a category of ``roots``.
         repeated: ``True`` when the category is already on this path, which only a cycle in stored
             data causes. The walk does not go down from a repeated category, whatever the consumer sets.
         outer: Where the parent put its children, or the ``top`` that the walk was given.
@@ -64,14 +66,14 @@ class _Leave:
 def walk_paths[S](roots: Sequence[CategoryNode], top: S) -> Iterator[PathVisit[S]]:
     """Visit the categories below ``roots`` once for each path, depth-first, in stored order.
 
-    A category that several parents reach is visited under each of them. A category already on the
-    path being visited is visited again with ``repeated`` set, and the walk does not go down from it.
-    So the walk ends on any stored shape. The count of visits grows exponentially with shared
-    parents, so the consumer counts them and stops the walk at its limit.
+    The walk visits a category that several parents reach under each of them. The walk visits
+    again, with ``repeated`` set, a category that is already on the current path, and does not go
+    down from it. So the walk ends on any stored shape. The count of visits grows exponentially with
+    shared parents, so the consumer counts them and stops the walk at its limit.
 
     Args:
         roots: The categories to start from, in order.
-        top: Where the drawing of the roots goes; it is the ``outer`` of each root's visit.
+        top: Where the drawing of the roots goes. It is the ``outer`` of each root's visit.
 
     Yields:
         One visit for each category on each path.

@@ -1,9 +1,10 @@
 """DjangoRepository — taxomesh storage adapter backed by the Django ORM.
 
-Every Django import is inside ``__init__`` or a method body, so that this module, and
+Every Django import is inside a function or a method body, so that this module, and
 ``import taxomesh``, work when Django is not installed.
-Every deferred import line carries ``# noqa: PLC0415``. The names that only the annotations use, such
-as ``QuerySet``, are imported at module level for the type checker only, under ``TYPE_CHECKING``.
+Every deferred import line has ``# noqa: PLC0415``. The module imports the names that only the
+annotations use, such as ``QuerySet``, at module level under ``TYPE_CHECKING``, for the type
+checker only.
 
 Usage::
 
@@ -72,7 +73,7 @@ def django_import_error(exc: ImportError) -> TaxomeshRepositoryError:
 def _storage_errors() -> Iterator[None]:
     """Raise a database error from the block as a ``TaxomeshRepositoryError`` with the error as its cause.
 
-    Django is imported when the block fails, so that this module works without it.
+    The function imports Django when the block fails, so that this module works without it.
     """
     try:
         yield
@@ -93,14 +94,14 @@ def _unique_key_failure(
 ) -> TaxomeshError:
     """Return the error for a save that a unique column refused: the error of the key another row holds.
 
-    The database names the refused column in its own words, which differ from one engine to the
-    next, so the rows are asked instead: the slug first, then the external id. When another row
-    holds neither, the refusal is a storage failure.
+    Each database engine names the refused column in a different text. So the function queries
+    the other rows instead: it looks for the slug first, then for the external id. When another
+    row holds neither, the refusal is a storage failure.
 
     Args:
-        others: The stored rows of the kind, the saved row left out.
+        others: The stored rows of the kind, without the saved row.
         kind: The noun the messages use, ``"category"`` or ``"item"``.
-        slug: The slug of the saved row; ``""`` is no slug.
+        slug: The slug of the saved row. ``""`` is no slug.
         external_id: The external id of the saved row, or ``None``.
         exc: The ``IntegrityError`` that the database raised.
     """
@@ -112,7 +113,7 @@ def _unique_key_failure(
 
 
 def _row[R: ModelBase](row_type: type[R], orm_row: "Model") -> R:
-    """Return the ``row_type`` row that ``orm_row`` holds: each field is read from the attribute of its name."""
+    """Return the ``row_type`` row that ``orm_row`` holds: each field comes from the attribute of its name."""
     return row_type.model_validate(orm_row, from_attributes=True)
 
 
@@ -139,8 +140,8 @@ class DjangoRepository:
         Raises:
             TaxomeshRepositoryError: If Django cannot be imported, or if its settings are not
                 configured.
-            TypeError: If ``using`` is not a ``str``. Django reads ``None`` as ``"default"``, so it is
-                refused before Django is imported.
+            TypeError: If ``using`` is not a ``str``. Django reads ``None`` as ``"default"``, so the
+                constructor refuses it before it imports Django.
         """
         if not isinstance(using, str):
             raise TypeError(f"using must be a str, not {type(using).__name__}")
@@ -177,7 +178,7 @@ class DjangoRepository:
         self._relations = ItemRelationLinkModel.objects.db_manager(using)
 
     def __repr__(self) -> str:
-        """Render as the constructor call that opens the same database alias."""
+        """Return the text of the constructor call that opens the same database alias."""
         return f"{type(self).__name__}(using={self._using!r})"
 
     # ------------------------------------------------------------------
@@ -190,19 +191,21 @@ class DjangoRepository:
 
         The block is ``django.db.transaction.atomic`` on this repository's database. Its first
         statement is an ``UPDATE`` of the implicit root's row that changes nothing. The statement
-        takes a lock that the transaction holds until it ends: the row's lock on PostgreSQL and
-        MySQL, and the write lock of the database on SQLite, where ``select_for_update()`` takes no
-        lock. So a block that another thread or another worker opens on the same database waits at
-        its first statement until this block ends, and then reads what this block stored. On SQLite,
-        a block that waits longer than the connection's timeout, 5 seconds by default, raises.
-        Migration ``0012`` stores the implicit root, and the service stores it when it is built if
-        it is absent, so the row is there.
+        takes a lock that the transaction holds until it ends. On PostgreSQL and MySQL, it is the
+        lock of the row. On SQLite, where ``select_for_update()`` takes no lock, it is the write
+        lock of the database.
+
+        So a block that another thread or another worker opens on the same database waits at its
+        first statement until this block ends. Then that block reads what this block stored. On
+        SQLite, a block that waits longer than the connection's timeout, 5 seconds by default,
+        raises. Migration ``0012`` stores the implicit root. The service also stores it when it is
+        built, if it is absent. So the row is stored.
 
         When a collection runs one member inside the block and the body raises, the whole
-        transaction rolls back, and no write of the block is committed.
+        transaction rolls back. The database commits no write of the block.
 
-        Django's ``atomic()`` blocks nest. The outermost block opens the database transaction, and
-        the ``transaction.atomic`` block that a write of this repository opens, such as
+        Django's ``atomic()`` blocks nest. The outermost block opens the database transaction. The
+        ``transaction.atomic`` block that a write of this repository opens, such as
         ``save_category``, is a **savepoint** inside it. An exception that leaves the block rolls
         back every savepoint and the transaction, so the data is as it was before the block. A
         block inside a transaction that the caller opened takes the lock too, and holds it until
@@ -264,8 +267,8 @@ class DjangoRepository:
     ) -> list[M]:
         """Return the stored rows that the lookup ``lookup``, such as ``item_id__in``, matches in ``values``.
 
-        When ``enabled`` is not ``None``, only the rows with that ``enabled`` value are returned. The
-        values are read in as many queries as the database's limit on parameters needs.
+        When ``enabled`` is not ``None``, the method returns only the rows with that ``enabled``
+        value. It reads the values in as many queries as the database's limit on parameters needs.
         """
         with _storage_errors():
             rows = objects.all()
@@ -325,24 +328,28 @@ class DjangoRepository:
     ) -> list[dict[str, list[object]]]:
         """Cut the values that one read filters by into the parts of its queries, so no query passes the limit.
 
-        A database accepts a limited number of parameters in one query: ``max_query_params`` on the
-        connection's features, by default 32,766 on SQLite, and ``None``, no limit, on PostgreSQL.
-        A value given twice is kept once, in its first place, so the parts return each row once, as
-        one query does. When the values fit, or the engine sets no limit, the read is one query, as
-        it would be without this method. Past the limit, each list is cut, in its order, into parts of at most
-        ``(limit - fixed) // (uses * number of lists)`` values, and one query reads each combination
-        of parts: a row that matches every list matches one combination.
+        A database accepts a limited number of parameters in one query. The limit is
+        ``max_query_params`` on the connection's features: by default 32,766 on SQLite, and
+        ``None``, no limit, on PostgreSQL. The method keeps a value given twice only once, in its
+        first place. So the parts return each row once, as one query does.
+
+        When the values fit, or the engine sets no limit, the read is one query, as it would be
+        without this method. When the values pass the limit, the method cuts each list, in its
+        order, into parts of at most ``(limit - fixed) // (uses * number of lists)`` values. One
+        query reads each combination of parts. A row that matches every list matches one
+        combination.
 
         Args:
-            lists: Each list of values, by the key the caller reads it under: a lookup such as
-                ``item_id__in`` goes to ``filter()`` as it is. ``None`` is no filter, and its key is
-                left out.
+            lists: Each list of values, by the key that the caller reads it under. A lookup such as
+                ``item_id__in`` goes to ``filter()`` as it is. ``None`` is no filter, and the method
+                leaves its key out.
             fixed: The number of the query's other parameters.
             uses: How many times the query passes each list: 2 for ``source OR target``.
 
         Returns:
-            The values of each query, by key: one mapping when one query reads them all, and none
-            when a list is empty past the limit, since no row matches an empty list.
+            The values of each query, by key. The list holds one mapping when one query reads them
+            all. It holds no mapping when one list of values is empty and the values pass the limit,
+            since no row matches an empty list.
         """
         from django.db import connections  # noqa: PLC0415
 
@@ -379,8 +386,8 @@ class DjangoRepository:
         """Return what this repository reports about itself.
 
         Returns:
-            A :class:`RepositoryInfo` whose ``path`` is ``None``, since the data is in a database
-            and not in a file, and whose ``diagnostics`` hold the database alias under
+            A :class:`RepositoryInfo`. Its ``path`` is ``None``, since the data is in a database
+            and not in a file. Its ``diagnostics`` hold the database alias under
             ``database_alias``.
         """
         return RepositoryInfo(backend=type(self).__name__, path=None, diagnostics={"database_alias": self._using})
@@ -397,12 +404,12 @@ class DjangoRepository:
         Args:
             category: The category row to store.
             expected_version: The version the stored row must be at, or ``None`` for no
-                comparison. Given, the save is one ``UPDATE`` filtered on it, and a row count of
-                zero is the conflict: the comparison and the write are one statement.
+                comparison. When it is given, the save is one ``UPDATE`` filtered on it, so the
+                comparison and the write are one statement. A row count of zero is the conflict.
 
         Returns:
-            The row as stored, carrying the version the database assigned: ``0`` on an insert,
-            and the replaced row's version plus one on an update.
+            The row as stored, with the version that the database assigned. The version is ``0``
+            on an insert, and the replaced row's version plus one on an update.
 
         Raises:
             TaxomeshVersionConflictError: If ``expected_version`` is given and the stored row is
@@ -434,7 +441,7 @@ class DjangoRepository:
                 disabled ones, and ``None`` all of them.
 
         Returns:
-            The matching categories, ordered by ``(name ASC, category_id ASC)``; empty when none
+            The matching categories, ordered by ``(name ASC, category_id ASC)``. Empty when none
             match.
         """
         with _storage_errors():
@@ -454,7 +461,7 @@ class DjangoRepository:
             category_id: The identifier of the category to delete.
 
         Returns:
-            ``True`` if the category was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the category was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -473,12 +480,12 @@ class DjangoRepository:
         Args:
             item: The item row to store.
             expected_version: The version the stored row must be at, or ``None`` for no
-                comparison. Given, the save is one ``UPDATE`` filtered on it, and a row count of
-                zero is the conflict: the comparison and the write are one statement.
+                comparison. When it is given, the save is one ``UPDATE`` filtered on it, so the
+                comparison and the write are one statement. A row count of zero is the conflict.
 
         Returns:
-            The row as stored, carrying the version the database assigned: ``0`` on an insert,
-            and the replaced row's version plus one on an update.
+            The row as stored, with the version that the database assigned. The version is ``0``
+            on an insert, and the replaced row's version plus one on an update.
 
         Raises:
             TaxomeshVersionConflictError: If ``expected_version`` is given and the stored row is
@@ -510,7 +517,7 @@ class DjangoRepository:
                 disabled ones, and ``None`` all of them.
 
         Returns:
-            The matching items, ordered by ``(name ASC, item_id ASC)``; empty when none match.
+            The matching items, ordered by ``(name ASC, item_id ASC)``. Empty when none match.
         """
         with _storage_errors():
             qs = self._items.all()
@@ -529,7 +536,7 @@ class DjangoRepository:
             item_id: The identifier of the item to delete.
 
         Returns:
-            ``True`` if the item was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the item was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -573,7 +580,7 @@ class DjangoRepository:
         """Return every stored tag, in no fixed order.
 
         Returns:
-            Every tag row, in the order that the database returns them; empty when no tag is
+            Every tag row, in the order that the database returns them. Empty when no tag is
             stored.
         """
         with _storage_errors():
@@ -583,14 +590,14 @@ class DjangoRepository:
         """Return the tags whose ``tag_id`` is in ``tag_ids``.
 
         A ``tag_id__in`` query does the lookup, one for each part of ``tag_ids`` that the database
-        accepts in one query: the repository does not read every tag and filter them in Python.
+        accepts in one query. The repository does not read every tag and filter them in Python.
 
         Args:
             tag_ids: The identifiers of the tags to look up.
 
         Returns:
-            A dict from the identifier of each stored tag to its row. An identifier that names no
-            stored tag is left out of the dict, and no error is raised.
+            A dict from the identifier of each stored tag to its row. The repository leaves out an
+            identifier that names no stored tag, and raises no error.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -607,7 +614,7 @@ class DjangoRepository:
             tag_id: The identifier of the tag to delete.
 
         Returns:
-            ``True`` if the tag was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the tag was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -644,7 +651,7 @@ class DjangoRepository:
             tag_id: The identifier of the tag.
 
         Returns:
-            ``True`` if the link was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the link was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -690,8 +697,8 @@ class DjangoRepository:
     def save_category_parent_link(self, link: CategoryParentLink) -> None:
         """Store a parent link: insert it, or update the stored one.
 
-        When a link with the same ``(category_id, parent_category_id)`` is stored, its
-        ``sort_index`` is updated. No second link is created.
+        When a link with the same ``(category_id, parent_category_id)`` is stored, the repository
+        updates its ``sort_index``. It creates no second link.
 
         Args:
             link: The parent link to store.
@@ -715,8 +722,8 @@ class DjangoRepository:
         """Return the stored parent links, filtered by either end when a filter is given.
 
         Both filters are part of the database query, as ``category_id__in`` and
-        ``parent_category_id__in``, in as many queries as the database's limit on parameters needs:
-        the repository does not read every link and filter them in Python.
+        ``parent_category_id__in``. The repository runs as many queries as the database's limit on
+        parameters needs. It does not read every link and filter them in Python.
 
         Args:
             category_ids: When given, only the links whose ``category_id`` is in it. An empty
@@ -749,8 +756,8 @@ class DjangoRepository:
     def save_item_parent_link(self, link: ItemParentLink) -> None:
         """Store a placement: insert it, or update the stored one.
 
-        When a placement with the same ``(item_id, category_id)`` is stored, its ``sort_index`` is
-        updated. No second placement is created.
+        When a placement with the same ``(item_id, category_id)`` is stored, the repository updates
+        its ``sort_index``. It creates no second placement.
 
         Args:
             link: The placement to store.
@@ -809,7 +816,7 @@ class DjangoRepository:
             parent_category_id: The identifier of the parent category.
 
         Returns:
-            ``True`` if the link was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the link was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -824,7 +831,7 @@ class DjangoRepository:
             category_id: The identifier of the category.
 
         Returns:
-            ``True`` if the placement was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the placement was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -873,7 +880,7 @@ class DjangoRepository:
         """Return the items whose ``item_id`` is in ``item_ids``.
 
         An ``item_id__in`` query does the lookup, one for each part of ``item_ids`` that the database
-        accepts in one query: the repository does not read every item and filter them in Python.
+        accepts in one query. The repository does not read every item and filter them in Python.
 
         Args:
             item_ids: The identifiers of the items to look up, with no duplicates.
@@ -881,8 +888,8 @@ class DjangoRepository:
                 ``None`` (the default) every matching item.
 
         Returns:
-            A dict from the identifier of each stored item to its row. An identifier that names no
-            stored item is left out of the dict, and no error is raised.
+            A dict from the identifier of each stored item to its row. The repository leaves out
+            an identifier that names no stored item, and raises no error.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -899,7 +906,7 @@ class DjangoRepository:
         """Return the categories whose ``category_id`` is in ``category_ids``.
 
         A ``category_id__in`` query does the lookup, one for each part of ``category_ids`` that the
-        database accepts in one query: the repository does not read every category and filter them
+        database accepts in one query. The repository does not read every category and filter them
         in Python.
 
         Args:
@@ -908,8 +915,8 @@ class DjangoRepository:
                 ones, and ``None`` (the default) every matching category.
 
         Returns:
-            A dict from the identifier of each stored category to its row. An identifier that
-            names no stored category is left out of the dict, and no error is raised.
+            A dict from the identifier of each stored category to its row. The repository leaves
+            out an identifier that names no stored category, and raises no error.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -931,8 +938,8 @@ class DjangoRepository:
                 ``None`` (the default) every matching item.
 
         Returns:
-            A dict from the external id of each stored item to its row. An external id that no
-            stored item has is left out of the dict, and no error is raised.
+            A dict from the external id of each stored item to its row. The repository leaves out
+            an external id that no stored item has, and raises no error.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -957,8 +964,8 @@ class DjangoRepository:
                 ones, and ``None`` (the default) every matching category.
 
         Returns:
-            A dict from the external id of each stored category to its row. An external id that
-            no stored category has is left out of the dict, and no error is raised.
+            A dict from the external id of each stored category to its row. The repository leaves
+            out an external id that no stored category has, and raises no error.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -996,7 +1003,8 @@ class DjangoRepository:
         """Store a relation: insert it, or update the stored one.
 
         When a relation with the same ``(source_item_id, target_item_id, relation_type)`` is
-        stored, its ``sort_index`` and ``metadata`` are updated. No second relation is created.
+        stored, the repository updates its ``sort_index`` and ``metadata``. It creates no second
+        relation.
 
         Args:
             link: The relation to store.
@@ -1026,13 +1034,13 @@ class DjangoRepository:
             relation_types: The relation types to keep, already stripped and in lowercase.
                 ``None`` or an empty collection is no filter.
             direction: ``"outgoing"`` returns the relations whose ``source_item_id`` is
-                ``item_id``; ``"incoming"`` those whose ``target_item_id`` is ``item_id``;
-                ``"both"`` those whose source or target is ``item_id``, in one ``OR`` query, each
-                relation at most once.
+                ``item_id``. ``"incoming"`` returns those whose ``target_item_id`` is ``item_id``.
+                ``"both"`` returns those whose source or target is ``item_id``, in one ``OR`` query,
+                each relation at most once.
 
         Returns:
             The matching relations, ordered by ``(sort_index ASC, source_item_id ASC,
-            target_item_id ASC)``; empty when none match.
+            target_item_id ASC)``. Empty when none match.
         """
         from django.db.models import Q  # noqa: PLC0415
 
@@ -1058,9 +1066,10 @@ class DjangoRepository:
     ) -> list[ItemRelationLink]:
         """Return the relations of many items in one ORM query, by direction.
 
-        ``"both"`` is one ``source OR target`` query, ``Q(...) | Q(...)``, and not two, so every
+        ``"both"`` is one ``source OR target`` query, ``Q(...) | Q(...)``, and not two. So every
         direction reads the relations in one query, or in one for each part of ``item_ids`` that
-        the database accepts in one query. The relation types are not cut: a caller passes a few.
+        the database accepts in one query. The method does not cut the relation types: a caller
+        passes a few.
         """
         from django.db.models import Q  # noqa: PLC0415
 
@@ -1110,7 +1119,7 @@ class DjangoRepository:
             relation_type: The relation type exactly as stored: stripped and in lowercase.
 
         Returns:
-            ``True`` if the relation was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the relation was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: On a database error.
@@ -1135,7 +1144,7 @@ class DjangoRepository:
 
         Returns:
             A lazy ``QuerySet[CategoryModel]`` that the caller can filter and order further.
-            Building it reads nothing. When the caller evaluates it, a database error is raised as
-            Django's ``DatabaseError``.
+            Building it reads nothing. When the caller evaluates it, Django raises a database
+            error as its ``DatabaseError``.
         """
         return self._categories.filter(enabled=True).exclude(name=ROOT_CATEGORY_NAME)

@@ -22,18 +22,19 @@ from taxomesh.utils.memoize import memoize
 
 
 class TagCollection(EntityCollectionBase[Tag, TagRef]):
-    """Tags, reached as a container on the service.
+    """The tag collection of a service.
 
     The tag reads and writes are here: subscript and :meth:`get`, :meth:`get_many`, ``in`` and
     ``len()``, listing, creation, update and deletion. Subscript and :meth:`get` read one tag
     through the port's ``find_tag``.
 
-    No member here takes an ``enabled`` filter, on purpose: ``Tag`` has no ``enabled`` field and
-    the port's ``list_tags()`` takes no filter, so a signature with the filter would promise a
-    choice that does not exist.
+    No member here takes an ``enabled`` filter. ``Tag`` has no ``enabled`` field, and the port's
+    ``list_tags()`` takes no filter. So a signature with the filter would promise a choice that
+    does not exist.
 
-    Reached as ``service.tags`` and never constructed directly: its memoized reads keep their
-    entries in the service's cache, which the service gives to this collection when it builds it.
+    A caller reaches it as ``service.tags`` and never constructs it directly. Its memoized reads
+    keep their entries in the service's cache. The service gives that cache to this collection
+    when it builds it.
     """
 
     _not_found: ClassVar[type[TaxomeshNotFoundError]] = TaxomeshTagNotFoundError
@@ -44,23 +45,23 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
         """Return the tag this names, or raise.
 
         Args:
-            key: The tag, or its identifier. Only the identifier is read.
+            key: The tag, or its identifier. The method reads only the identifier.
 
         Returns:
-            The stored Tag.
+            The stored ``Tag``.
 
         Raises:
             TaxomeshTagNotFoundError: If no tag with this identifier is stored.
             TypeError: If ``key`` is neither a ``Tag`` nor a ``UUID``.
 
         Note:
-            This calls the port's ``find_tag`` directly, with no cache, and turns its ``None`` into
-            the error.
+            This method calls the port's ``find_tag`` directly, with no cache, and turns its
+            ``None`` into the error.
         """
         return self._require_stored(tag_id_of(key))
 
     def _all(self) -> Sequence[Tag]:
-        """Return every stored tag — the set ``len`` counts."""
+        """Return every stored tag: the rows that ``len`` counts."""
         return tuple(self._repo.list_tags())
 
     def _find(self, tag_id: UUID, /) -> Tag | None:
@@ -70,13 +71,15 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
         """Return the tags these name, keyed by identifier.
 
         Args:
-            tags: The tag or identifier to look up, or a collection of them. An absent key is left
-                out of the result: it does not raise, and it does not appear with a ``None`` value.
+            tags: The tag or identifier to look up, or a collection of them. The method leaves an
+                absent key out of the result. It does not raise for that key, and the key does not
+                appear with a ``None`` value.
 
         Returns:
-            A mapping of tag identifier to ``Tag``, with only the tags that were found. Any number
-            of identifiers costs one storage read, and an empty request none. The answer is cached,
-            and calls that name the same tags share one entry, in any order and with any repeats.
+            A mapping of tag identifier to ``Tag``, with only the tags that the method found. Any
+            number of identifiers costs one storage read, and an empty request none. The service's
+            cache keeps the answer. Calls that name the same tags share one entry, in any order
+            and with any repeats.
 
         Raises:
             TypeError: If ``tags`` is neither one key nor a collection, or a key is neither a
@@ -95,7 +98,7 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
         return dict(self._repo.map_tags_by_id(tag_ids))
 
     def delete(self, key: TagRef, /) -> None:
-        """Delete a tag, and remove it from every item that carries it.
+        """Delete a tag, and remove it from every item that has it.
 
         Args:
             key: The tag to delete, or its identifier.
@@ -110,11 +113,11 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
                 raise self._missing(tag_id)
 
     def list(self, *, item: ItemRef | None = None) -> Sequence[Tag]:
-        """Return tags — every one, or those an item carries.
+        """Return tags: every one, or those that an item has.
 
         Args:
-            item: When given, only the tags this item carries, ordered by name, then by
-                identifier: a tag link carries no sort index.
+            item: When it is given, only the tags that this item has, ordered by name, then by
+                identifier: a tag link has no sort index.
 
         Returns:
             The matching tags, empty when there are none. Without ``item``, every stored tag, in no
@@ -157,14 +160,14 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
             metadata: Optional data of your own, stored with the tag.
 
         Returns:
-            The newly created Tag.
+            The new ``Tag``.
 
         Raises:
             TaxomeshValidationError: If the model refuses a value, such as a name over its maximum
-                length, or ``metadata`` is not plain JSON: a mapping whose keys are text and whose
-                values are text, finite numbers, booleans, ``None``, lists or tuples, and such
-                dicts. A tuple is taken as a list, and a ``StrEnum`` or ``IntEnum`` member as its
-                value; for another ``Enum``, pass ``.value``.
+                length, or ``metadata`` is not plain JSON. Plain JSON is a mapping whose keys are
+                text. Its values are text, finite numbers, booleans, ``None``, lists or tuples, and
+                such dicts. taxomesh takes a tuple as a list, and a ``StrEnum`` or ``IntEnum``
+                member as its value. For another ``Enum``, pass ``.value``.
             TypeError: If an argument is of a type the model does not take.
         """
         _require_plain_json(metadata)
@@ -185,25 +188,26 @@ class TagCollection(EntityCollectionBase[Tag, TagRef]):
         """Update a tag, and keep every field that the call does not give.
 
         Both fields default to ``UNSET``, which keeps the field as it is, and any other value
-        replaces it. Neither is nullable, so ``None`` is refused. The repository replaces the row
-        with a new one, which this method returns; a row that a caller already holds keeps the
-        values it was read with. The read and the save run in one ``atomic()`` block, so no write
-        of another block lands between them.
+        replaces it. Neither is nullable, so the method refuses ``None``. The repository replaces
+        the row with a new one, which this method returns. A row that a caller already holds keeps
+        the values it was read with. The read and the save run in one ``atomic()`` block, so no
+        write of another block comes between them.
 
         Args:
-            tag: The tag to update, or its identifier. Only the identifier is read.
-            name: New name.
-            metadata: New metadata. Replaces the stored dict rather than merging into it.
+            tag: The tag to update, or its identifier. The method reads only the identifier.
+            name: The new name.
+            metadata: The new metadata. It replaces the stored dict. The method does not merge
+                the two.
 
         Returns:
-            The updated Tag, a new row.
+            The updated ``Tag``, a new row.
 
         Raises:
             TaxomeshTagNotFoundError: If no tag with this identifier is stored.
             TaxomeshValidationError: If the model refuses a new value, such as a name over its
                 maximum length, or ``metadata`` is not plain JSON.
-            TypeError: If ``tag`` is neither a ``Tag`` nor a ``UUID``, a field is ``None``, or a new
-                value is of a type the model does not take.
+            TypeError: If ``tag`` is neither a ``Tag`` nor a ``UUID``, or a field is ``None``. Also
+                if a new value is of a type the model does not take.
         """
         changes = _given({"name": name, "metadata": metadata})
         _require_plain_json(metadata)

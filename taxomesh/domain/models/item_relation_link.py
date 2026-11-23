@@ -20,11 +20,11 @@ class ItemRelationLink(MetadataModelBase):
 
     Attributes:
         source_item_id: The item the relation goes from.
-        target_item_id: The item the relation goes to; never the source.
+        target_item_id: The item the relation goes to. It is never the source.
         relation_type: Your own label for the relation, at most ``RELATION_TYPE_MAX_LENGTH``
             characters, stored stripped and in lowercase.
         sort_index: The relation's position among the item's relations, lower first.
-        metadata: Plain JSON, frozen all the way down.
+        metadata: Plain JSON. It is frozen at every level.
     """
 
     source_item_id: UUID
@@ -36,7 +36,7 @@ class ItemRelationLink(MetadataModelBase):
     def __str__(self) -> str:
         """Return the relation as the command line prints it, such as ``<id> --[covers]--> <id> (sort_index: 0)``.
 
-        The metadata is left out; ``repr()`` shows every field.
+        The text leaves out the metadata. ``repr()`` shows every field.
         """
         relation = f"{self.source_item_id} --[{self.relation_type}]--> {self.target_item_id}"
         return f"{relation} (sort_index: {self.sort_index})"
@@ -71,7 +71,7 @@ class ItemRelationLink(MetadataModelBase):
             This link, when it is valid.
 
         Raises:
-            TaxomeshRelationError: If source_item_id == target_item_id.
+            TaxomeshRelationError: If ``source_item_id`` equals ``target_item_id``.
         """
         if self.source_item_id == self.target_item_id:
             raise TaxomeshRelationError(

@@ -5,8 +5,8 @@ tree, or every error at once. Each class name starts with ``Taxomesh``, so the n
 library raised it.
 
 Two branches are also standard exceptions, so a caller who knows only the standard library catches
-them: a not-found error is a ``KeyError``, as for an absent key of a ``dict``, and a validation
-error is a ``ValueError``, as ``int("x")`` raises.
+them. A not-found error is a ``KeyError``, as for an absent key of a ``dict``. A validation error
+is a ``ValueError``, as ``int("x")`` raises.
 """
 
 
@@ -22,7 +22,7 @@ class TaxomeshNotFoundError(TaxomeshError, KeyError):
     """
 
     def __str__(self) -> str:
-        """Return the message as written, without the quotes ``KeyError`` puts around it."""
+        """Return the message as written, without the quotes that ``KeyError`` puts around it."""
         return BaseException.__str__(self)
 
 
@@ -71,18 +71,24 @@ class TaxomeshDuplicateSlugError(TaxomeshValidationError):
 class TaxomeshRepositoryError(TaxomeshError):
     """Raised when a repository cannot read or write its storage.
 
-    The causes include: a file that cannot be read, parsed or written; a path that is a directory;
-    a file that another writer changed after the repository read it; Django that is not installed
-    or not configured; and a database error that Django raises. Every member of ``DjangoRepository``,
-    reads included, raises this error for a ``DatabaseError``, with the database's error as its cause.
+    The causes include:
+
+    - A file that the repository cannot read, parse or write.
+    - A path that is a directory.
+    - A file that another writer changed after the repository read it.
+    - Django that is not installed or not configured.
+    - A database error that Django raises.
+
+    Every member of ``DjangoRepository``, reads included, raises this error for a ``DatabaseError``,
+    with the database's error as its cause.
     """
 
 
 class TaxomeshConfigError(TaxomeshError):
     """Raised when a ``taxomesh.toml`` cannot be read or parsed, or holds a value that is not accepted.
 
-    Such a value is of the wrong type, and the message names its key, or it is a repository type that
-    taxomesh does not support.
+    Such a value is of the wrong type, or it is a repository type that taxomesh does not support.
+    For a value of the wrong type, the message names its key.
     """
 
 
@@ -97,8 +103,8 @@ class TaxomeshExternalIdConflictError(TaxomeshValidationError):
 class TaxomeshVersionConflictError(TaxomeshError):
     """Raised when an update expects the stored row at a version that it is no longer at.
 
-    It is a ``TaxomeshError`` and not a validation error: the request was valid, and the stored row
+    It is a ``TaxomeshError`` and not a validation error. The request was valid, and the stored row
     changed after the caller read it. To continue, read the row again and update it with its new
-    version. Through the service, a row deleted in between raises its not-found error instead;
-    through the port, a save that expects a version of a row that is not stored raises this one.
+    version. Through the service, a row deleted in between raises its not-found error instead.
+    Through the port, a save that expects a version of a row that is not stored raises this error.
     """

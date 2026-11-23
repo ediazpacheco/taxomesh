@@ -18,7 +18,7 @@ These are not exported, because no caller writes them in an annotation:
   row, which applies that rule.
 * :func:`normalise_relation_type` is the one rule that converts a relation type to the stored form.
 * :data:`Metadata`, :class:`FrozenDict` and :class:`FrozenList` make the ``metadata`` of a row
-  immutable all the way down. The field's type is ``dict[str, Any]``, and its value is a ``dict``:
+  immutable at every level. The field's type is ``dict[str, Any]``, and its value is a ``dict``:
   a :class:`FrozenDict` is a ``dict`` that refuses every change.
 """
 
@@ -35,10 +35,10 @@ from taxomesh.domain.constants import MAX_EXTERNAL_ID_STR_LENGTH
 type ExternalId = str | int | UUID | None
 """What every external-id parameter accepts.
 
-It is wider than the stored type, ``str | None``, on purpose. An external id is often the integer
-primary key of a record in another system. One conversion here saves each caller a ``str(pk)`` at
-each call. :func:`normalise_external_id` is that conversion, and the *only* one: its docstring
-gives the cost of this choice.
+It is wider than the stored type, ``str | None``, for this reason. An external id is often the
+integer primary key of a record in your own system. One conversion here saves each caller a
+``str(pk)`` at each call. :func:`normalise_external_id` is that conversion, and the *only* one: its
+docstring gives the cost of this choice.
 """
 
 
@@ -46,7 +46,7 @@ def normalise_external_id(value: ExternalId) -> str | None:
     """Convert an external id to the form that taxomesh stores.
 
     This is the one conversion rule, and writes and lookups both use it. If a write and a lookup
-    converted a value in different ways, a stored value could never be found again.
+    converted a value in different ways, no lookup could find a stored value again.
 
     Args:
         value: The external id as the caller gives it: text, an integer, a UUID, or ``None`` for
@@ -64,14 +64,14 @@ def normalise_external_id(value: ExternalId) -> str | None:
 
     Raises:
         TypeError: If ``value`` is not text, an integer, a UUID or ``None``. An integer is any
-            ``numbers.Integral``, so a numpy integer is one, but not a ``bool``: ``True`` would be
+            ``numbers.Integral``, so a numpy integer is one. A ``bool`` is not: ``True`` would be
             stored as ``"True"`` while comparing equal to ``1``.
 
     Note:
         The accepted type is wider than the stored one, so values with the same string form
-        address the **same** row: ``42`` and ``"42"`` are one external id, not two, and so are a
+        address the **same** row. ``42`` and ``"42"`` are one external id, not two. So are a
         ``UUID`` and its lowercase text with hyphens. An external id is unique within its kind,
-        so creating both raises a conflict, and no second row is created.
+        so creating both raises a conflict, and creates no second row.
     """
     if value is None:
         return None
@@ -105,8 +105,8 @@ class Direction(StrEnum):
     Attributes:
         OUTGOING: Relations where the queried item is the source.
         INCOMING: Relations where the queried item is the target.
-        BOTH: Either. Each stored link is read at most once, so a relation stored as two links,
-            ``A→B`` and ``B→A``, is read as two links, one for each direction.
+        BOTH: Either. A read returns each stored link at most once. So a relation stored as two
+            links, ``A→B`` and ``B→A``, comes back as two links, one for each direction.
     """
 
     OUTGOING = "outgoing"
@@ -117,19 +117,19 @@ class Direction(StrEnum):
 class UnsetType(Enum):
     """The type of :data:`UNSET`.
 
-    An ``Enum`` with one member, and not a singleton class written by hand. Python makes an enum
-    member unique, so ``is UNSET`` is always a correct test. There is no ``__new__`` to write, and
-    no claim that a type checker cannot check. A type checker also narrows it exactly:
+    An ``Enum`` with one member, and not a custom singleton class. Python makes an enum member
+    unique, so ``is UNSET`` is always a correct test. There is no ``__new__`` to write, and no claim
+    that a type checker cannot check. A type checker also narrows it exactly:
     ``str | None | UnsetType`` resolves under ``mypy --strict`` without a cast.
 
-    Public because the annotations of the update methods use it, and a caller may need to write
-    the same type.
+    It is public because the annotations of the update methods use it, and a caller may need to
+    write the same type.
     """
 
     UNSET = "UNSET"
 
     def __repr__(self) -> str:
-        """Render as ``UNSET``, with no memory address.
+        """Return ``UNSET``, with no memory address.
 
         The public-surface ledger shows the default of each parameter with ``repr``, and this is
         the default of the fields of every ``update``. An address, or the default
@@ -138,7 +138,7 @@ class UnsetType(Enum):
         return "UNSET"
 
     def __str__(self) -> str:
-        """Render as ``UNSET`` when formatted."""
+        """Return ``UNSET`` when the value is formatted."""
         return "UNSET"
 
 
@@ -157,7 +157,7 @@ _FROZEN_MESSAGE: Final[str] = "metadata is frozen: change a copy, made with dict
 
 
 def _refuse(*args: object, **kwargs: object) -> NoReturn:
-    """Raise, whatever the change: each changing method of a frozen container is this function."""
+    """Raise, whatever the change: each changing method of a frozen dict or list is this function."""
     raise TypeError(_FROZEN_MESSAGE)
 
 
@@ -217,18 +217,20 @@ classes cannot be hashed, such as a class whose metaclass defines ``__eq__`` and
 def _freeze(value: object) -> object:
     """Return a JSON-like value with every ``dict`` and ``list`` in it made immutable.
 
-    It is the validator behind :data:`Metadata`, which gives it a dict. It builds new containers
-    and does not wrap the given ones, so the caller can still change its own dicts and lists. A
-    tuple becomes a FrozenList, because every backend reads it back as a list. A value of a ``str``,
-    ``int`` or ``float`` subclass, such as an enum member, becomes the plain value, because every
-    backend reads back the plain value, and a key of a ``str`` subclass becomes plain text. Any other
-    value is returned as it is.
+    It is the validator behind :data:`Metadata`, which gives it a dict. It builds new dicts and
+    lists and does not wrap the given ones, so the caller can still change its own dicts and lists.
+
+    A tuple becomes a FrozenList, because every backend reads it back as a list. A value of a
+    ``str``, ``int`` or ``float`` subclass, such as an enum member, becomes the plain value. The
+    reason is that every backend reads back the plain value. A key of a ``str`` subclass becomes
+    plain text. The function returns any other value as it is.
 
     The two comprehensions keep a value whose exact type is in :data:`_JSON_LEAF_TYPES` where they
-    read it, and call this function for any other value. The shipped backends read metadata back as
-    dicts and lists of such values, so freezing it makes one call for each dict and list, and none
-    for each value. ``bool`` has no subclass, so the comprehensions keep every ``bool`` and never
-    pass one to this function, whose ``int`` branch would return it as an ``int``.
+    read it, and call this function for any other value. The shipped backends read back the metadata
+    that taxomesh wrote as dicts and lists of such values. So freezing it makes one call for each
+    dict and list, and none for each value. ``bool`` has no subclass, so the comprehensions keep
+    every ``bool`` and never pass one to this function. The ``int`` branch of this function would
+    return a ``bool`` as an ``int``.
     """
     if isinstance(value, dict):
         return FrozenDict(
@@ -253,11 +255,11 @@ def _freeze(value: object) -> object:
 
 # Any: metadata is the caller's own JSON — arbitrary keys, heterogeneous values.
 type Metadata = Annotated[dict[str, Any], AfterValidator(_freeze)]
-"""A row's ``metadata`` field: the caller's own JSON, immutable all the way down.
+"""A row's ``metadata`` field: the caller's own JSON, immutable at every level.
 
-Validated as ``dict[str, Any]``, then built again with a :class:`FrozenDict` for each dict and a
-:class:`FrozenList` for each list in it. Use it with ``Field(default_factory=FrozenDict)``, because
-pydantic does not validate a default.
+Pydantic validates it as ``dict[str, Any]``. Then :func:`_freeze` builds it again with a
+:class:`FrozenDict` for each dict and a :class:`FrozenList` for each list in it. Use it with
+``Field(default_factory=FrozenDict)``, because pydantic does not validate a default.
 """
 
 
@@ -267,8 +269,8 @@ StoredExternalId = Annotated[
 """The ``external_id`` field of a category row and of an item row.
 
 Validation converts the given value with :func:`normalise_external_id`, then checks the length of
-the text. This is a plain assignment and not a ``type`` statement, because pydantic moves a
-``type`` alias to the ``$defs`` of the JSON schema of a model, and the schema of this field stays
-inline. ``Field`` comes before ``BeforeValidator``: in the other order, ``max_length`` applies to
-the whole union, and ``None`` fails validation.
+the text. This is a plain assignment and not a ``type`` statement. Pydantic moves a ``type`` alias
+to the ``$defs`` of the JSON schema of a model. With a plain assignment, the schema of this field
+stays inline. ``Field`` comes before ``BeforeValidator``: in the other order, ``max_length`` applies
+to the whole union, and ``None`` fails validation.
 """

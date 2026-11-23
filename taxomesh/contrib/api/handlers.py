@@ -5,28 +5,30 @@ schema. It calls one member, and returns what the member returns: rows, links or
 The application does the rest of the HTTP work: it registers the routes, reads the requests and
 serializes the responses.
 
-Each handler is named ``<namespace>_<member>`` after the collection member it calls, so
+Each handler is named ``<namespace>_<member>`` after the collection member that it calls, so
 ``categories_get_by_slug`` calls ``service.categories.get_by_slug``, and ``graph`` calls
-``service.graph``. A handler keeps its member's contract: it returns what the member returns,
-a tuple from a listing, and a lookup (``*_get``, ``*_get_by_slug``, ``*_get_by_external_id``)
+``service.graph``. A handler keeps its member's contract: it returns what the member returns. From a
+listing it returns a tuple, and a lookup (``*_get``, ``*_get_by_slug``, ``*_get_by_external_id``)
 returns ``None`` on a miss. The consuming application turns that ``None`` into its 404.
 
-Every handler takes its arguments in the same way: ``service`` and the **subject** of the
+Every handler takes its arguments in the same way. ``service`` and the **subject** of the
 operation are the only positional parameters, and every other parameter is keyword-only. So two
-identifiers of the same type cannot change places without an error: ``items_tag(service, item_id,
-tag_id=...)`` fails the type check with its arguments in the other order, and two bare ``UUID``
-positionals would pass it. The subject is an entity of the collection that has the member: the item
-comes first in ``items_tag``, as in ``service.items.tag``. HTTP names a row by its identifier, so the
-parameters keep their ``_id`` names, and each one is passed to the member's parameter that the noun
-names.
+identifiers of the same type cannot change places without an error. ``items_tag(service, item_id,
+tag_id=...)`` fails the type check with its arguments in the other order. Two bare ``UUID``
+positionals would pass it.
+
+The subject is an entity of the collection that has the member: the item comes first in
+``items_tag``, as in ``service.items.tag``. HTTP names an entity by its identifier, so the
+parameters keep their ``_id`` names. The handler passes each one to the member's parameter that the
+noun names.
 
 A handler that takes a validated request names it ``body``. A search handler names it ``params``,
 because a search serves a GET endpoint, which has no body.
 
 An update handler passes on only the fields that the caller set. Its request schema says what an
-omitted field, a null and ``expected_version`` mean. Each field is passed under its own keyword,
-and not unpacked from a model dump, so a service parameter with another name is a type error here,
-and not a ``TypeError`` at run time.
+omitted field, a null and ``expected_version`` mean. The handler passes each field under its own
+keyword, and does not unpack a model dump. So a service parameter with another name is a type error
+here, and not a ``TypeError`` at run time.
 """
 
 from collections.abc import Sequence
@@ -72,7 +74,7 @@ def categories_list(
             disabled ones, and ``None`` all of them.
 
     Returns:
-        The matching categories. With neither filter, every category, wherever it is;
+        The matching categories. With neither filter, every category, wherever it is.
         :func:`categories_roots` lists the top level.
 
     Raises:
@@ -168,7 +170,7 @@ def categories_update(service: TaxomeshService, category_id: UUID, *, body: Upda
     Args:
         service: The service to call.
         category_id: The identifier of the category to update.
-        body: The validated request; only the fields that the caller set are passed on.
+        body: The validated request. The handler passes on only the fields that the caller set.
 
     Returns:
         The new row of the category.
@@ -235,7 +237,7 @@ def categories_add_parent(
 
 
 def categories_remove_parent(service: TaxomeshService, category_id: UUID, *, parent_id: UUID) -> None:
-    """Remove one parent from a category. Removing a parent it does not have does nothing.
+    """Remove one parent from a category. Removing a parent that it does not have does nothing.
 
     Args:
         service: The service to call.
@@ -375,7 +377,7 @@ def items_update(service: TaxomeshService, item_id: UUID, *, body: UpdateItemReq
     Args:
         service: The service to call.
         item_id: The identifier of the item to update.
-        body: The validated request; only the fields that the caller set are passed on.
+        body: The validated request. The handler passes on only the fields that the caller set.
 
     Returns:
         The new row of the item.
@@ -440,7 +442,7 @@ def items_place_in(
 
 
 def items_remove_from(service: TaxomeshService, item_id: UUID, *, category_id: UUID) -> None:
-    """Remove an item from one category. Removing a placement it does not have does nothing.
+    """Remove an item from one category. Removing a placement that it does not have does nothing.
 
     Args:
         service: The service to call.
@@ -565,7 +567,7 @@ def tags_update(service: TaxomeshService, tag_id: UUID, *, body: UpdateTagReques
     Args:
         service: The service to call.
         tag_id: The identifier of the tag to update.
-        body: The validated request; only the fields that the caller set are passed on.
+        body: The validated request. The handler passes on only the fields that the caller set.
 
     Returns:
         The new row of the tag.
@@ -612,10 +614,10 @@ def graph(service: TaxomeshService, *, enabled: bool | None = True) -> TaxomeshG
         stored at the call.
 
     Note:
-        A filtered graph is not the whole graph with some rows hidden. A link is kept only when
-        both of its ends pass the filter, so ``enabled=False`` drops the parent link between a
-        disabled category and an enabled parent. The child stays under each parent that the
-        filter keeps. With none, it is in no node's children: ``walk()`` reaches it, and
+        A filtered graph is not the whole graph with some rows hidden. The snapshot keeps a link
+        only when both of its ends pass the filter. So ``enabled=False`` drops the parent link
+        between a disabled category and an enabled parent. The child stays under each parent that
+        the filter keeps. With none, it is in no node's children: ``walk()`` reaches it, and
         ``roots`` does not list it.
     """
     return service.graph(enabled=enabled)

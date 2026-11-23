@@ -1,9 +1,11 @@
 """The file repository: the whole store in one file, read once and written whole on every write.
 
 ``JsonRepository`` and ``YamlRepository`` are this one store with two formats. Each says only how
-its file's text becomes data and back; :class:`FileRepositoryBase` holds the rest of the port.
-Writes are atomic: a sibling temporary file is flushed with ``os.fsync`` and then renamed into place
-with ``os.replace``, so the file is never in a partial state.
+its file's text becomes data and back. :class:`FileRepositoryBase` holds the rest of the port.
+
+The repository writes atomically. It writes the whole store to a temporary file in the same
+directory, and flushes that file with ``os.fsync``. Then ``os.replace`` renames that file into place,
+so the storage file is never partly written.
 """
 
 import functools
@@ -52,7 +54,7 @@ def _stamp_of(status: os.stat_result) -> FileStamp:
 
 
 def _reading[S: FileRepositoryBase, **P, R](method: Callable[Concatenate[S, P], R]) -> Callable[Concatenate[S, P], R]:
-    """Run a read whole while holding the store's lock, so no thread changes memory under it."""
+    """Run a read whole while holding the store's lock, so no thread changes memory while the read runs."""
 
     @functools.wraps(method)
     def locked(self: S, /, *args: P.args, **kwargs: P.kwargs) -> R:
@@ -65,11 +67,15 @@ def _reading[S: FileRepositoryBase, **P, R](method: Callable[Concatenate[S, P], 
 def _writing[S: FileRepositoryBase, **P, R](method: Callable[Concatenate[S, P], R]) -> Callable[Concatenate[S, P], R]:
     """Run a write whole while holding the store's lock, so its checks and its write are one step.
 
-    The write is refused before it starts when another writer changed the file. When it fails before
-    its new file is in place, memory gets back a copy of what it held before, which is what the file
-    still holds, so a later write does not write the failed change to disk. Once the new file is in
-    place, memory keeps the write and the repository records the file's stamp: the file holds the
-    write, and an interrupt that lands before the method returns loses nothing.
+    The repository refuses the write before it starts when another writer changed the file.
+
+    When the write fails before its new file is in place, memory gets back a copy of what it held
+    before. That copy is what the file still holds, so a later write does not write the failed change
+    to disk.
+
+    Once the new file is in place, memory keeps the write and the repository records the file's stamp.
+    The file then holds the write, so an interrupt that arrives before the method returns loses
+    nothing.
     """
 
     @functools.wraps(method)
@@ -118,8 +124,8 @@ def _upsert[L](links: list[L], link: L, key: Callable[[L], object]) -> None:
 def _discard[L](links: list[L], key: Callable[[L], object], wanted: object) -> bool:
     """Remove each link whose key is ``wanted``, and return whether one was there.
 
-    The list changes in place. The copy of memory that a write takes before it starts holds other
-    lists, so a failed write still puts back the links (see ``_writing``).
+    The list changes in place. A write takes a copy of memory before it starts, and that copy holds
+    other lists. So a failed write still puts back the links (see ``_writing``).
     """
     kept = [link for link in links if key(link) != wanted]
     removed = len(kept) < len(links)
@@ -170,21 +176,22 @@ class _Contents(NamedTuple):
 class FileRepositoryBase(ABC):
     """The repository port over one file that holds the whole store.
 
-    The file is read once, at construction. Every read answers from memory, and every write
-    changes memory and then writes the whole store back to the file. A subclass names the format:
-    :meth:`_parse` turns the file's text into a document, and :meth:`_render` turns a document
-    into text.
+    The repository reads the file once, when it is built. Every read answers from memory. Every
+    write changes memory and then writes the whole store back to the file. A subclass names the
+    format: :meth:`_parse` turns the file's text into a document, and :meth:`_render` turns a
+    document into text.
 
-    One repository may be shared by threads. Each member runs whole, holding the repository's
-    lock, before another thread's member starts.
+    Threads may share one repository. Each member runs whole, holding the repository's lock, before
+    another thread's member starts.
 
     A file has one writer. A repository records the file it read, and refuses to write once
-    another writer has changed it; a new repository reads the change. The check runs before each
-    write, so a write by another process that overlaps this one can still be lost.
+    another writer has changed it. A new repository reads the change. The check runs before each
+    write. So when two repositories write at the same moment, in one process or in two, one write can
+    still be lost.
 
     Args:
-        path: The path of the storage file. The repository creates the parent directories that are
-            missing.
+        path: The path of the storage file. The repository creates the parent directories that do
+            not exist.
 
     Raises:
         TaxomeshRepositoryError: If ``path`` is a directory, if the file exists but cannot be read
@@ -227,7 +234,7 @@ class FileRepositoryBase(ABC):
             self._load()
 
     def __repr__(self) -> str:
-        """Render as the constructor call that opens the same file."""
+        """Return the constructor call that opens the same file, as text."""
         return f"{type(self).__name__}({str(self._path)!r})"
 
     # ------------------------------------------------------------------
@@ -247,7 +254,7 @@ class FileRepositoryBase(ABC):
 
     @abstractmethod
     def _render(self, document: Mapping[str, object]) -> str:
-        """Return the text a file holding this document reads.
+        """Return the text of a file that holds this document.
 
         Args:
             document: The whole store, made of plain JSON values.
@@ -262,19 +269,19 @@ class FileRepositoryBase(ABC):
 
     @contextmanager
     def atomic(self) -> Iterator[None]:
-        """Hold the repository's lock for the block, so no other thread reads or writes inside it.
+        """Hold the repository's lock for the block, so no other thread reads or writes while it runs.
 
         A file has no transactions. Each write writes the whole store to disk on its own, so the
-        block rolls **nothing** back: when an operation that writes more than once fails in the
-        middle, the writes made before the failure stay on disk. Use ``DjangoRepository`` where the
-        writes of one operation must roll back together.
+        block rolls **nothing** back. When an operation that writes more than once fails, the
+        writes made before the failure stay on disk. Use ``DjangoRepository`` where the writes of
+        one operation must roll back together.
         """
         with self._lock:
             yield
 
     @property
     def in_transaction(self) -> bool:
-        """``False``: a file has no transactions, so no read sees a write that a rollback could take back."""
+        """``False``: a file has no transactions, so no read sees a write that a rollback could undo."""
         return False
 
     # ------------------------------------------------------------------
@@ -293,7 +300,7 @@ class FileRepositoryBase(ABC):
                 stamp = _stamp_of(os.fstat(fh.fileno()))
             document = self._parse(text)
             if not isinstance(document, dict):
-                raise ValueError("Expected a mapping at the top level")
+                raise ValueError("The file must hold a mapping")
             contents = _Contents(
                 categories={UUID(k): Category.model_validate(v) for k, v in document.get("categories", {}).items()},
                 items={UUID(k): Item.model_validate(v) for k, v in document.get("items", {}).items()},
@@ -317,7 +324,8 @@ class FileRepositoryBase(ABC):
     def _contents(self) -> _Contents:
         """Return a copy of what memory holds, which no later write changes.
 
-        The containers are copied and the rows shared: rows are frozen, so this is a full copy.
+        The method copies the dicts and the lists, and shares the rows. Rows are frozen, so this is
+        a full copy.
         """
         return _Contents(
             categories=dict(self._categories),
@@ -330,11 +338,11 @@ class FileRepositoryBase(ABC):
         )
 
     def _put(self, contents: _Contents) -> None:
-        """Make memory hold ``contents`` as a load of a file holding them does.
+        """Make memory hold ``contents`` as a load of a file that holds them does.
 
-        A link that names a row that is not stored is dropped, and the top level is normalized, so
-        contents taken between two writes of one operation read as a new repository would read
-        them.
+        The method drops each link that names a row that is not stored, and normalizes the top
+        level. So contents taken between two writes of one operation read as a new repository would
+        read them.
         """
         self._categories, self._items, self._tags = contents.categories, contents.items, contents.tags
         self._item_tag_links = contents.item_tag_links
@@ -350,8 +358,8 @@ class FileRepositoryBase(ABC):
         """Return the status of the store file, or ``None`` when there is no file.
 
         Raises:
-            TaxomeshRepositoryError: If the file's status cannot be read, as when its directory
-                refuses a look inside.
+            TaxomeshRepositoryError: If the file's status cannot be read, such as when the process
+                has no permission to search the file's directory.
         """
         try:
             return self._path.stat()
@@ -363,10 +371,10 @@ class FileRepositoryBase(ABC):
     def _settle(self, before: _Contents) -> None:
         """After a write that failed with no new stamp recorded, make memory hold what the file holds.
 
-        The file holds the write when its stamp is the pending one, the rename done and its stamp not
-        yet recorded: memory keeps the write, and the stamp is recorded. Otherwise memory gets back
-        ``before``. A status that cannot be read counts as the old file, so the write's own error is
-        the one that leaves.
+        The file holds the write when its stamp is the pending one. In that case the rename was done,
+        and the repository had not yet recorded the stamp. Memory then keeps the write, and the
+        repository records the stamp. Otherwise memory gets back ``before``. A status that cannot be
+        read counts as the old file, so the caller gets the write's own error.
 
         Args:
             before: What memory held before the write.
@@ -384,23 +392,23 @@ class FileRepositoryBase(ABC):
         """Refuse to write over a file another writer changed since this repository read it.
 
         Raises:
-            TaxomeshRepositoryError: If the file's stamp differs from the one this repository
-                recorded when it last read or wrote the file, if the file is gone, or if its
-                status cannot be read.
+            TaxomeshRepositoryError: If the file is gone, if its status cannot be read, or if its
+                stamp is not the recorded one. The recorded stamp is the one from when this
+                repository last read or wrote the file.
         """
         status = self._stat()
         current = None if status is None else _stamp_of(status)
         if current != self._stamp:
             raise TaxomeshRepositoryError(
-                f"{self._path} changed since this repository read it; build a new repository to read the change"
+                f"{self._path} changed since this repository read it: build a new repository to read the change"
             )
 
     def _drop_dangling_links(self) -> None:
         """Drop every link that names a row that is not stored.
 
         Each delete calls this after it removes its row, so the same write deletes every link that
-        names that row. Loading calls it too, so a store that holds such links loads without them
-        and is written without them on the next save.
+        names that row. Loading calls it too, so a store that holds such links loads without them,
+        and the next save writes the store without them.
         """
         self._item_tag_links = [
             lnk for lnk in self._item_tag_links if lnk.item_id in self._items and lnk.tag_id in self._tags
@@ -436,11 +444,12 @@ class FileRepositoryBase(ABC):
     def _flush(self) -> None:
         """Write the whole store to the file atomically, or raise and leave the file as it was.
 
-        Renders the whole store, writes it to a sibling temp file, calls ``os.fsync`` to flush OS
-        buffers, then replaces the target file via ``os.replace`` (POSIX atomic rename). When any
-        step fails, the file still holds the last good state, and the temp file is removed when it
-        can be. The new file has the mode of the file that it replaces. The write that called this puts
-        memory back (see ``_writing``).
+        The method turns the whole store into text, and writes the text to a temporary file in the
+        same directory. It calls ``os.fsync`` to flush the buffers of the operating system. Then
+        ``os.replace`` puts the temporary file over the storage file, which is an atomic rename on
+        POSIX. When a step fails, the storage file still holds what it held before, and the method
+        removes the temporary file when it can. The new file has the mode of the file that it
+        replaces. After a failure, the write that called this puts memory back (see ``_writing``).
 
         Raises:
             TaxomeshRepositoryError: If the store cannot be written.
@@ -478,7 +487,7 @@ class FileRepositoryBase(ABC):
 
         The given row does not change. An update stores the version of the row that it replaces
         plus one. A write that stores the implicit root also restores the top-level invariant, as a
-        load does: each category that holds no parent link gains a link to the root.
+        load does. Each category that holds no parent link gains a link to the root.
 
         Args:
             category: The category row to store.
@@ -494,7 +503,7 @@ class FileRepositoryBase(ABC):
             TaxomeshExternalIdConflictError: If ``category.external_id`` is not ``None`` and another
                 category already has it.
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         replaced = self._categories.get(category.category_id)
         stored = row_to_store(
@@ -536,8 +545,8 @@ class FileRepositoryBase(ABC):
                 disabled ones, and ``None`` all of them.
 
         Returns:
-            The matching categories, ordered by ``(name ASC, category_id ASC)``; empty when none
-            match.
+            The matching categories, ordered by ``(name ASC, category_id ASC)``. The list is empty
+            when none match.
         """
         cats = list(self._categories.values())
         if enabled is not None:
@@ -555,11 +564,11 @@ class FileRepositoryBase(ABC):
             category_id: The identifier of the category to delete.
 
         Returns:
-            ``True`` if the category was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the category was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         if category_id not in self._categories:
             return False
@@ -593,7 +602,7 @@ class FileRepositoryBase(ABC):
             TaxomeshExternalIdConflictError: If ``item.external_id`` is not ``None`` and another item
                 already has it.
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         replaced = self._items.get(item.item_id)
         stored = row_to_store(
@@ -629,7 +638,8 @@ class FileRepositoryBase(ABC):
                 disabled ones, and ``None`` all of them.
 
         Returns:
-            The matching items, ordered by ``(name ASC, item_id ASC)``; empty when none match.
+            The matching items, ordered by ``(name ASC, item_id ASC)``. The list is empty when none
+            match.
         """
         items = list(self._items.values())
         if enabled is not None:
@@ -647,11 +657,11 @@ class FileRepositoryBase(ABC):
             item_id: The identifier of the item to delete.
 
         Returns:
-            ``True`` if the item was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the item was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         if item_id not in self._items:
             return False
@@ -673,7 +683,7 @@ class FileRepositoryBase(ABC):
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         self._tags[tag.tag_id] = tag
         self._flush()
@@ -695,7 +705,7 @@ class FileRepositoryBase(ABC):
         """Return every stored tag.
 
         Returns:
-            Every tag row; empty when no tag is stored.
+            Every tag row. The list is empty when no tag is stored.
         """
         return list(self._tags.values())
 
@@ -707,8 +717,8 @@ class FileRepositoryBase(ABC):
             tag_ids: The identifiers of the tags to look up.
 
         Returns:
-            A dict from the identifier of each stored tag to its row. An identifier that names no
-            stored tag is left out of the dict, and no error is raised.
+            A dict from the identifier of each stored tag to its row. The dict leaves out an
+            identifier that names no stored tag, and the method raises no error.
         """
         return {tag_id: self._tags[tag_id] for tag_id in tag_ids if tag_id in self._tags}
 
@@ -722,11 +732,11 @@ class FileRepositoryBase(ABC):
             tag_id: The identifier of the tag to delete.
 
         Returns:
-            ``True`` if the tag was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the tag was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         if tag_id not in self._tags:
             return False
@@ -749,7 +759,7 @@ class FileRepositoryBase(ABC):
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         already_linked = any(_tag_link_key(lnk) == (item_id, tag_id) for lnk in self._item_tag_links)
         if not already_linked:
@@ -765,11 +775,11 @@ class FileRepositoryBase(ABC):
             tag_id: The identifier of the tag.
 
         Returns:
-            ``True`` if the link was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the link was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         if not _discard(self._item_tag_links, _tag_link_key, (item_id, tag_id)):
             return False
@@ -813,14 +823,14 @@ class FileRepositoryBase(ABC):
         """Store a parent link: insert it, or update the stored one.
 
         When a link with the same ``(category_id, parent_category_id)`` is stored, the given link
-        takes its place, with its own ``sort_index``. No second link is created.
+        takes its place, with its own ``sort_index``. The repository creates no second link.
 
         Args:
             link: The parent link to store.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         _upsert(self._category_parent_links, link, _parent_link_key)
         self._flush()
@@ -867,14 +877,14 @@ class FileRepositoryBase(ABC):
         """Store a placement: insert it, or update the stored one.
 
         When a placement with the same ``(item_id, category_id)`` is stored, the given placement
-        takes its place, with its own ``sort_index``. No second placement is created.
+        takes its place, with its own ``sort_index``. The repository creates no second placement.
 
         Args:
             link: The placement to store.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         _upsert(self._item_parent_links, link, _placement_key)
         self._flush()
@@ -918,11 +928,11 @@ class FileRepositoryBase(ABC):
             parent_category_id: The identifier of the parent category.
 
         Returns:
-            ``True`` if the link was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the link was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         if not _discard(self._category_parent_links, _parent_link_key, (category_id, parent_category_id)):
             return False
@@ -938,11 +948,11 @@ class FileRepositoryBase(ABC):
             category_id: The identifier of the category.
 
         Returns:
-            ``True`` if the placement was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the placement was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         if not _discard(self._item_parent_links, _placement_key, (item_id, category_id)):
             return False
@@ -959,14 +969,14 @@ class FileRepositoryBase(ABC):
 
         When a relation with the same ``(source_item_id, target_item_id, relation_type)`` is
         stored, the given relation takes its place, with its own ``sort_index`` and ``metadata``.
-        No second relation is created.
+        The repository creates no second relation.
 
         Args:
             link: The relation to store.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         _upsert(self._item_relation_links, link, _relation_key)
         self._flush()
@@ -986,12 +996,13 @@ class FileRepositoryBase(ABC):
             relation_types: The relation types to keep, already stripped and in lowercase.
                 ``None`` or an empty collection is no filter.
             direction: ``"outgoing"`` returns the relations whose ``source_item_id`` is
-                ``item_id``; ``"incoming"`` those whose ``target_item_id`` is ``item_id``;
-                ``"both"`` those whose source or target is ``item_id``, each relation at most once.
+                ``item_id``. ``"incoming"`` returns those whose ``target_item_id`` is ``item_id``.
+                ``"both"`` returns those whose source or target is ``item_id``, each relation at
+                most once.
 
         Returns:
             The matching relations, ordered by ``(sort_index ASC, source_item_id ASC,
-            target_item_id ASC)``; empty when none match.
+            target_item_id ASC)``. The list is empty when none match.
         """
         return sorted(self._relations_of((item_id,), relation_types, direction), key=_relation_order)
 
@@ -1003,7 +1014,7 @@ class FileRepositoryBase(ABC):
         relation_types: Collection[str] | None = None,
         direction: Literal["outgoing", "incoming", "both"] = "outgoing",
     ) -> list[ItemRelationLink]:
-        """Return the relations of many items in one pass over the stored relations, by direction."""
+        """Return the relations of many items in one pass over the stored relations, in the order of the direction."""
         relations = self._relations_of(set(item_ids), relation_types, direction)
         return sorted(relations, key=_BATCH_RELATION_ORDER[direction])
 
@@ -1057,11 +1068,11 @@ class FileRepositoryBase(ABC):
             relation_type: The relation type exactly as stored: stripped and in lowercase.
 
         Returns:
-            ``True`` if the relation was stored and is deleted; ``False`` if it was not stored.
+            ``True`` if the relation was stored and is deleted. ``False`` if it was not stored.
 
         Raises:
             TaxomeshRepositoryError: If another writer changed the file since this repository read
-                it, or the file cannot be written; nothing is written.
+                it, or the file cannot be written. The repository writes nothing.
         """
         if not _discard(self._item_relation_links, _relation_key, (source_item_id, target_item_id, relation_type)):
             return False
@@ -1112,8 +1123,8 @@ class FileRepositoryBase(ABC):
                 ``None`` (the default) every matching item.
 
         Returns:
-            A dict from the identifier of each stored item to its row. An identifier that names no
-            stored item is left out of the dict, and no error is raised.
+            A dict from the identifier of each stored item to its row. The dict leaves out an
+            identifier that names no stored item, and the method raises no error.
         """
         return _rows_by_id(self._items, item_ids, enabled)
 
@@ -1132,8 +1143,8 @@ class FileRepositoryBase(ABC):
                 ones, and ``None`` (the default) every matching category.
 
         Returns:
-            A dict from the identifier of each stored category to its row. An identifier that
-            names no stored category is left out of the dict, and no error is raised.
+            A dict from the identifier of each stored category to its row. The dict leaves out an
+            identifier that names no stored category, and the method raises no error.
         """
         return _rows_by_id(self._categories, category_ids, enabled)
 
@@ -1152,8 +1163,8 @@ class FileRepositoryBase(ABC):
                 ``None`` (the default) every matching item.
 
         Returns:
-            A dict from the external id of each stored item to its row. An external id that no
-            stored item has is left out of the dict, and no error is raised.
+            A dict from the external id of each stored item to its row. The dict leaves out an
+            external id that no stored item has, and the method raises no error.
         """
         return bulk_lookup_by_external_id(self._items, external_ids, enabled)
 
@@ -1175,8 +1186,8 @@ class FileRepositoryBase(ABC):
                 ones, and ``None`` (the default) every matching category.
 
         Returns:
-            A dict from the external id of each stored category to its row. An external id that
-            no stored category has is left out of the dict, and no error is raised.
+            A dict from the external id of each stored category to its row. The dict leaves out an
+            external id that no stored category has, and the method raises no error.
         """
         return bulk_lookup_by_external_id(self._categories, external_ids, enabled)
 

@@ -8,8 +8,9 @@ These are exported from ``taxomesh``:
 These are not, because no caller annotates with them:
 
 * :func:`category_id_of`, :func:`item_id_of` and :func:`tag_id_of` — the one conversion behind
-  each type, as ``os.fspath`` is behind a path. Of a row passed in, only its identifier is read, so
-  a stale row and a fresh one address the same stored row. Anything else raises ``TypeError``.
+  each type, as ``os.fspath`` is behind a path. The conversion reads only the identifier of a row
+  that it is given. So a row read before an update and a row read after it address the same stored
+  row. Anything else raises ``TypeError``.
 
 They are not in :mod:`taxomesh.domain.types`, because they name the models, and the models
 import that module.
@@ -36,7 +37,7 @@ def category_id_of(ref: CategoryRef, /) -> UUID:
         ref: A category, or its identifier.
 
     Returns:
-        The identifier, unchecked against storage.
+        The identifier. The function does not check it against storage.
 
     Raises:
         TypeError: If ``ref`` is neither a ``Category`` nor a ``UUID``.
@@ -55,7 +56,7 @@ def item_id_of(ref: ItemRef, /) -> UUID:
         ref: An item, or its identifier.
 
     Returns:
-        The identifier, unchecked against storage.
+        The identifier. The function does not check it against storage.
 
     Raises:
         TypeError: If ``ref`` is neither an ``Item`` nor a ``UUID``.
@@ -74,7 +75,7 @@ def tag_id_of(ref: TagRef, /) -> UUID:
         ref: A tag, or its identifier.
 
     Returns:
-        The identifier, unchecked against storage.
+        The identifier. The function does not check it against storage.
 
     Raises:
         TypeError: If ``ref`` is neither a ``Tag`` nor a ``UUID``.

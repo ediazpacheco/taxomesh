@@ -8,7 +8,7 @@ from typing import TypedDict
 
 
 class GraphEntry(TypedDict):
-    """One entry of the graph page, as the template renders it: a category or an item."""
+    """One entry of the graph page, as the template shows it: a category or an item."""
 
     depth: int
     kind: str
@@ -25,7 +25,7 @@ class GraphEntry(TypedDict):
 
 
 class RelationEntry(TypedDict):
-    """One outgoing relation of an item, as the template renders it."""
+    """One outgoing relation of an item, as the template shows it."""
 
     relation_type: str
     target_name: str

@@ -1,4 +1,4 @@
-"""The storage backends a ``TaxomeshService`` can be given.
+"""The repository classes of the three shipped storage backends, for a ``TaxomeshService``.
 
 ::
 
@@ -8,8 +8,8 @@
     service = TaxomeshService(YamlRepository("catalog.yaml"))
 
 Importing this module imports no Django. ``DjangoRepository`` needs the ``django`` extra only when
-it is constructed, and its error says so when Django is not installed. The module of each adapter
-can also be imported on its own.
+the caller constructs it. When Django is not installed, its error says so. A caller can also import
+the module of each adapter on its own.
 """
 
 from taxomesh.adapters.repositories.django_repository import DjangoRepository

@@ -1,8 +1,9 @@
 """File-backed JSON repository for taxomesh.
 
-The store is one JSON document in one file, read once when the repository is built and written
-whole after every write. :class:`~taxomesh.adapters.repositories._file.FileRepositoryBase` holds the
-port; this module says how JSON text becomes data and back.
+The store is one JSON document in one file. The repository reads the file once, when it is built,
+and writes it whole after every write.
+:class:`~taxomesh.adapters.repositories._file.FileRepositoryBase` holds the port. This module says
+how JSON text becomes data and back.
 """
 
 import json
@@ -29,7 +30,7 @@ class JsonRepository(FileRepositoryBase):
 
     Args:
         path: The path of the storage file. The default is ``data/taxomesh.json`` in the working
-            directory. The repository creates the parent directories that are missing.
+            directory. The repository creates the parent directories that do not exist.
 
     Raises:
         TaxomeshRepositoryError: If ``path`` is a directory, if the file exists but cannot be

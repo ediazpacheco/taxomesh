@@ -15,9 +15,10 @@ def normalise_root_links(
     """Return a store's links with the top-level invariant restored.
 
     A category holds a link to the implicit root exactly when it holds no other parent link, and no
-    item is placed in the root. So a root link held beside another parent is dropped, a category
-    holding no parent link gains a root link at sort index 0, and an item placement in the root is
-    dropped. Links that already keep the invariant come back equal, in their order.
+    item is placed in the root. So the function drops a root link that a category holds beside
+    another parent link. It gives a category that holds no parent link a root link at sort index 0.
+    It drops each item placement in the root. Links that already keep the invariant come back
+    equal, in their order.
 
     Args:
         categories: Every stored category, the root included, keyed by identifier.

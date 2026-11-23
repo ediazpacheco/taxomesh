@@ -1,4 +1,4 @@
-"""The container base that the collection of each kind of entity inherits, and its shared checks."""
+"""The base class that the collection of each kind of entity inherits, and the checks that they share."""
 
 from __future__ import annotations
 
@@ -29,15 +29,16 @@ def _normalise_external_ids(external_ids: ExternalId | Collection[ExternalId]) -
     """Convert each external id by the one rule, remove duplicates, and leave out ``None``.
 
     One external id, as text, an integer, a UUID or ``None``, is one key. The function applies
-    :func:`~taxomesh.domain.types.normalise_external_id` and nothing else: a write and a lookup use
-    the same conversion, so a value written and a value looked up are always converted the same
-    way. So the surrounding whitespace and the empty string are kept, as a write keeps them.
+    :func:`~taxomesh.domain.types.normalise_external_id` and nothing else. A write and a lookup use
+    the same conversion, so a value written and a value looked up always get the same conversion.
+    So the function keeps the surrounding whitespace and the empty string, as a write keeps them.
     ``None`` means *no match*, and the rule never gives the text ``"None"``, so it adds no key.
 
     Raises:
-        TypeError: If ``external_ids`` is ``bytes``, a ``bytearray`` or a ``memoryview``, each a
-            collection of integers that would be looked up as their digits, is neither one external
-            id nor a collection, or an external id is not text, an integer, a UUID or ``None``.
+        TypeError: If ``external_ids`` is ``bytes``, a ``bytearray`` or a ``memoryview``. Each is
+            a collection of integers, and a lookup would look them up as their digits. Also if
+            ``external_ids`` is neither one external id nor a collection, or an external id is not
+            text, an integer, a UUID or ``None``.
     """
     if isinstance(external_ids, (bytes, bytearray, memoryview)):
         raise TypeError(
@@ -53,19 +54,23 @@ def _normalise_external_ids(external_ids: ExternalId | Collection[ExternalId]) -
 def _as_validation_error() -> Iterator[None]:
     """Raise the error that Python and this library use for what the model refuses, chained to pydantic's.
 
-    Wraps the collection code that builds a row or a link from a caller's values, so that no
-    public member lets pydantic's own error out. An argument of the wrong type, such as
-    a name that is not text, raises ``TypeError``, as ``int(None)`` does; a value of the right type
-    that the model refuses, such as a name over its maximum length or a sort index reading
-    ``"ten"``, raises ``TaxomeshValidationError``, as ``int("ten")`` raises ``ValueError``.
-    pydantic's lax coercion decides what the right type is, so ``"5"`` is a sort index of 5. A
-    check the model makes itself with one of this library's validation errors, as a relation's
-    checks do, reaches the caller as that error: pydantic reports it as its own, since every
-    taxomesh validation error is a ``ValueError``, and carries the original in the error's context.
+    This context manager wraps the collection code that builds a row or a link from a caller's
+    values. So no public member raises pydantic's own error. An argument of the wrong type, such as
+    a name that is not text, raises ``TypeError``, as ``int(None)`` does. A value of the right type
+    that the model refuses raises ``TaxomeshValidationError``, as ``int("ten")`` raises
+    ``ValueError``. Examples are a name over its maximum length and a sort index that reads
+    ``"ten"``. The lax coercion of pydantic decides what the right type is, so ``"5"`` is a sort
+    index of 5.
+
+    A check that the model makes itself can raise one of this library's validation errors, as a
+    relation's checks do. The caller gets that error. Every taxomesh validation error is a
+    ``ValueError``, so pydantic reports it as its own and carries the original in the error's
+    context.
 
     Raises:
         TypeError: If an argument is of a type the model does not take.
-        TaxomeshValidationError: If the model refuses a value, or the error its own check raised.
+        TaxomeshValidationError: If the model refuses a value. If the model's own check raised a
+            taxomesh validation error, the context manager raises that error.
     """
     try:
         yield
@@ -74,11 +79,12 @@ def _as_validation_error() -> Iterator[None]:
 
 
 def _refusal(exc: ValidationError) -> TaxomeshValidationError | TypeError:
-    """Return the error a model's refusal stands for, naming each refused field.
+    """Return the error to raise for a model's refusal, naming each refused field.
 
-    The taxomesh error a model's own check raised wins. Otherwise an argument of the wrong type
-    makes it a ``TypeError``: pydantic names such an error ``…_type``, and only the argument itself
-    counts, so a key of the wrong type inside a ``metadata`` dict is a value the dict holds.
+    If a model's own check raised a taxomesh error, the function returns that error. Otherwise an
+    argument of the wrong type makes the result a ``TypeError``. For such an argument, pydantic
+    names the error ``…_type``. Only the argument itself counts, so a key of the wrong type inside
+    a ``metadata`` dict is a value that the dict holds.
     """
     details = exc.errors(include_url=False, include_input=False)
     for detail in details:
@@ -95,14 +101,16 @@ def _refusal(exc: ValidationError) -> TaxomeshValidationError | TypeError:
 
 
 def _require_plain_json(metadata: object, /) -> None:
-    """Refuse metadata that is not plain JSON, before anything is built or written.
+    """Refuse metadata that is not plain JSON, before a member builds or writes anything.
 
-    Plain JSON is, at any depth, a dict with ``str`` keys, a list or tuple, a ``str``, an ``int``,
-    a finite ``float``, a ``bool`` or ``None``: what every backend can store, a tuple as a list.
-    The model takes any mapping as a dict, so a mapping's contents are checked as a dict's are;
-    a ``metadata`` that is no mapping at all is the wrong type, which the model refuses. Checked
-    where a caller's metadata comes in, not on the model, so a store already holding another value
-    still loads.
+    Plain JSON is a dict with ``str`` keys, a list or tuple, a ``str``, an ``int``, a finite
+    ``float``, a ``bool`` or ``None``. The same holds at any depth. Every backend can store these
+    values, a tuple as a list.
+
+    The model takes any mapping as a dict, so the function checks a mapping's contents as it checks
+    a dict's. A ``metadata`` that is no mapping at all is the wrong type, which the model refuses.
+    The check is where a caller's metadata comes in, not on the model. So a store that already holds
+    another value still loads.
 
     Raises:
         TaxomeshValidationError: Naming the first value, or key, that is not plain JSON.
@@ -116,9 +124,10 @@ def _require_plain_json(metadata: object, /) -> None:
 def _not_json(value: object, where: str, open_containers: dict[int, str], /) -> str | None:
     """Return why ``value``, found at ``where``, is not plain JSON, or ``None`` when it is.
 
-    ``open_containers`` maps each dict and list on the path down to ``value`` to where it was
-    found, as ``json.dumps`` keeps its markers: a container met again on its own path contains
-    itself. One held twice side by side is not on its own path, and is plain JSON twice.
+    ``open_containers`` maps each dict, list and tuple on the path down to ``value`` to where the
+    function found it, as ``json.dumps`` keeps its markers. A dict, a list or a tuple that the
+    function meets again on its own path contains itself. One held twice side by side is not on its
+    own path, and is plain JSON twice.
     """
     children: list[tuple[str, object]] = []
     if isinstance(value, float) and not math.isfinite(value):
@@ -160,7 +169,7 @@ def _require_enabled(enabled: object, /) -> None:
 
 
 def _require_text(name: str, value: object, /) -> None:
-    """Refuse an argument that must be text, before it is compared with what is stored.
+    """Refuse an argument that must be text, before a member compares it with what is stored.
 
     Raises:
         TypeError: If ``value`` is not a ``str``.
@@ -172,8 +181,8 @@ def _require_text(name: str, value: object, /) -> None:
 def _require_version(expected_version: object, /) -> None:
     """Refuse an expected version that is neither an integer from 0 nor ``None``.
 
-    Storage compares it with the stored row's version, so any other value would read as a
-    conflict rather than as the mistake it is. ``True`` is the integer 1, as it is for ``limit``.
+    Storage compares it with the stored row's version, so any other value would appear as a
+    conflict, and not as the mistake that it is. ``True`` is the integer 1, as it is for ``limit``.
 
     Raises:
         TypeError: If ``expected_version`` is neither an ``int`` nor ``None``.
@@ -188,10 +197,10 @@ def _require_version(expected_version: object, /) -> None:
 
 
 def _require_sequence(name: str, value: object, /) -> None:
-    """Refuse an order that is not a sequence, before any element of it is read.
+    """Refuse an order that is not a sequence, before a member reads any element of it.
 
-    A set or a mapping holds no order of the caller's, so storing its iteration order would store
-    an order nobody gave, as ``random.sample`` refuses a set.
+    A set or a mapping holds no order of the caller's. To store its iteration order would store an
+    order that nobody gave. In the same way, ``random.sample`` refuses a set.
 
     Raises:
         TypeError: If ``value`` is not a ``Sequence``.
@@ -218,7 +227,7 @@ def _require_limit(limit: object, /) -> None:
     """Refuse a result limit that is not an integer of at least 1.
 
     A float is the wrong type however many rows match. ``NaN``, which compares false with
-    everything, would otherwise pass a range check and cap nothing.
+    everything, would otherwise pass a range check and limit nothing.
 
     Raises:
         TypeError: If ``limit`` is not an ``int``.
@@ -233,9 +242,10 @@ def _require_limit(limit: object, /) -> None:
 def _given(fields: Mapping[str, object], /) -> dict[str, object]:
     """Return the fields an update was given a value for.
 
-    ``UNSET`` keeps a field as it is, so it is left out. ``None`` is not a value of any field passed
-    here: each ``update`` handles ``external_id``, the one nullable field, itself. The check is
-    here, and not in the model, because the model reads a stored ``None`` description as empty.
+    ``UNSET`` keeps a field as it is, so the function leaves it out. ``None`` is not a value of any
+    field passed here: each ``update`` handles ``external_id``, the one nullable field, itself. The
+    check is here, and not in the model, because the model reads a stored ``None`` description as
+    empty.
 
     Args:
         fields: Each field's argument, by name.
@@ -260,11 +270,12 @@ class _Positioned(Protocol):
 
 
 def _position_among[L: _Positioned](siblings: Iterable[L], /, *, stored: Callable[[L], bool] | None = None) -> int:
-    """Return where a link goes among its siblings when no position is given.
+    """Return where a link goes among its siblings when the caller gives no position.
 
     A stored link, the sibling that ``stored`` picks, keeps its position. A new link goes after the
-    last: the largest position plus one, or 0 when there is no sibling. The largest, and not the
-    number of siblings: with a gap, or a position given by hand, the number can fall before the last.
+    last: the largest position plus one, or 0 when there is no sibling. The function takes the
+    largest position, and not the number of siblings. With a gap, or a position that a caller gave,
+    the number can come before the last position.
 
     Args:
         siblings: The stored links of the same parent, category or source item, read inside the
@@ -303,8 +314,8 @@ def _in_order[R: _Switchable](
 ) -> tuple[R, ...]:
     """Return the row of each identifier, in the order given, that the ``enabled`` filter keeps.
 
-    ``rows`` holds the stored rows with no ``enabled`` filter, so an identifier that is not in it
-    names a row that is not stored, and a disabled row is not taken for a deleted one.
+    ``rows`` holds the stored rows with no ``enabled`` filter. So an identifier that is not in it
+    names a row that is not stored. The function does not take a disabled row for a deleted one.
 
     Args:
         ids: The identifiers, in the order of the result.
@@ -332,12 +343,13 @@ def _in_order[R: _Switchable](
 def _changed[R: BaseModel](row: R, changes: Mapping[str, object], /) -> R:
     """Return a new row with these fields changed, checked as a new row would be.
 
-    ``model_copy(update=…)`` checks nothing, so a name past its limit would pass it. The new row
-    is validated from the original's fields instead, with the changes laid over them, so every
-    check the model makes runs again. The original is left as it was.
+    ``model_copy(update=…)`` checks nothing, so a name past its limit would pass it. Instead, the
+    function validates the new row from the original's fields, with each change in place of the
+    original value. So every check that the model makes runs again. The function leaves the
+    original as it was.
 
     Args:
-        row: The row to change. It is not modified.
+        row: The row to change. The function does not modify it.
         changes: The new value of each field that changes.
 
     Returns:
@@ -358,33 +370,35 @@ class EntityCollectionBase[T, K](ABC):
 
         For an absent key, subscript raises. Anything named ``get*`` never does.
 
-    ``get`` and ``__contains__`` are written **once, here**, both through the subclass's
-    ``__getitem__``. So they cannot come to disagree, as three lookups written apart could:
+    This class defines ``get`` and ``__contains__`` **once, here**, and both call the subclass's
+    ``__getitem__``. So the three forms cannot disagree, as three forms written separately could.
     ``key in coll`` is true exactly when ``coll[key]`` does not raise, because it is the same call.
 
-    It is **not** a ``collections.abc.Mapping``, on purpose. ``Mapping`` requires an ``__iter__``
-    that yields keys, and builds ``keys()``, ``items()``, ``values()`` and ``==`` on it: to iterate
-    a view, or to compare with another mapping, reads every row, and the call does not show that
-    cost. ``__iter__`` and ``__reversed__`` are ``None``, not left undefined. Through Python's old
-    sequence protocol, a class with ``__getitem__`` is iterable all the same, and with ``__len__``
-    it is also reversible. Then ``iter()`` succeeds, and ``reversed()`` succeeds after it reads
-    every row to take the length. The first ``next()`` calls ``coll[0]`` or ``coll[len(coll) - 1]``,
-    which raises ``TypeError`` for an integer key that the caller did not give; over an empty
-    store, ``reversed()`` yields nothing. ``None`` makes ``iter()`` and ``reversed()`` raise
-    ``TypeError`` at once, as ``Mapping`` itself does for ``reversed()``.
+    It is **not** a ``collections.abc.Mapping``, for the following reason. ``Mapping`` requires an
+    ``__iter__`` that yields keys, and builds ``keys()``, ``items()``, ``values()`` and ``==`` on
+    it. To iterate a view, or to compare with another mapping, reads every row, and the call does
+    not show that cost.
+
+    ``__iter__`` and ``__reversed__`` are ``None``, not left undefined. Through Python's old
+    sequence protocol, a class with ``__getitem__`` is iterable even with no ``__iter__``, and with
+    ``__len__`` it is also reversible. Then ``iter()`` succeeds, and ``reversed()`` succeeds after
+    it reads every row to take the length. The first ``next()`` calls ``coll[0]`` or
+    ``coll[len(coll) - 1]``, which raises ``TypeError`` for an integer key that the caller did not
+    give. Over an empty store, ``reversed()`` yields nothing. ``None`` makes ``iter()`` and
+    ``reversed()`` raise ``TypeError`` immediately, as ``Mapping`` itself does for ``reversed()``.
 
     ``T`` is the row and ``K`` what names one: ``CategoryRef``, ``ItemRef`` or ``TagRef``, the row
-    or its identifier. ``T`` is only in **return** positions and ``K`` only in parameters, so the
-    class is covariant in ``T`` and contravariant in ``K``: every concrete collection is a subtype
-    of ``EntityCollectionBase[object, UUID]``, so one parametrized test can state the law for the
-    three kinds of entity with no ``Any``, no cast and no ``type: ignore``. A ``T`` in a parameter
-    would reverse that inference, which is also why :meth:`_all` returns ``Sequence[T]`` and not
-    the invariant ``list[T]``.
+    or its identifier. ``T`` is only in **return** positions and ``K`` only in parameters. So the
+    class is covariant in ``T`` and contravariant in ``K``, and every concrete collection is a
+    subtype of ``EntityCollectionBase[object, UUID]``. So one parametrized test can state the law
+    for the three kinds of entity with no ``Any``, no cast and no ``type: ignore``. A ``T`` in a
+    parameter would reverse that inference. That is also why :meth:`_all` returns ``Sequence[T]``
+    and not the invariant ``list[T]``.
 
-    A subclass sets :attr:`_not_found` to its own ``TaxomeshNotFoundError`` subclass, so a caller
-    that catches the error of one kind never gets the error of another kind,
-    :attr:`_namespace` to the service attribute that it is reached through, and :attr:`_kind` to
-    the noun that its messages use.
+    A subclass sets :attr:`_not_found` to its own ``TaxomeshNotFoundError`` subclass. So a caller
+    that catches the error of one kind never gets the error of another kind. A subclass also sets
+    :attr:`_namespace` to the service attribute that a caller reaches it through, and :attr:`_kind`
+    to the noun that its messages use.
     """
 
     _not_found: ClassVar[type[TaxomeshNotFoundError]]
@@ -410,10 +424,10 @@ class EntityCollectionBase[T, K](ABC):
         self._cache = cache
 
     def __repr__(self) -> str:
-        """Render as the expression that reaches this collection, reading no storage.
+        """Return the expression that reaches this collection, and read no storage.
 
-        The attribute path, and not a constructor call, because a collection is never
-        constructed directly.
+        The result is the attribute path, and not a constructor call, because a caller never
+        constructs a collection directly.
         """
         return f"{self._service!r}.{self._namespace}"
 
@@ -421,12 +435,12 @@ class EntityCollectionBase[T, K](ABC):
     def __getitem__(self, key: K, /) -> T:
         """Return the row this names, or raise.
 
-        Each subclass implements it over the port's lookup of one row, and turns a miss (and, for
-        categories, the implicit root) into its own not-found error. The rest of the law is built
-        on this one method.
+        Each subclass implements it over the port's lookup of one row, and turns a miss into its
+        own not-found error. The collection of categories does the same for the implicit root. This
+        class builds the rest of the law on this one method.
 
         Args:
-            key: The row, or its identifier. Only the identifier is read.
+            key: The row, or its identifier. The method reads only the identifier.
 
         Returns:
             The stored row.
@@ -452,8 +466,9 @@ class EntityCollectionBase[T, K](ABC):
         """Return the stored row with this identifier, read from storage, or raise.
 
         A write calls it, and not subscript, because a write checks, and builds on, what it is
-        about to change: a row that another service changed or deleted after this service read it
-        is seen as it is stored. The cached ``_lookup`` of categories and items calls it on a miss.
+        about to change. So the write reads the stored state of a row that another service changed
+        or deleted after this service read it. The cached ``_lookup`` of categories and items calls
+        it on a miss.
 
         Raises:
             TaxomeshNotFoundError: The subclass's own subclass of it, when no row with this
@@ -469,17 +484,17 @@ class EntityCollectionBase[T, K](ABC):
         """Run a member's storage writes in one ``atomic()`` block, then clear the service's cache.
 
         Every member that writes runs in one block, and makes inside it every read that its writes
-        depend on: the rows it names or builds on, the slug and external id it checks, and the
-        links it checks or puts in order. The block keeps out every other block of the same store,
-        so no other write lands between those reads and the writes.
+        depend on. These reads cover the rows it names or builds on, and the slug and external id
+        it checks. They also cover the links it checks or puts in order. The block keeps out every
+        other block of the same store, so no other write comes between those reads and the writes.
 
-        The method clears the service's cache, and calls ``then``, whether the writes end or fail:
-        a store that cannot roll back keeps the writes made before a failure, and the next read
-        must see them.
+        The method clears the service's cache, and calls ``then``, whether the writes end or fail.
+        A store that cannot roll back keeps the writes made before a failure, and the next read
+        must find them.
 
         Args:
-            then: Called last. A member that changes rows passes the method that drops its search
-                corpus.
+            then: The method calls it last. A member that changes rows passes the method that drops
+                its search corpus.
         """
         try:
             with self._repo.atomic():
@@ -496,16 +511,16 @@ class EntityCollectionBase[T, K](ABC):
         One row or identifier is one key, as ``str.startswith`` takes one prefix or a tuple of
         them.
 
-        An absent key is **left out of the result**: it does not raise, and it does not appear with
-        a ``None`` value. Either of those would make every caller write the same check, and
-        ``get_many`` exists to remove that check.
+        The method **leaves an absent key out of the result**: the key does not raise, and it does
+        not appear with a ``None`` value. Either of those would make every caller write the same
+        check, and ``get_many`` exists to remove that check.
 
         Args:
             keys: The row or identifier to look up, or a collection of them. A duplicate or an
                 absent key causes no error.
 
         Returns:
-            A mapping of identifier to row, with only the keys that were found.
+            A mapping of identifier to row, with only the keys that the method found.
 
         Raises:
             TypeError: If ``keys`` is neither one key nor a collection, or a key is neither a row
@@ -533,13 +548,14 @@ class EntityCollectionBase[T, K](ABC):
     def get[D](self, key: K, default: D | None = None, /) -> T | D | None:
         """Return the row this names, or a default instead of raising.
 
-        The other half of subscript, and the reason that both forms exist: ``coll[key]`` asks for
-        a row that must be stored, and ``coll.get(key)`` asks *whether* it is stored. Both
-        parameters are positional-only, as on ``dict``.
+        This form and subscript exist for two different questions. ``coll[key]`` asks for a row
+        that must be stored, and ``coll.get(key)`` asks *whether* it is stored. Both parameters are
+        positional-only, as on ``dict``.
 
         Args:
             key: The row, or its identifier.
-            default: Returned when the row is absent. Defaults to ``None``.
+            default: The value that the method returns when the row is absent. Defaults to
+                ``None``.
 
         Returns:
             The stored row, or ``default`` when the row is not stored.
@@ -602,8 +618,8 @@ class _UniqueKeysCollection[T, K](EntityCollectionBase[T, K]):
 
     A category and an item each have a slug and an external id, unique among rows of their kind. A
     subclass answers which stored row, if any, already has a key. Both checks read storage, never
-    the cache, inside the ``atomic()`` block of the write that they guard, and both let a row keep
-    its own key: ``own_id`` is the identifier of the row being saved.
+    the cache, inside the ``atomic()`` block of the write that calls them. Both let a row keep its
+    own key: ``own_id`` is the identifier of the row that the write saves.
     """
 
     @abstractmethod

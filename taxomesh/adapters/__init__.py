@@ -1,1 +1,1 @@
-"""taxomesh.adapters — Concrete adapters for storage and REST views."""
+"""The adapters: the storage repositories and the command line."""

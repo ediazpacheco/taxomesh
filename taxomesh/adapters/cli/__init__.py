@@ -1,7 +1,7 @@
 """The command line of taxomesh.
 
 :func:`run` is the ``taxomesh`` console script. The command line needs typer and rich, which the
-``cli`` extra installs; without them the script says so, rather than failing with a traceback.
+``cli`` extra installs. Without them, the script says so, and does not fail with a traceback.
 """
 
 from typing import Final
@@ -16,7 +16,8 @@ def run() -> None:
 
     Raises:
         SystemExit: With :data:`CLI_EXTRA_MESSAGE`, which exits with status 1, when typer or
-            rich cannot be imported. Any other missing module is raised as it is.
+            rich cannot be imported. The function raises the ``ModuleNotFoundError`` of any other
+            module as it is.
     """
     try:
         from taxomesh.adapters.cli.main import app  # noqa: PLC0415

@@ -6,12 +6,12 @@ matches from rapidfuzz. :func:`normalize` converts a text for comparison, :func:
 scores one candidate, and :func:`score_corpus` ranks many.
 
 ``SearchCandidate`` is an internal helper. It keeps a row with its searchable fields already
-normalized, so each field is normalized once and not at each step of the scoring.
+normalized, so the search normalizes each field once, and not at each step of the scoring.
 :func:`candidate_of` builds one from a row.
 
 ``SearchCorpus`` holds the built candidates of one kind of entity for the lifetime of the
-service's cache, or until that service next creates, updates or deletes a row of that kind. The
-service gives it to the collection that searches it.
+service's cache. It drops them before that when the service next creates, updates or deletes a row
+of that kind. The service gives it to the collection that searches it.
 """
 
 import heapq
@@ -47,8 +47,8 @@ _SPACE_RE: Final[re.Pattern[str]] = re.compile(r"\s+")
 class SearchCandidate[T]:
     """A row with its searchable fields, already normalized.
 
-    Built so that each field of a candidate is normalized once, and not at each step of the
-    scoring. A held corpus keeps its candidates from one search to the next.
+    The class exists so that the search normalizes each field of a candidate once, and not at each
+    step of the scoring. A held corpus keeps its candidates from one search to the next.
 
     Args:
         obj: The row: an ``Item`` or a ``Category``.
@@ -104,13 +104,13 @@ def candidate_of[R: _Searchable](row: R) -> SearchCandidate[R]:
 class SearchCorpus[T]:
     """The search candidates of one kind of entity, held for the lifetime of the service's cache.
 
-    A create, update or delete of a row of that kind drops them sooner; a write of a link does
+    A create, update or delete of a row of that kind drops them sooner. A write of a link does
     not, because no candidate holds a link.
 
     The service owns the corpus and gives it to the collection that searches it. The collection
-    reads or fills it through :meth:`held_or` on a search that no category limits, and calls
-    :meth:`invalidate` whenever it creates, updates or deletes a row of that kind; the service
-    reports :attr:`size`. Because the two hold the same object, they agree: a collection with a
+    reads or fills it through :meth:`held_or` on a search that no category limits. The collection
+    calls :meth:`invalidate` whenever it creates, updates or deletes a row of that kind. The
+    service reports :attr:`size`. The two hold the same object, so they agree. A collection with a
     list of its own would let the service describe a corpus that the collection had dropped.
     """
 
@@ -149,8 +149,9 @@ class SearchCorpus[T]:
     def hold(self, candidates: list[SearchCandidate[T]]) -> list[SearchCandidate[T]]:
         """Hold these candidates for the cache's lifetime, and return them.
 
-        Holds nothing when the cache stores nothing, so a service built with ``cache_ttl=0``
-        builds the corpus from storage on every search, and so does a search inside a transaction.
+        The corpus holds nothing when the cache stores nothing. So a service built with
+        ``cache_ttl=0`` builds the corpus from storage on every search, and so does a search inside
+        a transaction.
 
         Args:
             candidates: The corpus just built from storage.
@@ -167,8 +168,8 @@ class SearchCorpus[T]:
         """Return the held candidates, or build them, hold them and return them.
 
         Args:
-            build: Reads the rows from storage and returns their candidates. It is called only
-                when :attr:`candidates` is ``None``.
+            build: Reads the rows from storage and returns their candidates. The method calls it
+                only when :attr:`candidates` is ``None``.
 
         Returns:
             The corpus to search.
@@ -218,18 +219,19 @@ def score_candidate(
 
     The result is a float ≥ 0 when the candidate matches, or ``None`` when it does not.
 
-    How the score is made:
-    - A fixed *boost* comes from an exact, prefix, word-prefix or substring match on the
-      normalized name, slug and external id.
+    How the function makes the score:
+    - A fixed *boost* comes from the best match on the normalized fields. That is an exact or a
+      prefix match on the name or the slug, or a word-prefix match on the name. It can also be a
+      substring match on the name, the slug or the external id.
     - When *fuzzy* is ``True``, the rapidfuzz ratios against the name and the slug add
-      ``max_fuzzy − FUZZY_THRESHOLD`` to the score.
+      ``max_fuzzy − FUZZY_THRESHOLD`` to the score, when ``max_fuzzy`` is at least the threshold.
     - A candidate matches if ``boost > 0`` **or** ``max_fuzzy ≥ FUZZY_THRESHOLD``.
 
     Args:
         query: The query, already normalized by the caller.
         name: The name of the item or category, as stored.
         slug: The slug of the item or category, as stored.
-        external_id: The external id, as stored; an empty string turns off the external-id
+        external_id: The external id, as stored. An empty string turns off the external-id
             match.
         fuzzy: When it is ``True``, the rapidfuzz ratios count.
 
@@ -252,7 +254,7 @@ def score_prenorm(
 ) -> float | None:
     """Score one candidate from field values that are already normalized.
 
-    Each field must have passed through ``normalize()``; the caller makes sure
+    Each field must have passed through ``normalize()``. The caller makes sure
     of it. For values as stored, use ``score_candidate()``.
 
     Args:
@@ -289,7 +291,7 @@ def score_corpus[T](
     Args:
         norm_q: The normalized query.
         corpus: The normalized candidates to score.
-        fuzzy: Passed to ``score_prenorm``.
+        fuzzy: The function passes it to ``score_prenorm``.
         limit: The maximum number of results.
 
     Returns:

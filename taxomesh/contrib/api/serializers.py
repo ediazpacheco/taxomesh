@@ -4,10 +4,10 @@
 accepts. :func:`items_to_list` and :func:`categories_to_list` do the same for rows. An application
 uses them to return the graph or rows as the JSON body of a response.
 
-The graph holds one node for each category, but the serialization is a *tree*: a category that
-several parents reach is emitted once **for each path**, because a nested ``children`` document
-means that. :func:`~taxomesh.domain.paths.walk_paths` makes that walk, and its module says why the
-walk is iterative and its guard path-local.
+The graph holds one node for each category, but the serialization is a *tree*. A category that
+several parents reach appears once **for each path**, because a nested ``children`` document means
+that. :func:`~taxomesh.domain.paths.walk_paths` makes that walk. Its module says why the walk is
+iterative and its guard path-local.
 """
 
 from collections.abc import Sequence
@@ -38,37 +38,40 @@ def graph_to_dict(graph: TaxomeshGraph) -> dict[str, Any]:
             ]
         }
 
-    A category that several parents reach is emitted once under each of them. A category that
-    appears again on its own path, which only a cycle in stored data makes, is emitted where it
-    appears again, without its children: its ``children`` is empty there, and the document ends.
-    Its children were already emitted higher on the same path. So an empty ``children`` is either a
-    category with no children or a cycle that stops there.
+    A category that several parents reach appears once under each of them. A category can appear
+    again on its own path, which only a cycle in stored data causes. The function emits it where it
+    appears again, without its children. Its ``children`` is empty there, and that path ends.
+    The document already holds its children higher on the same path. So an empty ``children`` is
+    either a category with no children or a cycle that stops there.
 
     The document starts at ``graph.roots``, so it leaves out each category that no node in
-    ``roots`` reaches: a category whose parents the ``enabled`` filter left out, the categories of a
-    stored cycle that no top-level category reaches, and each category that only those reach.
+    ``roots`` reaches:
+
+    - A category whose parents the ``enabled`` filter left out.
+    - The categories of a stored cycle that no top-level category reaches.
+    - Each category that only those reach.
+
     ``graph.walk()`` yields them all.
 
     Args:
         graph: The graph snapshot that ``TaxomeshService.graph()`` returned.
 
     Returns:
-        A dict that ``json.dumps`` accepts; ``{"roots": []}`` for an empty graph.
+        A dict that ``json.dumps`` accepts. For an empty graph, ``{"roots": []}``.
 
     Raises:
         TaxomeshGraphTooLargeError: If the document would hold more than ``MAX_EMITTED_NODES``
             node dicts. Shared parents make the count grow exponentially, so a graph of a few
-            dozen categories can pass the limit; without it, the response would have no upper
-            size.
+            dozen categories can pass the limit. Without the limit, the response would have no
+            upper size.
     """
     # Any: an emitted node dict is a heterogeneous JSON mix (str, bool, list, nested dict).
     roots: list[dict[str, Any]] = []
     for emitted, visit in enumerate(walk_paths(graph.roots, roots), 1):
         if emitted > MAX_EMITTED_NODES:
             raise TaxomeshGraphTooLargeError(
-                f"Serializing this graph would emit more than {MAX_EMITTED_NODES} nodes: a category "
-                f"reachable through several parents is emitted once per path, so {len(graph)} stored "
-                "categories can expand without bound"
+                f"Serializing this graph would emit more than {MAX_EMITTED_NODES} nodes: it holds {len(graph)} "
+                "categories, and a category appears once for each path to it"
             )
         # Any: an emitted node dict is a heterogeneous JSON mix (str, bool, list, nested dict).
         children: list[dict[str, Any]] = []
@@ -92,8 +95,8 @@ def items_to_list(items: Sequence[Item]) -> list[dict[str, Any]]:
         items: The item rows, in the order to emit them, such as what ``items_search`` returns.
 
     Returns:
-        One ``Item.model_dump(mode="json")`` dict for each row, in that order; empty when ``items``
-        is empty.
+        One ``Item.model_dump(mode="json")`` dict for each row, in that order. An empty list when
+        ``items`` is empty.
     """
     return [item.model_dump(mode="json") for item in items]
 
@@ -107,7 +110,7 @@ def categories_to_list(categories: Sequence[Category]) -> list[dict[str, Any]]:
             ``categories_search`` returns.
 
     Returns:
-        One ``Category.model_dump(mode="json")`` dict for each row, in that order; empty when
-        ``categories`` is empty.
+        One ``Category.model_dump(mode="json")`` dict for each row, in that order. An empty list
+        when ``categories`` is empty.
     """
     return [cat.model_dump(mode="json") for cat in categories]

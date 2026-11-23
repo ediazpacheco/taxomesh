@@ -1,7 +1,7 @@
 """The Django admin of taxomesh.
 
-It has the admin of each model, with its forms, inlines and filters; the graph page and the debug
-page; and the mixins for the admin of your own models.
+It has the admin of each model, with its forms, inlines and filters. It has the graph page and the
+debug page. It also has the mixins for the admin of your own models.
 """
 
 from __future__ import annotations
@@ -159,10 +159,10 @@ def _parent_from_payload(raw: object) -> UUID | None:
 def _graph_view_error(exc: Exception) -> JsonResponse:
     """Answer an exception of a graph view as the HTTP edge answers it.
 
-    A library error that maps to a client error is the caller's to correct: 400, with the message of
-    the error. A library error that maps to 500, and any other exception, answers 500 with one
-    generic text, since their own text can name a table, a constraint or a path. The server error is
-    logged.
+    The caller can correct a library error that maps to a client error. Such an error answers 400,
+    with its own message. A library error that maps to 500 answers 500 with one generic text, and so
+    does any other exception. The text is generic because their own text can name a table, a
+    constraint or a path. The function logs the server error.
 
     Args:
         exc: The exception that the view caught.
@@ -193,7 +193,7 @@ def _category_linked_model_setting() -> str:
     """Return the setting that names the linked model of a category.
 
     It is ``TAXOMESH_CATEGORY_LINKED_MODEL`` when that setting is set, and ``TAXOMESH_LINKED_MODEL``
-    otherwise. The category pages, the category list and the graph read this rule.
+    otherwise. The category pages, the category list and the graph use this rule.
     """
     if _linked_model_label(TAXOMESH_CATEGORY_LINKED_MODEL_SETTING):
         return TAXOMESH_CATEGORY_LINKED_MODEL_SETTING
@@ -206,12 +206,12 @@ def _resolve_linked_url(external_id: str | None, setting_name: str = TAXOMESH_LI
     The Django setting ``setting_name`` names the linked model, as ``"app_label.ModelName"``. The
     function builds the URL of that model's admin change page with the external id as the primary
     key. It does not check that a record with that key exists. When the setting is not set, it
-    returns ``None``, since the setting is optional. When the URL cannot be built, it logs a warning
+    returns ``None``, since the setting is optional. When it cannot build the URL, it logs a warning
     and returns ``None``.
 
     Args:
-        external_id: The external id, used as the primary key in the linked model. An empty value
-            or ``None`` returns ``None``.
+        external_id: The external id, which the function uses as the primary key in the linked
+            model. An empty value or ``None`` returns ``None``.
         setting_name: The Django setting that names the linked model. The default is
             ``TAXOMESH_LINKED_MODEL``.
 
@@ -300,9 +300,9 @@ def _new_service() -> TaxomeshService:
 class TaxomeshAdminMixin:
     """A mixin that builds a new service for each write, and has the display members that the admins share.
 
-    The display members link a row to the admin page of its linked record: the record of the linked
-    model whose primary key is the row's external id. The setting of an admin names the linked
-    model. It is ``TAXOMESH_LINKED_MODEL``, and for the admin of categories
+    The display members link a row to the admin page of its linked record. That is the record of
+    the linked model whose primary key is the row's external id. The setting of an admin names the
+    linked model. It is ``TAXOMESH_LINKED_MODEL``, and for the admin of categories
     ``TAXOMESH_CATEGORY_LINKED_MODEL`` while that setting is set.
     """
 
@@ -331,7 +331,7 @@ class TaxomeshAdminMixin:
             obj: The object that the admin shows.
 
         Returns:
-            An HTML link with the ↗ icon, or an empty string when no URL can be built.
+            An HTML link with the ↗ icon, or an empty string when the method can build no URL.
         """
         url = _resolve_linked_url(getattr(obj, "external_id", None) or "", self._linked_model_setting())
         if url:
@@ -343,8 +343,8 @@ class TaxomeshAdminMixin:
     def external_id_with_link(self, obj: Any) -> str:
         """Show the external id, and after it a ↗ link to the admin page of the linked record.
 
-        When the setting of this admin is not set, or the URL cannot be built, it shows the external
-        id alone.
+        When the setting of this admin is not set, or the method cannot build the URL, the method
+        shows the external id alone.
 
         Args:
             obj: The object that the admin shows.
@@ -389,10 +389,10 @@ class TaxomeshLinkedFKMixin(_ModelAdminMixinBase):
     """A ``ModelAdmin`` mixin that uses ``TaxomeshLinkedFKWidget`` for each foreign key to a taxomesh model.
 
     Add it to the ``ModelAdmin`` of a model of your own that has foreign keys to ``ItemModel`` or
-    ``CategoryModel``. Each such field then renders as a Select2 autocomplete, with a ``↗`` link to
-    the taxomesh admin page of the selected object, and needs no code of its own.
+    ``CategoryModel``. The admin page then shows each such field as a Select2 autocomplete, with a
+    ``↗`` link to the taxomesh admin page of the selected object. The field needs no code of its own.
 
-    The mixin knows nothing of your app: when Django builds the form, it reads
+    The mixin does not depend on your app: when Django builds the form, the mixin reads
     ``db_field.related_model`` to find the foreign keys to taxomesh models.
 
     Usage::
@@ -418,7 +418,7 @@ class TaxomeshLinkedFKMixin(_ModelAdminMixinBase):
         Args:
             db_field: The foreign key of the edited model.
             request: The current HTTP request.
-            **kwargs: Passed to ``super().formfield_for_foreignkey()``.
+            **kwargs: The method passes them to ``super().formfield_for_foreignkey()``.
 
         Returns:
             The form field: with ``TaxomeshLinkedFKWidget`` for a foreign key to ``ItemModel`` or
@@ -449,7 +449,7 @@ def _get_item_category_ids(obj: Any, external_id_attr: str) -> list[UUID]:
         external_id_attr: The name of the attribute of ``obj`` that holds the external id.
 
     Returns:
-        The identifiers of the categories; empty when no item has that external id.
+        The identifiers of the categories. The list is empty when no item has that external id.
     """
     external_id = str(getattr(obj, external_id_attr))
     svc = TaxomeshService(repository=DjangoRepository())
@@ -463,8 +463,9 @@ class _CategoriesWidget(FilteredSelectMultiple):
     """The widget of the ``categories`` field: the admin's two-box select, and a hidden input after it.
 
     A browser posts nothing for a multiple select with no option selected. The posted data alone
-    then does not tell an empty selection from a form that did not show the field. The hidden input
-    is posted with each form that shows the field, and tells the two apart.
+    then does not show whether the selection is empty or the form did not show the field. The
+    browser posts the hidden input with each form that shows the field. Data that holds the input
+    therefore comes from such a form.
     """
 
     # Any: an override takes what django-stubs' Widget.render takes, whose attrs are dict[str, Any].
@@ -475,7 +476,7 @@ class _CategoriesWidget(FilteredSelectMultiple):
         attrs: dict[str, Any] | None = None,
         renderer: BaseRenderer | None = None,
     ) -> SafeString:
-        """Render the select, then the hidden input, named ``name`` followed by ``_shown``."""
+        """Return the HTML of the select, then of the hidden input, named ``name`` followed by ``_shown``."""
         return format_html(
             '{}<input type="hidden" name="{}" value="1">',
             super().render(name, value, attrs, renderer),
@@ -491,9 +492,10 @@ class _CategoriesWidget(FilteredSelectMultiple):
 def _reconcile_categories(obj: Any, form: Any, external_id_attr: str) -> None:
     """Place the item of a record in the selected categories, and remove it from the others that the field offers.
 
-    The service makes the changes. Nothing changes when the form has no ``categories`` field, when
-    the data does not come from a form that showed the field, or when no item has the external id.
-    A placement in a category that the field does not offer, such as a disabled category, stays.
+    The service makes the changes. The function changes nothing when the form has no ``categories``
+    field, or when the data does not come from a form that showed the field. It also changes
+    nothing when no item has the external id. A placement in a category that the field does not
+    offer, such as a disabled category, stays.
 
     Args:
         obj: Your record, which the admin saves.
@@ -608,7 +610,7 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
 
         Args:
             request: The current HTTP request.
-            obj: The record that the page edits; ``None`` on the add page.
+            obj: The record that the page edits, or ``None`` on the add page.
 
         Returns:
             The fields of the page.
@@ -626,7 +628,7 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
     ) -> type[forms.ModelForm[Any]]:
         """Add a ``categories`` field, a ``ModelMultipleChoiceField``, to the form of a page that shows it.
 
-        Django passes ``fields``, the fields that the page shows; without it, the method reads them
+        Django passes ``fields``, the fields that the page shows. Without it, the method reads them
         from ``get_fieldsets()``, as Django's own method does. When they name ``categories``, the
         method declares the field on the base form class before it calls ``super().get_form()``.
         ``modelform_factory`` then finds the field in ``declared_fields``. Without that, a
@@ -639,9 +641,9 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
 
         Args:
             request: The current HTTP request.
-            obj: The record that the page edits; ``None`` on the add page.
-            change: Whether the form edits a stored record; passed to the parent.
-            **kwargs: Passed to ``super().get_form()``.
+            obj: The record that the page edits, or ``None`` on the add page.
+            change: Whether the form edits a stored record. The method passes it to the parent.
+            **kwargs: The method passes them to ``super().get_form()``.
 
         Returns:
             The form class. When the page shows the field, it has a ``categories`` field, whose
@@ -685,15 +687,15 @@ class ItemCategoryAssignmentMixin(TaxomeshAdminMixin, _ModelAdminMixinBase):
         """Save the record, then place its item in the selected categories through the service.
 
         ``super().save_model()`` stores the record first. When the page showed the ``categories``
-        field, ``items.place_in`` then places the item in each selected category that it is not in,
-        and ``items.remove_from`` removes it from each category that the field offers and that is
-        not selected.
+        field, the method then makes two changes. ``items.place_in`` places the item in each
+        selected category that it is not in. ``items.remove_from`` removes it from each category
+        that the field offers and that is not selected.
 
         Args:
             request: The current HTTP request.
             obj: The record that the admin saves.
             form: The bound admin form, with ``cleaned_data``.
-            change: ``True`` when the page edits a stored record; ``False`` when it adds one.
+            change: ``True`` when the page edits a stored record, and ``False`` when it adds one.
         """
         super().save_model(request, obj, form, change)
         _reconcile_categories(obj, form, self.taxomesh_external_id_attr)
@@ -764,7 +766,7 @@ class CategoryChildLinkForm(_CategoryLinkForm):
 class _LinkInlineMixin(_LinkInlineMixinBase):
     """An inline of links that reads the two ends of each link with the link, in one query.
 
-    The label of each row names both ends, so without this, each row would read them on its own.
+    The label of each link names both ends, so without this, each link would read them on its own.
     """
 
     # Any: the mixin serves the inline of each link model, with the model of its page.
@@ -800,7 +802,7 @@ class _CategoryLinkInline(_LinkInlineMixin, _CategoryParentLinkTabular):
         Args:
             db_field: The ForeignKey field descriptor.
             request: The current HTTP request.
-            **kwargs: Passed through to super().
+            **kwargs: The method passes them to ``super().formfield_for_foreignkey()``.
 
         Returns:
             The form field, whose choices are the stored categories without the implicit root.
@@ -821,11 +823,12 @@ class CategoryParentLinkInline(_CategoryLinkInline):
     def get_queryset(self, request: HttpRequest) -> models.QuerySet[CategoryParentLinkModel]:
         """Leave out the link to the implicit root, which this inline's parent select cannot show.
 
-        ``formfield_for_foreignkey`` removes the implicit root from the parent choices. If the link
-        to it were listed, its line would render a select with no option: the browser would send
-        no parent for that line, and each save of the page would fail on a missing required field.
-        The link stays stored, and only its line is not listed. The page shows it as the read-only
-        top-level flag, and the service adds or removes it as the other parents change.
+        ``formfield_for_foreignkey`` removes the implicit root from the parent choices. If the
+        inline listed the link to it, the line of that link would show a select with no option. The
+        browser would then send no parent for that line, and each save of the page would fail on a
+        required field with no value. The link stays stored: the inline only leaves out its line.
+        The page shows it as the read-only top-level flag, and the service adds or removes it as
+        the other parents change.
 
         Args:
             request: The current HTTP request.
@@ -967,10 +970,10 @@ class CategoryModelForm(_CategoryFormBase):
     """The form of a category: it refuses the reserved name of the implicit root.
 
     The service refuses the name too, on create and on rename. But ``save_model`` runs only after
-    Django accepts the form, so a refusal there would show on the page beside Django's own "was
-    added successfully", and Django would log an addition of a row that is not stored. Refused here,
-    the page shows the form again with the error under the field, as it does for an external id that
-    another category has.
+    Django accepts the form. A refusal there would show on the page beside Django's own "was added
+    successfully". Django would also log an addition of a row that is not stored. When this form
+    refuses the name, the page shows the form again with the error under the field. The page does
+    the same for an external id that another category has.
     """
 
     class Meta:
@@ -1044,7 +1047,7 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
 
         Args:
             request: The current HTTP request.
-            obj: The category that the page edits; ``None`` on the add page.
+            obj: The category that the page edits, or ``None`` on the add page.
         """
         return _fields_with_link(super().get_fields(request, obj), self._linked_model_setting())
 
@@ -1086,9 +1089,10 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
     def _may_move(self, request: HttpRequest, kind: str) -> bool:
         """Return whether the user may move a node of this kind: the change permission of its admin.
 
-        A category asks this admin, and an item the admin that the same site registers for items, so
-        an override of ``has_change_permission`` is obeyed. With no admin for items on the site,
-        Django's own rule answers: the user's ``change`` permission on the item model.
+        For a category, the method asks this admin. For an item, it asks the admin that the same
+        site registers for items. An override of ``has_change_permission`` therefore decides the
+        answer. When the site has no admin for items, Django's own rule answers: the user's
+        ``change`` permission on the item model.
         """
         if kind == DRAG_KIND_CATEGORY:
             return self.has_change_permission(request)
@@ -1099,7 +1103,7 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
             return request.user.has_perm(f"{opts.app_label}.{get_permission_codename('change', opts)}")
 
     def _move_refused(self, kind: str) -> JsonResponse:
-        """Answer a move that the user may not make: 403, in the shape the graph page shows."""
+        """Answer a move that the user may not make: 403, in the format that the graph page shows."""
         plural = "categories" if kind == DRAG_KIND_CATEGORY else "items"
         return JsonResponse(
             {"error": f"Moving {plural} needs the permission to change {plural}"}, status=HTTPStatus.FORBIDDEN
@@ -1109,8 +1113,9 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
     def _read_move(self, request: HttpRequest, fields: tuple[str, ...]) -> dict[str, Any] | JsonResponse:
         """Read the body of a move that the graph page sends, or return the answer that refuses it.
 
-        A move is a POST whose JSON object holds ``kind``, a kind the graph knows, and ``fields``,
-        from a user who may move that kind. A refusal answers 405, 400 or 403.
+        A move is a POST whose JSON object holds ``kind`` and each of ``fields``. ``kind`` names a
+        kind of node that the graph has, and the user may move that kind. A refusal answers 405,
+        400 or 403.
 
         Args:
             request: The current HTTP request.
@@ -1216,18 +1221,19 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
         return JsonResponse({"ok": True})
 
     def graph_view(self, request: HttpRequest) -> HttpResponse:
-        """Render the graph page: the top-level categories, whose children the page loads when it opens each one.
+        """Return the graph page: the top-level categories, whose children the page loads when it opens each one.
 
         The page reads the graph with ``enabled=None``, so the filter leaves out no category. It
-        starts at ``graph.roots``, so it does not draw the categories of a stored cycle that no
-        top-level category reaches, or a category that only those reach; ``graph.walk()`` yields
-        them all. When the graph holds only such categories, the page says "No categories found."
+        starts at ``graph.roots``. It therefore does not draw the categories of a stored cycle that
+        no top-level category reaches. It also does not draw a category that only those categories
+        reach. ``graph.walk()`` yields them all. When the graph holds only such categories, the
+        page says "No categories found."
 
         Args:
             request: The current HTTP request.
 
         Returns:
-            The rendered graph page.
+            The graph page.
         """
 
         error: str | None = None
@@ -1365,8 +1371,8 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
         Args:
             request: The current HTTP request.
             obj: The category that the page saves.
-            form: The bound form, which this method does not use; Django's interface passes it.
-            change: ``True`` when the page edits a stored row; ``False`` when it adds one.
+            form: The bound form, which this method does not use. Django's interface passes it.
+            change: ``True`` when the page edits a stored row, and ``False`` when it adds one.
         """
 
         svc = self._make_service()
@@ -1413,20 +1419,22 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
 
         Django's default ``save_formset`` writes the links through the ORM, which keeps whatever
         link to the implicit root the category has. ``add_parent`` and ``remove_parent`` keep the
-        top level instead: a category that gets a parent leaves it, and one that loses its last
-        parent returns to it. For a line whose pair changed, the new parent is added, then the old
-        one removed. The other inlines use Django's default save, through the ORM.
+        top level instead. A category that gets a parent leaves the top level. A category that
+        loses its last parent returns to it. For a line whose pair changed, the method adds the new
+        parent, then removes the old one. The other inlines use Django's default save, through the
+        ORM.
 
-        Each line is saved on its own, the deleted lines first. A line that the service refuses is
-        reported and changes nothing, so an edited line keeps its old link, and the lines after it
-        are saved. Each form checks its own line against the stored links, so two lines can still
-        make a cycle together; the service then refuses the second.
+        The method saves each line on its own, the deleted lines first. When the service refuses a
+        line, the method reports the refusal, and that line changes nothing. An edited line then
+        keeps its old link, and the method saves the lines after it. Each form checks its own line
+        against the stored links, so two lines can still make a cycle together. The service then
+        refuses the second.
 
         Args:
             request: The current HTTP request.
             form: The category form.
             formset: The inline formset that the page saves.
-            change: ``True`` when the page edits a stored category; ``False`` when it adds one.
+            change: ``True`` when the page edits a stored category, and ``False`` when it adds one.
         """
 
         if formset.model is not CategoryParentLinkModel:
@@ -1449,11 +1457,12 @@ class CategoryModelAdmin(_ServiceAdminMixin, _CategoryAdminBase):
     def at_top_level(self, obj: CategoryModel | None) -> bool | None:
         """Whether the category is at the top level: it has no parent.
 
-        Read-only, since the parents decide it. Adding a parent takes a category off the top level,
-        and removing its last one puts it back. Unknown on the add page, before any parent is saved.
+        The field is read-only, since the parents decide it. A category that gets a parent leaves
+        the top level, and a category that loses its last parent returns to it. The value is
+        unknown on the add page, before the page saves any parent.
 
         Args:
-            obj: The category being shown.
+            obj: The category that the page shows.
 
         Returns:
             ``True`` or ``False``, or ``None`` for a category not stored yet.
@@ -1528,7 +1537,7 @@ class ItemRelationLinkForm(_ItemRelationLinkFormBase):
 
 
 class _ItemRelationInlineBase(_LinkInlineMixin, _ItemRelationLinkTabular):
-    """The base of the two relation inlines; a subclass sets ``fk_name``, its names and ``autocomplete_fields``."""
+    """The base of the two relation inlines: a subclass sets ``fk_name``, its names and ``autocomplete_fields``."""
 
     model = ItemRelationLinkModel
     form = ItemRelationLinkForm
@@ -1582,7 +1591,7 @@ class ItemModelAdmin(_ServiceAdminMixin, _ItemAdminBase):
 
         Args:
             request: The current HTTP request.
-            obj: The item that the page edits; ``None`` on the add page.
+            obj: The item that the page edits, or ``None`` on the add page.
         """
         return _fields_with_link(super().get_fields(request, obj), self._linked_model_setting())
 
@@ -1598,8 +1607,8 @@ class ItemModelAdmin(_ServiceAdminMixin, _ItemAdminBase):
         Args:
             request: The current HTTP request.
             obj: The item that the page saves.
-            form: The bound form, which this method does not use; Django's interface passes it.
-            change: ``True`` when the page edits a stored row; ``False`` when it adds one.
+            form: The bound form, which this method does not use. Django's interface passes it.
+            change: ``True`` when the page edits a stored row, and ``False`` when it adds one.
         """
 
         svc = self._make_service()
@@ -1661,10 +1670,11 @@ class ItemModelAdmin(_ServiceAdminMixin, _ItemAdminBase):
         not through the service. For the outgoing and the incoming relation inlines, this method
         calls ``items.relate`` and ``items.unrelate`` instead.
 
-        Each line is saved on its own, the deleted lines first. For a line whose stored key changed,
-        the new relation is stored, then the old one removed, so a refused line keeps the relation
-        that it had. The key compared is the one that ``relate`` stores, so a relation type that
-        changes only in case or in the spaces around it is the same relation.
+        The method saves each line on its own, the deleted lines first. For a line whose stored key
+        changed, the method stores the new relation, then removes the old one. A refused line
+        therefore keeps the relation that it had. The method compares the key that ``relate``
+        stores. A relation type that changes only in case or in the spaces around it is therefore
+        the same relation.
 
         The other inlines use Django's default save, through the ORM.
 
@@ -1672,7 +1682,7 @@ class ItemModelAdmin(_ServiceAdminMixin, _ItemAdminBase):
             request: The current HTTP request.
             form: The form of the item.
             formset: The inline formset that the page saves.
-            change: ``True`` when the page edits a stored item; ``False`` when it adds one.
+            change: ``True`` when the page edits a stored item, and ``False`` when it adds one.
         """
 
         if formset.model is not ItemRelationLinkModel:
@@ -1709,10 +1719,10 @@ class ItemModelAdmin(_ServiceAdminMixin, _ItemAdminBase):
 class TagModelForm(_TagFormBase):
     """The form of a tag: it accepts a tag without metadata.
 
-    ``TagModel.metadata`` is declared without ``blank=True``, so the form that Django builds from it
-    would require the field and refuse ``{}``, the metadata of every tag created without any: the
-    admin could then neither add nor save such a tag. The field is optional here, because a change
-    to the model would need a migration.
+    The model declares ``TagModel.metadata`` without ``blank=True``. The form that Django builds
+    from it would therefore require the field and refuse ``{}``. That is the metadata of every tag
+    created without any, so the admin could then neither add nor save such a tag. The field is
+    optional here, because a change to the model would need a migration.
 
     It is the JSON field of the category and item forms, which reads an empty box as ``{}``. A
     plain optional field would read it as ``None``, which ``tags.update`` refuses. The add page
@@ -1756,8 +1766,8 @@ class TagModelAdmin(_ServiceAdminMixin, _TagAdminBase):
         Args:
             request: The current HTTP request.
             obj: The tag that the page saves.
-            form: The bound form, which this method does not use; Django's interface passes it.
-            change: ``True`` when the page edits a stored row; ``False`` when it adds one.
+            form: The bound form, which this method does not use. Django's interface passes it.
+            change: ``True`` when the page edits a stored row, and ``False`` when it adds one.
         """
 
         svc = self._make_service()
@@ -1842,7 +1852,7 @@ class TaxomeshDebugProxyAdmin(_StaffPageMixin, _DebugProxyAdminBase):
 
     # Any: an override takes what django-stubs' ModelAdmin.changelist_view takes, a context of any values.
     def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
-        """Render the debug page.
+        """Return the debug page.
 
         Args:
             request: The current HTTP request.
@@ -1850,7 +1860,7 @@ class TaxomeshDebugProxyAdmin(_StaffPageMixin, _DebugProxyAdminBase):
 
         Returns:
             The page, which shows ``TaxomeshService.info``, or the text of the error when the
-            service cannot be built or read.
+            method cannot build or read the service.
         """
 
         # Any: template context, one row per key; its values are TaxomeshInfo's, of several types.

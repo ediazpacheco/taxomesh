@@ -195,6 +195,7 @@ class TestEmittedNodeBudget:
             graph_to_dict(graph)
 
         assert str(MAX_EMITTED_NODES) in str(raised.value)
+        assert "a category appears once for each path to it" in str(raised.value)
 
     def test_a_shape_just_under_the_budget_still_serializes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Guard the guard: the budget must not fire early enough to break ordinary data.

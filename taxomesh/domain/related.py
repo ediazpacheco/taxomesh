@@ -14,8 +14,8 @@ class RelatedItems:
     """The items related to one queried item, grouped by relation type.
 
     One value of the mapping ``service.items.get_many_related`` returns, under the same
-    ``item_id`` it carries. Frozen and slotted, because it is a read model and not an entity: a
-    standard dataclass and not a Pydantic model, for the same reason as
+    ``item_id`` it carries. Frozen and slotted, because it is a read model and not an entity. It is
+    a standard dataclass and not a Pydantic model, for the same reason as
     :class:`~taxomesh.domain.info.RepositoryInfo`.
 
     Attributes:
@@ -35,15 +35,15 @@ class RelatedItems:
     by_type: Mapping[str, Sequence[Item]]
 
     def __post_init__(self) -> None:
-        """Replace ``by_type`` with a read-only copy, so the class keeps its promise to be frozen."""
+        """Replace ``by_type`` with a read-only copy, so that the mapping is frozen, as the class is."""
         object.__setattr__(self, "by_type", MappingProxyType(dict(self.by_type)))
 
     def of_type(self, relation_type: str) -> Sequence[Item]:
         """Return the items related under one relation type.
 
         Args:
-            relation_type: The relation type. Case and surrounding whitespace are ignored, as
-                everywhere else a relation type is accepted.
+            relation_type: The relation type. The member ignores case and surrounding whitespace,
+                as every member of the item collection does for a relation type.
 
         Returns:
             That type's items in resolution order, empty when there are none of that type.
@@ -58,8 +58,8 @@ class RelatedItems:
     def __iter__(self) -> Iterator[Item]:
         """Yield each related item once, by relation type and then in resolution order.
 
-        An item related under several types is yielded at its first occurrence only;
-        :meth:`of_type` is the per-type view.
+        Iteration yields an item related under several types at its first occurrence only.
+        :meth:`of_type` gives the items of one type.
         """
         seen: set[UUID] = set()
         for relation_type in self.relation_types:

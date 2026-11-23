@@ -56,13 +56,14 @@ logger = logging.getLogger(__name__)
 
 
 class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
-    """Items, reached as a container on the service.
+    """The item collection of a service.
 
-    The item reads and writes are here: subscript and the other lookups, the count, listing,
-    search, creation, update, deletion, placement, tagging and relations.
+    The item reads and writes are here: subscript and the lookups, the count, listing, search,
+    creation, update, deletion, placement, tagging and relations.
 
-    Reached as ``service.items`` and never constructed directly: every memoized read below keeps
-    its entries in the service's cache, which the service gives to this collection when it builds it.
+    A caller reaches it as ``service.items`` and never constructs it directly. Every memoized read
+    below keeps its entries in the service's cache. The service gives that cache to this collection
+    when it builds it.
     """
 
     _not_found: ClassVar[type[TaxomeshNotFoundError]] = TaxomeshItemNotFoundError
@@ -75,8 +76,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         Args:
             service: The owning service.
             cache: The service's cache, which holds the memoized reads below.
-            corpus: The item search corpus. The service holds it; this collection fills it on
-                search and drops it whenever it creates, updates or deletes an item.
+            corpus: The item search corpus. The service holds it. This collection fills it on
+                search, and drops it whenever it creates, updates or deletes an item.
         """
         super().__init__(service, cache=cache)
         self._corpus = corpus
@@ -85,7 +86,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         """Return the item this names, or raise.
 
         Args:
-            key: The item, or its identifier. Only the identifier is read.
+            key: The item, or its identifier. The method reads only the identifier.
 
         Returns:
             The stored ``Item``.
@@ -100,11 +101,12 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     def _lookup(self, item_id: UUID, /) -> Item:
         """Read one item through the cache.
 
-        The one cached read of a single row behind subscript, ``get`` and ``in``. It is
-        positional-only for the same reason as the category method: ``memoize`` builds the key
-        from the arguments as the call passes them, so a keyword call would build a different key.
+        This method is the one cached read of a single row behind subscript, ``get`` and ``in``.
+        It is positional-only for the same reason as the category method. ``memoize`` builds the
+        key from the arguments as the call passes them, so a keyword call would build a different
+        key.
 
-        **Nothing primes this method**, unlike the category one: the cache has no size bound and
+        **Nothing primes this method**, unlike the category one. The cache has no size bound and
         item rows are large, so a listing does not keep every row that it read.
 
         Raises:
@@ -137,20 +139,21 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         """Return the items these name, keyed by identifier.
 
         Args:
-            items: The item or identifier to look up, or a collection of them. An absent key is
-                left out of the result: it does not raise, and it does not appear with a ``None``
-                value.
+            items: The item or identifier to look up, or a collection of them. The method leaves
+                an absent key out of the result. It does not raise for that key, and the key does
+                not appear with a ``None`` value.
             enabled: ``True`` enabled only, ``False`` disabled only, ``None`` (the default) all.
                 The default agrees with subscript and :meth:`get`, which do not filter.
 
         Returns:
-            A mapping of item identifier to ``Item``, with only the items that were found. An
-            empty request is answered without a storage read. The answer is cached, and calls that
-            name the same items share one entry, in any order and with any repeats.
+            A mapping of item identifier to ``Item``, with only the items that the method found.
+            The method answers an empty request without a storage read. The service's cache keeps
+            the answer. Calls that name the same items and the same ``enabled`` share one entry, in
+            any order and with any repeats.
 
         Raises:
-            TypeError: If ``items`` is neither one key nor a collection, a key is neither an
-                ``Item`` nor a ``UUID``, or ``enabled`` is neither a ``bool`` nor ``None``.
+            TypeError: If ``items`` is neither one key nor a collection, or a key is neither an
+                ``Item`` nor a ``UUID``. Also if ``enabled`` is neither a ``bool`` nor ``None``.
         """
         _require_enabled(enabled)
         keys = (items,) if isinstance(items, (Item, UUID)) else items
@@ -168,7 +171,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     def delete(self, key: ItemRef, /) -> None:
         """Delete an item, with its placements, its tags and its relations in either direction.
 
-        The categories, tags and items it was linked to are not deleted.
+        The method does not delete the categories, tags and items that the item was linked to.
 
         Args:
             key: The item to delete, or its identifier.
@@ -190,8 +193,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
 
         Returns:
             The matching ``Item``, or ``None`` when no item has this slug. An empty slug is no
-            slug: it answers ``None`` without a storage read, however many items were created
-            without one.
+            slug. The method answers it with ``None`` and without a storage read, however many
+            items were created without a slug.
 
         Raises:
             TypeError: If ``slug`` is not a ``str``.
@@ -209,9 +212,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     def get_by_external_id(self, external_id: ExternalId, /) -> Item | None:
         """Return the item with this external id, or ``None``.
 
-        Answers ``None`` for an external id of ``None`` without a storage read. The external id
-        is converted to its stored form before the cached read, so ``42`` and ``"42"`` share one
-        cache entry.
+        The method answers ``None`` for an external id of ``None`` without a storage read. It
+        converts the external id to its stored form before the cached read, so ``42`` and ``"42"``
+        share one cache entry.
 
         Args:
             external_id: The external id: text, an integer or a UUID. Values with the same string
@@ -243,24 +246,26 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> Mapping[str, Item]:
         """Return the items for these external ids, keyed by external id.
 
-        Each value is converted to its stored text by the rule that writes use, and by nothing
-        else: the surrounding whitespace and the empty string are kept, as a write keeps them.
-        ``None`` is left out and a duplicate counts once, so calls that differ only in these
-        respects share one cache entry.
+        The method converts each value to its stored text by the rule that writes use, and by
+        nothing else. It keeps the surrounding whitespace and the empty string, as a write keeps
+        them. It leaves ``None`` out and counts a duplicate once, so calls that differ only in
+        these respects share one cache entry.
 
         Args:
-            external_ids: The external id to look up, or a collection of them. Text, integers and
-                UUIDs can be mixed: values with the same string form name the same row, and a
-                ``None`` adds nothing. An absent external id is left out of the result.
+            external_ids: The external id to look up, or a collection of them. A collection can
+                mix text, integers and UUIDs. Values with the same string form name the same row,
+                and a ``None`` adds nothing. The method leaves an absent external id out of the
+                result.
             enabled: ``True`` enabled only, ``False`` disabled only, ``None`` (the default) all.
 
         Returns:
-            A mapping of external id, as stored, to ``Item``, with only the items that were found.
+            A mapping of external id, as stored, to ``Item``, with only the items that the method
+            found.
 
         Raises:
-            TypeError: If an external id is not text, an integer, a UUID or ``None``,
-                ``external_ids`` is bytes or neither one external id nor a collection, or
-                ``enabled`` is neither a ``bool`` nor ``None``.
+            TypeError: If an external id is not text, an integer, a UUID or ``None``. Also if
+                ``external_ids`` is bytes, a bytearray or a memoryview, or is neither one external
+                id nor a collection. Also if ``enabled`` is neither a ``bool`` nor ``None``.
             TaxomeshRepositoryError: If the repository raises it.
         """
         _require_enabled(enabled)
@@ -288,11 +293,11 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             category: When it is given, only the items placed directly in this category, ordered
                 by sort index. The category or its identifier.
             recursive: When it is ``True`` and ``category`` is given, also the items of every
-                descendant category: each item once, however many categories of that subtree it
-                is placed in. The categories come in depth-first order from ``category``, the
-                items in sort-index order in each category, and an item placed in several
-                categories takes the position of its first placement. It has no effect without
-                ``category``.
+                descendant category. Each item comes once, however many categories of that subtree
+                it is placed in. The categories come in depth-first order from ``category``, and
+                the items in sort-index order in each category. An item placed in several
+                categories takes the position of its first placement. ``recursive`` has no effect
+                without ``category``.
             tag: When it is given, only the items that have this tag. Without ``category``, they
                 are ordered by name, then by identifier, as an unfiltered listing is: a tag link
                 has no sort index. With ``category``, the category's listing keeps its own order
@@ -304,7 +309,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
 
         Raises:
             TaxomeshCategoryNotFoundError: If ``category`` is given and names a category that is
-                not stored, or the implicit root. Checked before the tag.
+                not stored, or the implicit root. The method checks the category before the tag.
             TaxomeshTagNotFoundError: If ``tag`` is given and names a tag that is not stored.
             TaxomeshItemNotFoundError: If a placement or a tag link names an item that is not
                 stored, as when another writer deletes it during the call.
@@ -383,12 +388,12 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
 
         Without ``category``, the candidates come from a corpus whose fields are normalized once.
         The service holds the corpus for ``cache_ttl``, or until it next creates, updates or
-        deletes an item. With ``category``, the candidates are the items of that category: read
-        from the cached listing, or, with ``recursive``, from storage.
+        deletes an item. With ``category``, the candidates are the items of that category. The
+        method reads them from the cached listing, or, with ``recursive``, from storage.
 
         Args:
             query: The text to match against the name, the slug and the external id.
-            limit: The maximum number of results; at least 1.
+            limit: The maximum number of results, at least 1.
             category: When it is given, the search covers only this category. The category or its
                 identifier.
             recursive: Whether to include the items of the category's descendants. It has an
@@ -403,9 +408,10 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             TaxomeshValidationError: If ``limit`` is less than 1.
             TaxomeshCategoryNotFoundError: If ``category`` is given and names a category that is
                 not stored, or the implicit root.
-            TaxomeshItemNotFoundError: If the query is not blank, ``category`` is given without
-                ``recursive``, and a placement in that category names an item that is not stored,
-                as :meth:`list` raises. The recursive form skips such a placement.
+            TaxomeshItemNotFoundError: If a placement in ``category`` names an item that is not
+                stored, as :meth:`list` raises. The method raises it only when the query is not
+                blank and ``category`` is given without ``recursive``. The recursive form skips
+                such a placement.
             TypeError: If ``query`` is not a ``str``, ``limit`` not an ``int``, ``category``
                 neither a ``Category`` nor a ``UUID``, or ``enabled`` neither a ``bool`` nor ``None``.
         """
@@ -431,17 +437,17 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     def _ordered_subtree_item_ids(self, category_id: UUID) -> builtins.list[UUID]:
         """Return the identifiers of the items placed in this category or in a descendant, each once.
 
-        The shared half of the two recursive item reads: this collection's listing and the
-        candidate loader of :meth:`search`. The two do different things with a placement whose
-        item is not stored, so each caller reads the rows itself. The traversal, the placement
-        read and the order are here, so there is one of each.
+        This method is the part that the two recursive item reads share: this collection's listing
+        and the candidate loader of :meth:`search`. The two do different things with a placement
+        whose item is not stored, so each caller reads the rows itself. The traversal, the
+        placement read and the order are here, so there is one of each.
 
-        The order is the subtree's depth-first order, then ``sort_index`` in each category, and an
-        item placed in several categories keeps the position of its first placement. The
-        repository's own order would put ``category_id`` first, so the answer would depend on which
-        category got the lower identifier.
+        The order is the subtree's depth-first order, then ``sort_index`` in each category. An item
+        placed in several categories keeps the position of its first placement. The repository's
+        own order would put ``category_id`` first, so the answer would depend on which category got
+        the lower identifier.
 
-        Two reads, at any depth: the parent links, then the placements.
+        The method makes two storage reads at any depth: the parent links, then the placements.
 
         Args:
             category_id: The category to descend from. The caller checks it: whether it is stored,
@@ -477,15 +483,16 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> Sequence[Item]:
         """Return the item candidates that a search limited to a category ranks.
 
-        A search with no category reads its held corpus instead, so a category is always given
-        here.
+        A search with no category reads its held corpus instead, so the caller always gives a
+        category here.
 
         Args:
             category_id: The category that the search is limited to.
             recursive: When it is ``True``, include the items of every descendant category, each
                 item once.
             enabled: ``True`` (the default) enabled only, ``False`` disabled only, ``None`` all.
-                Applied when the rows are read, not afterwards.
+                The recursive form gives the filter to the repository. The other form reads the
+                cached listing for that ``enabled`` value.
 
         Returns:
             The items, each once.
@@ -518,10 +525,10 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         Args:
             name: The name of the item.
             slug: An optional slug: a text key for URLs, unique among items.
-            external_id: The optional external id, the key of your record; unique among items
-                when it is given. Text, an integer or a UUID: the string form is stored, so the
-                value read back is a string even when an ``int`` or a ``UUID`` was given, and
-                values with the same string form name the same row.
+            external_id: The optional external id, the key of your record. It is unique among
+                items when it is given. It is text, an integer or a UUID. The method stores the
+                string form, so the value read back is a string even when the caller gave an
+                ``int`` or a ``UUID``. Values with the same string form name the same row.
             metadata: Optional data of your own, stored with the item.
 
         Returns:
@@ -531,10 +538,10 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             TaxomeshDuplicateSlugError: If another item already has the slug.
             TaxomeshExternalIdConflictError: If another item already has the external id.
             TaxomeshValidationError: If the model refuses a value, such as a name over its maximum
-                length, or ``metadata`` is not plain JSON: a mapping whose keys are text and whose
-                values are text, finite numbers, booleans, ``None``, lists or tuples, and such
-                dicts. A tuple is taken as a list, and a ``StrEnum`` or ``IntEnum`` member as its
-                value; for another ``Enum``, pass ``.value``.
+                length, or ``metadata`` is not plain JSON. Plain JSON is a mapping whose keys are
+                text. Its values are text, finite numbers, booleans, ``None``, lists or tuples, and
+                such dicts. taxomesh takes a tuple as a list, and a ``StrEnum`` or ``IntEnum``
+                member as its value. For another ``Enum``, pass ``.value``.
             TypeError: If an argument is of a type the model does not take, or ``external_id`` is
                 not text, an integer, a UUID or ``None``.
         """
@@ -569,28 +576,33 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         """Update an item, and keep every field that the call does not give.
 
         Every field defaults to ``UNSET``, which keeps it as it is, and any other value replaces
-        it. ``None`` clears ``external_id``, the one nullable field, and is refused for the others.
+        it. ``None`` clears ``external_id``, the one nullable field, and the method refuses it for
+        the others.
 
-        The repository replaces the row with a new one, which this method returns; a row that a
-        caller already holds keeps the values it was read with. Every check comes before the save:
-        the slug and the external id against storage, and each new value against the model. The
-        read, the checks and the save run in one ``atomic()`` block, so no write of another block
-        lands between them. The save checks the external id again, for what this check cannot
-        see: a write made outside a block, or another stored item that already has the external id
-        that this item keeps. A refused update stores nothing.
+        The repository replaces the row with a new one, which this method returns. A row that a
+        caller already holds keeps the values it was read with.
+
+        Every check comes before the save: the slug and the external id against storage, and each
+        new value against the model. The read, the checks and the save run in one ``atomic()``
+        block, so no write of another block comes between them. The save checks the external id
+        again, for what this check cannot see. That is a write made outside a block, or another
+        stored item that already has the external id that this item keeps. A refused update stores
+        nothing.
 
         Args:
-            item: The item to update, or its identifier. Only the identifier is read: the update
-                applies to the stored row.
+            item: The item to update, or its identifier. The method reads only the identifier: the
+                update applies to the stored row.
             name: The new name.
-            slug: The new slug; ``""`` clears it.
+            slug: The new slug. ``""`` clears it.
             external_id: The new external id: text, an integer or a UUID, stored as its string
                 form. ``None`` clears it.
             enabled: The new enabled state.
-            metadata: The new metadata. It replaces the stored dict; it is not merged into it.
+            metadata: The new metadata. It replaces the stored dict. The method does not merge
+                the two.
             expected_version: The ``version`` of the row that the caller read. When it is given,
-                the update is made only if the stored row is still at that version; the repository
-                compares and writes in one step. ``None`` (the default) makes no comparison.
+                the repository makes the update only if the stored row is still at that version.
+                The repository compares and writes in one step. ``None`` (the default) makes no
+                comparison.
 
         Returns:
             The updated ``Item`` as stored, its version one higher than the row it replaced.
@@ -604,9 +616,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
                 maximum length, ``metadata`` is not plain JSON, or ``expected_version`` is below 0.
             TaxomeshVersionConflictError: If ``expected_version`` is given and the stored row is
                 no longer at it.
-            TypeError: If ``item`` is neither an ``Item`` nor a ``UUID``, a field other than
-                ``external_id`` is ``None``, a new value is of a type the model does not take, or
-                ``expected_version`` is neither an ``int`` nor ``None``.
+            TypeError: If ``item`` is neither an ``Item`` nor a ``UUID``, or a field other than
+                ``external_id`` is ``None``. Also if a new value is of a type the model does not
+                take, or ``expected_version`` is neither an ``int`` nor ``None``.
         """
         item_id = item_id_of(item)
         _require_version(expected_version)
@@ -628,12 +640,13 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     def place_in(self, item: ItemRef, category: CategoryRef, *, sort_index: int | None = None) -> ItemParentLink:
         """Place an item in a category. An item can be placed in several categories.
 
-        Idempotent: to place an item in a category that it is already placed in stores no second
-        placement, and a given ``sort_index`` updates the position of that one.
+        The method is idempotent. A call that places an item in a category where it is already
+        placed stores no second placement. A given ``sort_index`` updates the position of that
+        placement.
 
-        With no ``sort_index``, the method reads the category's placements to find the last one,
-        so its cost grows with the number of items in the category: a load of many items into one
-        category passes their positions.
+        With no ``sort_index``, the method reads the category's placements to find the last one.
+        So its cost grows with the number of items in the category. To load many items into one
+        category, pass their positions.
 
         Args:
             item: The item to place, or its identifier.
@@ -649,9 +662,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             TaxomeshCategoryNotFoundError: If the category is not stored, or is the implicit root.
             TaxomeshValidationError: If ``sort_index`` is a value that the link refuses, such as
                 text that is not a number.
-            TypeError: If ``item`` is neither an ``Item`` nor a ``UUID``, ``category`` neither a
-                ``Category`` nor a ``UUID``, or ``sort_index`` of a type the link does not take. All
-                three are refused before anything is read.
+            TypeError: If ``item`` is neither an ``Item`` nor a ``UUID``, or ``category`` neither a
+                ``Category`` nor a ``UUID``. Also if ``sort_index`` is of a type the link does not
+                take. The method refuses all three before it reads anything.
         """
         item_id = item_id_of(item)
         category_id = category_id_of(category)
@@ -672,7 +685,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         return link
 
     def remove_from(self, item: ItemRef, category: CategoryRef) -> None:
-        """Remove an item from one category; its other placements stay.
+        """Remove an item from one category, and keep its other placements.
 
         A no-op when the item is not placed in that category.
 
@@ -703,8 +716,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> ItemParentLink:
         """Move an item from one category to another.
 
-        Each item and category is given as itself or as its identifier. Every check comes before the
-        first write, so a refused move changes nothing.
+        The caller gives each item and category as itself or as its identifier. Every check comes
+        before the first write, so a refused move changes nothing.
 
         Args:
             item: The item to move.
@@ -762,9 +775,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> int:
         """Return the position of ``before`` among the placements of the category that an item joins.
 
-        A placement names only a stored item, so a ``before`` among the siblings costs no read. Only
-        a refused ``before`` is read, to choose its error: not-found when no item is stored with its
-        identifier, a validation error otherwise.
+        A placement names only a stored item, so a ``before`` among the siblings costs no read. The
+        method reads only a refused ``before``, to choose its error: not-found when no item is
+        stored with its identifier, a validation error otherwise.
 
         Args:
             before_id: The item that the moving item goes before.
@@ -800,9 +813,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             TaxomeshCategoryNotFoundError: If the category is not stored, or is the implicit root.
             TaxomeshValidationError: If an item is not placed in that category.
             TaxomeshRepositoryError: If storage fails while writing the order.
-            TypeError: If ``category`` is neither a ``Category`` nor a ``UUID``, an item neither an
-                ``Item`` nor a ``UUID``, or ``items`` is not a sequence: a set, a mapping or an
-                iterator.
+            TypeError: If ``category`` is neither a ``Category`` nor a ``UUID``, or an item neither
+                an ``Item`` nor a ``UUID``. Also if ``items`` is not a sequence: a set, a mapping or
+                an iterator.
         """
         category_id = category_id_of(category)
         _require_sequence("items", items)
@@ -825,13 +838,13 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             tag: The tag to add, or its identifier.
 
         Returns:
-            The tag link. When the item already has the tag, the same link, and nothing is
-            written again.
+            The tag link. When the item already has the tag, the method returns the same link, and
+            the repository writes nothing again.
 
         Raises:
-            TaxomeshTagNotFoundError: If the tag is not stored. Checked first, so a call with the
-                two identifiers in the wrong order raises this error, and does not link the wrong
-                pair.
+            TaxomeshTagNotFoundError: If the tag is not stored. The method checks the tag first.
+                So a call with the two identifiers in the wrong order raises this error, and does
+                not link the wrong pair.
             TaxomeshItemNotFoundError: If the item is not stored.
             TypeError: If ``item`` is neither an ``Item`` nor a ``UUID``, or ``tag`` neither a
                 ``Tag`` nor a ``UUID``.
@@ -852,7 +865,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             tag: The tag to remove, or its identifier.
 
         Raises:
-            TaxomeshTagNotFoundError: If the tag is not stored. Checked first, as in :meth:`tag`.
+            TaxomeshTagNotFoundError: If the tag is not stored. The method checks the tag first, as
+                in :meth:`tag`.
             TaxomeshItemNotFoundError: If the item is not stored.
             TypeError: If ``item`` is neither an ``Item`` nor a ``UUID``, or ``tag`` neither a
                 ``Tag`` nor a ``UUID``.
@@ -876,8 +890,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> ItemRelationLink:
         """Relate one item to another, in one direction.
 
-        To relate the same source, target and relation type again updates the metadata of that
-        relation, and a given ``sort_index`` its position; it does not add a second one.
+        A call that relates the same source, target and relation type again updates the metadata of
+        that relation. A given ``sort_index`` updates its position. The call does not add a second
+        relation.
 
         Args:
             source: The item that the relation goes from, or its identifier.
@@ -899,9 +914,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
                 or a blank relation type.
             TaxomeshValidationError: If the model refuses another value, such as a relation type
                 over its maximum length, or ``metadata`` is not plain JSON.
-            TypeError: If ``source`` or ``target`` is neither an ``Item`` nor a ``UUID``, or
+            TypeError: If ``source`` or ``target`` is neither an ``Item`` nor a ``UUID``. Also if
                 another argument is of a type the link does not take, such as a relation type that
-                is not text. Each is refused before anything is read.
+                is not text. The method refuses each before it reads anything.
         """
         source_item_id = item_id_of(source)
         target_item_id = item_id_of(target)
@@ -935,8 +950,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         Args:
             source: The item that the relation goes from, or its identifier.
             target: The item that the relation goes to, or its identifier.
-            relation_type: The type of the relation to remove. Case and surrounding whitespace
-                are ignored.
+            relation_type: The type of the relation to remove. The method ignores case and
+                surrounding whitespace.
 
         Raises:
             TaxomeshItemNotFoundError: If either item is not stored.
@@ -967,12 +982,12 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         Args:
             item: The item whose relations to return, or its identifier.
             relation_types: When it is given, only the relations of this type or of these types.
-                Case and surrounding whitespace are ignored; ``None`` or an empty collection means
-                every type.
+                The method ignores case and surrounding whitespace. ``None`` or an empty collection
+                means every type.
             direction: ``"outgoing"`` (the default) where the item is the source, ``"incoming"``
                 where it is the target, ``"both"`` for either, each link at most once. A relation
-                stored in both directions is two links, so ``"both"`` returns both. A
-                :class:`~taxomesh.domain.types.Direction` member is taken as its value.
+                stored in both directions is two links, so ``"both"`` returns both. The method
+                takes a :class:`~taxomesh.domain.types.Direction` member as its value.
 
         Returns:
             The matching relations, empty when there are none.
@@ -997,7 +1012,7 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> Sequence[ItemRelationLink]:
         """The cached read behind :meth:`list_relations`, keyed by the normalized arguments.
 
-        A stored link names only stored items, so the item is looked up only when the read
+        A stored link names only stored items. So the method looks up the item only when the read
         returns no link, and through the cache of single items.
 
         Raises:
@@ -1018,18 +1033,18 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> Sequence[Item]:
         """Return the items on the other end of an item's relations.
 
-        The related items are read in one batch and filtered by ``enabled``, as a listing is. A
-        relation whose other end is not stored is skipped, with a ``WARNING`` that names that end
-        as absent. No state of a related row makes this method raise.
+        The method reads the related items in one batch and filters them by ``enabled``, as a
+        listing does. It skips a relation whose other end is not stored, with a ``WARNING`` that
+        names that end as absent. No state of a related row makes this method raise.
 
         Args:
             item: The item whose related items to return, or its identifier.
             relation_types: When it is given, only the relations of this type or of these types.
-                Case and surrounding whitespace are ignored; ``None`` or an empty collection means
-                every type.
+                The method ignores case and surrounding whitespace. ``None`` or an empty collection
+                means every type.
             direction: ``"outgoing"`` (the default) returns the targets, ``"incoming"`` the
-                sources, ``"both"`` the other end of every link of the item. A
-                :class:`~taxomesh.domain.types.Direction` member is taken as its value.
+                sources, ``"both"`` the other end of every link of the item. The method takes a
+                :class:`~taxomesh.domain.types.Direction` member as its value.
             enabled: ``True`` (the default) enabled related items only, ``False`` disabled only,
                 ``None`` all. The state of the queried item has no effect.
 
@@ -1039,8 +1054,9 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
         Raises:
             TaxomeshItemNotFoundError: If the item is not stored.
             TaxomeshValidationError: If ``direction`` is text naming no direction.
-            TypeError: If ``item`` is neither an ``Item`` nor a ``UUID``, a relation type is not a
-                ``str``, ``direction`` is not text, or ``enabled`` is neither a ``bool`` nor ``None``.
+            TypeError: If ``item`` is neither an ``Item`` nor a ``UUID``, or a relation type is not
+                a ``str``. Also if ``direction`` is not text, or ``enabled`` is neither a ``bool``
+                nor ``None``.
         """
         _require_enabled(enabled)
         return self._related(
@@ -1089,39 +1105,39 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> Mapping[UUID, RelatedItems]:
         """Return the related items for many items at once, in two repository calls.
 
-        One batch read of the links and one batch read of the items, in every direction and for
-        any number of identifiers: never one read for each item. The related items are filtered
-        by ``enabled``, as a listing is. A relation whose other end is not stored is skipped, with
-        a ``WARNING`` that names that end as absent. No state of a related row makes this method
-        raise. On Django, a call with more keys than the database takes in one query runs as
-        several queries.
+        The method makes one batch read of the links and one batch read of the items, in every
+        direction and for any number of identifiers. It never makes one read for each item. It
+        filters the related items by ``enabled``, as a listing does. It skips a relation whose
+        other end is not stored, with a ``WARNING`` that names that end as absent. No state of a
+        related row makes this method raise. On Django, a call with more keys than the database
+        takes in one query runs as several queries.
 
         Args:
             items: The queried item or its identifier, or a collection of them. The order and the
                 duplicates have no effect.
             relation_types: When it is given, only the relations of this type or of these types.
-                Case and surrounding whitespace are ignored; ``None`` or an empty collection means
-                every type.
+                The method ignores case and surrounding whitespace. ``None`` or an empty collection
+                means every type.
             direction: ``"outgoing"`` (the default) returns the items that these relate to,
-                ``"incoming"`` the items that relate to these, ``"both"`` the two together. A
-                :class:`~taxomesh.domain.types.Direction` member is taken as its value.
+                ``"incoming"`` the items that relate to these, ``"both"`` the two together. The
+                method takes a :class:`~taxomesh.domain.types.Direction` member as its value.
             enabled: ``True`` (the default) enabled related items only, ``False`` disabled only,
                 ``None`` all. The state of the queried items has no effect.
 
         Returns:
-            A mapping of queried item identifier to its :class:`RelatedItems`. A queried item
-            with no matching relation is absent, and a queried item that is not stored is absent
-            too: these are keys asked about, not subjects. In one relation type, ``"outgoing"``
-            items are ordered by ``(sort_index, target identifier)``, ``"incoming"`` items by
-            ``(sort_index, source identifier)``, and ``"both"`` lists first the items that the
-            outgoing links give.
+            A mapping of queried item identifier to its :class:`RelatedItems`. The mapping leaves
+            out a queried item with no related item to return. It leaves out a queried item that is
+            not stored too: these are keys asked about, not subjects. In one relation type,
+            ``"outgoing"`` items are ordered by ``(sort_index, target identifier)``, ``"incoming"``
+            items by ``(sort_index, source identifier)``, and ``"both"`` lists first the items that
+            the outgoing links give.
 
         Raises:
             TaxomeshValidationError: If ``direction`` is text naming no direction.
-            TypeError: If ``items`` is neither one item nor a collection, a queried item is neither
-                an ``Item`` nor a ``UUID``, a relation type is not a ``str``, ``direction`` is not
-                text, or ``enabled`` is neither a ``bool`` nor ``None``. Each is refused even when
-                no item is asked about.
+            TypeError: If ``items`` is neither one item nor a collection, or a queried item is
+                neither an ``Item`` nor a ``UUID``. Also if a relation type is not a ``str``,
+                ``direction`` is not text, or ``enabled`` is neither a ``bool`` nor ``None``. The
+                method refuses each even when the call asks about no item.
 
         Example::
 
@@ -1129,12 +1145,16 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             found[item_a.item_id].of_type("related_to")  # (item_b,)
 
         Note:
-            Calls share one cache entry when they differ only in the order of the identifiers, the
-            duplicates, an item or its identifier, one value or a collection that holds it, or
-            the case and the whitespace of a relation type; ``direction`` and ``enabled`` are part
-            of the key. The mapping is a new dict on every call. Each ``by_type`` is read-only and new on
-            every call, and each group is a tuple of frozen rows, so a change that one caller makes
-            reaches no other call.
+            Calls share one cache entry when they differ only in these respects:
+
+            - the order of the identifiers, and the duplicates
+            - an item or its identifier
+            - one value or a collection that holds it
+            - the case and the whitespace of a relation type
+
+            ``direction`` and ``enabled`` are part of the key. The mapping is a new dict on every
+            call. Each ``by_type`` is read-only and new on every call, and each group is a tuple of
+            frozen rows. So a change that one caller makes reaches no other call.
         """
         _require_enabled(enabled)
         normalised_types = _normalise_relation_types(relation_types)
@@ -1163,11 +1183,11 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
     ) -> dict[UUID, dict[str, tuple[Item, ...]]]:
         """The cached read behind :meth:`get_many_related`, keyed by the normalized arguments.
 
-        Reads every direction with **one** batch read of the links
-        (:meth:`list_item_relation_links_batch`) and one batch read of the items: two repository
-        calls in all, ``"both"`` included. Each link gives one :class:`_End` for each queried end
-        that it has. For ``"both"``, the ends are sorted again, so that each group lists first the
-        items that the outgoing links give, then those that the incoming links give.
+        The method reads every direction with **one** batch read of the links
+        (:meth:`list_item_relation_links_batch`) and one batch read of the items. That is two
+        repository calls in all, ``"both"`` included. Each link gives one :class:`_End` for each
+        queried end that it has. For ``"both"``, the method sorts the ends again. So each group
+        lists first the items that the outgoing links give, then those that the incoming links give.
         """
         links = self._repo.list_item_relation_links_batch(item_ids, direction=direction, relation_types=relation_types)
         if not links:
@@ -1225,7 +1245,7 @@ def _normalise_relation_types(relation_types: str | Collection[str] | None) -> t
     """Strip each type and put it in lowercase, as ``relate`` stores it, and make one sorted, hashable key.
 
     One string is one type. ``None`` and an empty collection both mean every type, and both come
-    back as ``None``; ``""`` is one type, which no relation has.
+    back as ``None``. ``""`` is one type, which no relation has.
 
     Raises:
         TypeError: If ``relation_types`` is neither a string nor a collection, or a type in it is
@@ -1267,7 +1287,7 @@ def _log_absent_end(
     relation_type: str,
     absent_is_target: bool,
 ) -> None:
-    """Log the WARNING for a relation that is skipped because its other end is not stored.
+    """Log the WARNING for a relation that a read skips because its other end is not stored.
 
     *present_id* is the queried end, and *absent_id* the end that names no stored item. The roles
     come from the link itself, source or target, so the message is correct in every direction.
