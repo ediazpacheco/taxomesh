@@ -487,7 +487,7 @@ class FileRepositoryBase(ABC):
 
         The given row does not change. An update stores the version of the row that it replaces
         plus one. A write that stores the implicit root also restores the top-level invariant, as a
-        load does: each category that holds no parent link gains a link to the root.
+        load does. Each category that holds no parent link gains a link to the root.
 
         Args:
             category: The category row to store.

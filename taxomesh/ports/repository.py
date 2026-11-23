@@ -37,12 +37,13 @@ class TaxomeshRepositoryBase(Protocol):
     A store holds the implicit root: a ``Category`` row named ``__root__``. Its identifier can be
     any ``UUID``, because the service finds the row by its name. When the service is built over a
     store that holds no such row, it stores one. Each top-level category holds a parent link to the
-    implicit root, and the service writes these links. A category that holds no parent link is not
-    at the top level: ``svc.categories.roots()`` and ``svc.graph().roots`` leave it out, and nothing
-    raises. So a backend that loads a store written without these links first stores the implicit
-    root, when the store holds none, and links each category that holds no parent link to it. The
-    file repositories link them when they load a file that holds the implicit root, or in the write
-    that stores it.
+    implicit root, and the service writes these links.
+
+    A category that holds no parent link is not at the top level: ``svc.categories.roots()`` and
+    ``svc.graph().roots`` leave it out, and nothing raises. So a backend that loads a store written
+    without these links repairs it. It first stores the implicit root, when the store holds none.
+    Then it links each category that holds no parent link to the root. The file repositories link
+    them when they load a file that holds the implicit root, or in the write that stores it.
     """
 
     # --- Atomicity boundary ---
