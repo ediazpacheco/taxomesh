@@ -261,9 +261,10 @@ assert {c.name for c in svc.categories.roots()} == {"Recorded music", "Jazz"}
 - No signature names the implicit root: `None` stands for the top level in `move` and `reorder`.
   Every member treats the identifier of the implicit root as that of a category that is not
   stored. `get` answers `None`, and subscript or a filter raises not-found.
-- A store that breaks the invariant is repaired. A file repository repairs it when it loads a file
-  that holds the implicit root. Django migration `0011_root_invariant` repairs it once, and
-  `0012_implicit_root` stores the implicit root once and merges any duplicates.
+- A store that breaks the invariant is repaired. A file repository repairs it when it loads its
+  file, or, in a file that holds no implicit root, in the write that stores the root. Django
+  migration `0011_root_invariant` repairs it once, and `0012_implicit_root` stores the implicit root
+  once and merges any duplicates.
 
 **Why:** "top level" has one meaning, which every read agrees on. To list the top level, a member
 reads the links to the implicit root, then the rows that they name. It does not read the parents of

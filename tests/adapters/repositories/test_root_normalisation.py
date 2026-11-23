@@ -9,6 +9,10 @@ link, and no item is placed in the root. A store written without it loads with i
 
 Loading never writes: the file changes with the next save, and a store that already holds the
 invariant is not rewritten at all.
+
+A file that holds categories and no implicit root has no root to link them to as it loads. The
+repository restores the invariant in the write that stores the root, so the service that stores it
+lists the same top level as a repository that loads the file afterwards.
 """
 
 import json
@@ -23,6 +27,7 @@ from taxomesh.adapters.repositories.json_repository import JsonRepository
 from taxomesh.adapters.repositories.yaml_repository import YamlRepository
 from taxomesh.application.service import TaxomeshService
 from taxomesh.domain.models import CategoryParentLink, ItemParentLink
+from taxomesh.exceptions import TaxomeshRepositoryError
 
 BACKENDS = ("json", "yaml")
 
@@ -150,3 +155,71 @@ def test_a_store_that_holds_the_invariant_is_not_rewritten(backend: str, tmp_pat
     reopened.items.list(category=music.category_id)
 
     assert path.read_bytes() == written
+
+
+def _without_the_root(backend: str, path: Path, root_id: UUID) -> None:
+    """Rewrite the file without the root row and without the links to it."""
+    text = path.read_text(encoding="utf-8")
+    # Any: the parsed file, indexed by the keys a store writes.
+    data: dict[str, Any] = json.loads(text) if backend == "json" else yaml.safe_load(text)
+    del data["categories"][str(root_id)]
+    data["category_parent_links"] = [
+        lnk for lnk in data["category_parent_links"] if lnk["parent_category_id"] != str(root_id)
+    ]
+    path.write_text(json.dumps(data) if backend == "json" else yaml.safe_dump(data), encoding="utf-8")
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_a_file_without_a_root_gets_its_top_level_when_the_service_stores_the_root(
+    backend: str, tmp_path: Path
+) -> None:
+    path = tmp_path / f"store.{backend}"
+    seeded = TaxomeshService(repository=_open(backend, path))
+    music = seeded.categories.create("Music")
+    jazz = seeded.categories.create("Jazz")
+    seeded.categories.add_parent(jazz.category_id, music.category_id)
+    stray = seeded.categories.create("Stray")
+    _without_the_root(backend, path, seeded._root_id)
+
+    first = TaxomeshService(repository=_open(backend, path))
+
+    root_id = first._root_id
+    assert root_id != seeded._root_id
+    assert _parents(first, music.category_id) == {root_id: 0}
+    assert _parents(first, stray.category_id) == {root_id: 0}
+    assert _parents(first, jazz.category_id) == {music.category_id: 0}
+    assert {c.name for c in first.categories.roots()} == {"Music", "Stray"}
+    assert [n.category.name for n in first.graph().roots] == [c.name for c in first.categories.roots()]
+
+    links, _ = _on_disk(backend, path)
+    assert {(child, parent) for child, parent, _ in links} == {
+        (str(music.category_id), str(root_id)),
+        (str(stray.category_id), str(root_id)),
+        (str(jazz.category_id), str(music.category_id)),
+    }
+
+    second = TaxomeshService(repository=_open(backend, path))
+    assert second._root_id == root_id
+    assert [c.name for c in second.categories.roots()] == [c.name for c in first.categories.roots()]
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_a_failed_write_of_the_root_leaves_memory_without_the_root_links(
+    backend: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / f"store.{backend}"
+    seeded = TaxomeshService(repository=_open(backend, path))
+    music = seeded.categories.create("Music")
+    _without_the_root(backend, path, seeded._root_id)
+    repository = _open(backend, path)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise OSError("the disk is full")
+
+    with monkeypatch.context() as patched:
+        patched.setattr("os.replace", refuse)
+        with pytest.raises(TaxomeshRepositoryError):
+            TaxomeshService(repository=repository)
+
+    assert repository.list_category_parent_links(category_ids=[music.category_id]) == []
+    assert [c.name for c in repository.list_categories(enabled=None)] == ["Music"]
