@@ -24,7 +24,7 @@ class ItemRelationLink(MetadataModelBase):
         relation_type: Your own label for the relation, at most ``RELATION_TYPE_MAX_LENGTH``
             characters, stored stripped and in lowercase.
         sort_index: The relation's position among the item's relations, lower first.
-        metadata: Plain JSON. It cannot be changed, at any level.
+        metadata: Plain JSON. It is frozen at every level.
     """
 
     source_item_id: UUID

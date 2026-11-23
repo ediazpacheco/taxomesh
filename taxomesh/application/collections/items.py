@@ -264,9 +264,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
 
         Raises:
             TypeError: If an external id is not text, an integer, a UUID or ``None``. Also if
-                ``external_ids`` is bytes, a bytearray or a memoryview, or is neither one external id nor a
-                collection. Also if
-                ``enabled`` is neither a ``bool`` nor ``None``.
+                ``external_ids`` is bytes, a bytearray or a memoryview, or is neither one external
+                id nor a collection. Also if ``enabled`` is neither a ``bool`` nor ``None``.
             TaxomeshRepositoryError: If the repository raises it.
         """
         _require_enabled(enabled)
@@ -492,8 +491,8 @@ class ItemCollection(_UniqueKeysCollection[Item, ItemRef]):
             recursive: When it is ``True``, include the items of every descendant category, each
                 item once.
             enabled: ``True`` (the default) enabled only, ``False`` disabled only, ``None`` all.
-                The recursive form gives the filter to the repository. The other form filters the
-                cached listing.
+                The recursive form gives the filter to the repository. The other form reads the
+                cached listing for that ``enabled`` value.
 
         Returns:
             The items, each once.

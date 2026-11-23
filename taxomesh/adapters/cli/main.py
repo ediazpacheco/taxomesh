@@ -212,7 +212,7 @@ def category_create(
     ctx: typer.Context,
     name: str = typer.Option(..., "--name", help="Name of the category"),
     description: str = typer.Option("", "--description", help="Description of the category"),
-    slug: str = typer.Option("", "--slug", help="Slug, unique within its kind"),
+    slug: str = typer.Option("", "--slug", help="Slug, unique within its kind (by default, none)"),
     external_id: str | None = typer.Option(None, "--external-id", help=EXTERNAL_ID_HELP),
 ) -> None:
     """Create a category at the top level."""
@@ -325,7 +325,7 @@ def item_list(
 def item_create(
     ctx: typer.Context,
     name: str = typer.Option(..., "--name", help="Name of the item"),
-    slug: str = typer.Option("", "--slug", help="Slug, unique within its kind"),
+    slug: str = typer.Option("", "--slug", help="Slug, unique within its kind (by default, none)"),
     external_id: str | None = typer.Option(None, "--external-id", help=EXTERNAL_ID_HELP),
 ) -> None:
     """Create an item."""
@@ -640,8 +640,8 @@ def _draw_graph(
     for emitted, visit in enumerate(walk_paths(roots, tree), 1):
         if emitted > MAX_EMITTED_NODES:
             _err(
-                f"This graph would draw more than {MAX_EMITTED_NODES} categories, because a category appears once "
-                "for each path to it: give a smaller --max-depth"
+                f"This graph would draw more than {MAX_EMITTED_NODES} categories: a category appears once for "
+                "each path to it, so give a smaller --max-depth"
             )
         category = visit.node.category
         label = f"[bold cyan]{category}[/bold cyan]  {_state_icon(category.enabled)}"

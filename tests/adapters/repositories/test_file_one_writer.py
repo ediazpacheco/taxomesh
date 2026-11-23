@@ -21,7 +21,7 @@ type FileKind = Literal["json", "yaml"]
 type FileRepository = JsonRepository | YamlRepository
 
 # What the refusal says to do.
-CURE = "build a new repository"
+CURE = "read it: build a new repository to read the change$"
 
 
 def _open(kind: FileKind, path: Path) -> FileRepository:

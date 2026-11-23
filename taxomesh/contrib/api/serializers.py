@@ -70,8 +70,8 @@ def graph_to_dict(graph: TaxomeshGraph) -> dict[str, Any]:
     for emitted, visit in enumerate(walk_paths(graph.roots, roots), 1):
         if emitted > MAX_EMITTED_NODES:
             raise TaxomeshGraphTooLargeError(
-                f"This graph would emit more than {MAX_EMITTED_NODES} nodes: its {len(graph)} stored categories "
-                "give more, because a category appears once for each path to it"
+                f"Serializing this graph would emit more than {MAX_EMITTED_NODES} nodes: it holds {len(graph)} "
+                "categories, and a category appears once for each path to it"
             )
         # Any: an emitted node dict is a heterogeneous JSON mix (str, bool, list, nested dict).
         children: list[dict[str, Any]] = []

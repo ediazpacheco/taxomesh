@@ -58,8 +58,8 @@ def dump_config(repo_type: str, repo_detail: str, name: str | None = None) -> st
 
     The output is valid TOML, which ``tomllib.loads()`` reads. Above each key, comments say what
     the key controls. They also give the default of a key that has one, and the values that ``type``
-    accepts. The key names come from
-    ``CONFIG_KEYS``, so this function holds no key name as a literal.
+    accepts. The key names come from ``CONFIG_KEYS``, so this function holds no key name as a
+    literal.
 
     Args:
         repo_type: The repository type that the configuration selects, such as ``"yaml"``,

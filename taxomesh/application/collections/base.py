@@ -124,10 +124,10 @@ def _require_plain_json(metadata: object, /) -> None:
 def _not_json(value: object, where: str, open_containers: dict[int, str], /) -> str | None:
     """Return why ``value``, found at ``where``, is not plain JSON, or ``None`` when it is.
 
-    ``open_containers`` maps each dict, list and tuple on the path down to ``value`` to where the function
-    found it, as ``json.dumps`` keeps its markers. A dict, a list or a tuple that the function meets again
-    on its own path contains itself. One held twice side by side is not on its own path, and is
-    plain JSON twice.
+    ``open_containers`` maps each dict, list and tuple on the path down to ``value`` to where the
+    function found it, as ``json.dumps`` keeps its markers. A dict, a list or a tuple that the
+    function meets again on its own path contains itself. One held twice side by side is not on its
+    own path, and is plain JSON twice.
     """
     children: list[tuple[str, object]] = []
     if isinstance(value, float) and not math.isfinite(value):

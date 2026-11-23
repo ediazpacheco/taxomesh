@@ -100,8 +100,8 @@ class CategoryNode:
         outside the subtree is not a node of this graph.
 
         Returns:
-            The ancestor nodes. Empty for a top-level category, and for the ``root`` category of a limited
-            graph.
+            The ancestor nodes. Empty for a top-level category, and for ``root`` in a graph limited
+            by ``root``.
         """
         return self._graph._ancestor_nodes(self._category.category_id)
 

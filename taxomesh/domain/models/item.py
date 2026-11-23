@@ -28,7 +28,7 @@ class Item(MetadataModelBase):
         slug: A text key for URLs, unique among items. ``""`` is no slug.
         enabled: ``False`` leaves the item out of listings, searches and related reads, at the
             default of their ``enabled`` filter.
-        metadata: Plain JSON. It cannot be changed, at any level.
+        metadata: Plain JSON. It is frozen at every level.
         created_at: When ``create`` stored the row. The audit epoch, 1970-01-01 UTC, on a row
             stored without one.
         updated_at: When ``create`` or the latest ``update`` stored the row. The audit epoch on a

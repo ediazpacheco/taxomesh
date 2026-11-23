@@ -226,8 +226,8 @@ def _freeze(value: object) -> object:
     plain text. The function returns any other value as it is.
 
     The two comprehensions keep a value whose exact type is in :data:`_JSON_LEAF_TYPES` where they
-    read it, and call this function for any other value. The shipped backends read the metadata that
-    taxomesh wrote back as dicts and lists of such values. So freezing it makes one call for each
+    read it, and call this function for any other value. The shipped backends read back the metadata
+    that taxomesh wrote as dicts and lists of such values. So freezing it makes one call for each
     dict and list, and none for each value. ``bool`` has no subclass, so the comprehensions keep
     every ``bool`` and never pass one to this function. The ``int`` branch of this function would
     return a ``bool`` as an ``int``.

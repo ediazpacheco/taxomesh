@@ -106,8 +106,8 @@ class TaxomeshService:
                 ``TaxomeshRepositoryBase``, or if ``cache_ttl`` is not a number. A path is not a
                 ``TaxomeshRepositoryBase``, and neither is an object that lacks a member of the
                 port. The service checks the repository with ``isinstance``. That check does not
-                see a member that ``__getattr__`` gives. Pass a class that forwards the port that way
-                to ``TaxomeshRepositoryBase.register``.
+                see a member that ``__getattr__`` gives. Pass a class that forwards the port that
+                way to ``TaxomeshRepositoryBase.register``.
             TaxomeshValidationError: If ``cache_ttl`` is negative or NaN. The service checks it
                 before it reads the config file or storage.
             TaxomeshConfigError: If the config file exists but cannot be read or parsed, or names a
@@ -294,10 +294,10 @@ class TaxomeshService:
                 then empty, as it is for a category that has no items.
 
         Returns:
-            A ``TaxomeshGraph`` snapshot. Its ``roots`` is empty when the graph holds no top-level category. The
-            nodes in ``roots`` are ordered by the ``sort_index`` of their link to the implicit root,
-            then by identifier. In a graph limited by ``root``, the only node in ``roots`` is
-            ``root``.
+            A ``TaxomeshGraph`` snapshot. Without ``root``, its ``roots`` is empty when the snapshot
+            holds no top-level category. The nodes in ``roots`` are ordered by the ``sort_index`` of
+            their link to the implicit root, then by identifier. In a graph limited by ``root``, the
+            only node in ``roots`` is ``root``.
 
         Raises:
             TaxomeshCategoryNotFoundError: If ``root`` names a category that is not stored, or names

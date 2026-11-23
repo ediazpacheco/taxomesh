@@ -183,9 +183,9 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         Returns:
             A mapping of category identifier to ``Category``, with only the categories that the
-            method found. The method answers an empty request without a storage read. It caches the
-            answer. Calls that name the same categories and the same ``enabled`` share one entry,
-            in any order and with any repeats.
+            method found. The method answers an empty request without a storage read. The service's
+            cache keeps the answer. Calls that name the same categories and the same ``enabled``
+            share one entry, in any order and with any repeats.
 
         Raises:
             TypeError: If ``categories`` is neither one key nor a collection, or a key is neither
@@ -338,9 +338,8 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
 
         Raises:
             TypeError: If an external id is not text, an integer, a UUID or ``None``. Also if
-                ``external_ids`` is bytes, a bytearray or a memoryview, or is neither one external id nor a
-                collection. Also if
-                ``enabled`` is neither a ``bool`` nor ``None``.
+                ``external_ids`` is bytes, a bytearray or a memoryview, or is neither one external
+                id nor a collection. Also if ``enabled`` is neither a ``bool`` nor ``None``.
             TaxomeshRepositoryError: If the repository raises it.
         """
         _require_enabled(enabled)
@@ -593,7 +592,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             description: An optional longer description.
             slug: An optional slug: a text key for URLs, unique among categories.
             external_id: The optional external id, the key of your record. It is unique among
-                categories when it is given. Text, an integer or a UUID. The method stores its
+                categories when it is given. It is text, an integer or a UUID. The method stores its
                 string form, so a read returns a string even when the caller gave an ``int`` or a
                 ``UUID``. Values with the same string form name the same row.
             metadata: Optional data of your own, stored with the category.
@@ -608,7 +607,7 @@ class CategoryCollection(_UniqueKeysCollection[Category, CategoryRef]):
             TaxomeshValidationError: If the model refuses a value, such as a name over its maximum
                 length, or ``metadata`` is not plain JSON. Plain JSON is a mapping whose keys are
                 text and whose values are text, finite numbers, booleans, ``None``, lists or
-                tuples, and such dicts. The method takes a tuple as a list, and a ``StrEnum`` or
+                tuples, and such dicts. taxomesh takes a tuple as a list, and a ``StrEnum`` or
                 ``IntEnum`` member as its value. For another ``Enum``, pass ``.value``.
             TaxomeshRepositoryError: If storage fails while writing the category or its link to the
                 top level.
