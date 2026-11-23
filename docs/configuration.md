@@ -34,7 +34,7 @@ names ([CLI reference](cli.md)).
 `taxomesh --show-config` prints the configuration in effect as TOML, which a file can hold as it
 is. It shows the accepted values of `type`, and the default of each key that it prints. Redirect it to a
 new file, such as `taxomesh --show-config > taxomesh.toml.new`. Never redirect it to the
-`taxomesh.toml` in use: the shell empties that file before taxomesh reads it, and the file then
+`taxomesh.toml` in use. The shell empties that file before taxomesh reads it, and the file then
 holds only the defaults.
 [`taxomesh.toml.example`](../taxomesh.toml.example) is a ready-to-use template.
 
