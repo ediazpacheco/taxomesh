@@ -51,7 +51,7 @@ its own default. `_config.py` imports the two constants only to report which pat
 resolves to. It never repeats their values. `tests/service/test_service_config.py` asserts that the
 backend gets no path argument and that `_config.py` writes no file path.
 
-**The port reports absence and the service raises.**
+**The port.** It reports absence, and the service raises:
 
 - The port, `TaxomeshRepositoryBase`, is a `typing.Protocol`, so a backend inherits nothing. mypy
   checks that a backend has the members of the port. The service checks them with `isinstance` when
@@ -261,9 +261,10 @@ assert {c.name for c in svc.categories.roots()} == {"Recorded music", "Jazz"}
 - No signature names the implicit root: `None` stands for the top level in `move` and `reorder`.
   Every member treats the identifier of the implicit root as that of a category that is not
   stored. `get` answers `None`, and subscript or a filter raises not-found.
-- A store that breaks the invariant is repaired. A file repository repairs it when it loads a file
-  that holds the implicit root. Django migration `0011_root_invariant` repairs it once, and
-  `0012_implicit_root` stores the implicit root once and merges any duplicates.
+- A store that breaks the invariant is repaired. A file repository repairs it when it loads its
+  file, or, in a file that holds no implicit root, in the write that stores the root. Django
+  migration `0011_root_invariant` repairs it once, and `0012_implicit_root` stores the implicit root
+  once and merges any duplicates.
 
 **Why:** "top level" has one meaning, which every read agrees on. To list the top level, a member
 reads the links to the implicit root, then the rows that they name. It does not read the parents of
@@ -403,8 +404,8 @@ absence of logic in a handler, or the imports of `contrib/api`.
 | A write's checks and writes are one step | `tests/service/test_concurrent_writes.py`, `tests/contrib/django/test_concurrent_writes.py` |
 | The handlers' names and contracts | `tests/contrib/test_api_handlers.py` |
 
-Tests enforce the rules listed here, so a change that breaks one of them fails the build. Every
-backend runs the tests of the behavior behind the names. They check the port's `None` on a miss, the
+Tests enforce the rules listed here, so a change that breaks one of them fails the build. The tests
+of the behavior behind the names run on every backend. They check the port's `None` on a miss, the
 answer of each `get*` member to an absent key, and what each `enabled` value selects. The port
 contract suite runs on the three adapters and the tests' `InMemoryRepository`, and so does each
 service test that uses the shared `service` fixture.

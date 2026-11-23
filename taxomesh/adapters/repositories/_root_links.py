@@ -1,4 +1,4 @@
-"""The top-level invariant that both file repositories restore in a store when they load it."""
+"""The top-level invariant that both file repositories restore when they load a store or store its root."""
 
 from collections.abc import Mapping, Sequence
 from uuid import UUID

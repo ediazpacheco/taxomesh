@@ -171,7 +171,7 @@ is, table names and file paths included. So the body of a 500 is a fixed string.
 The original exception and its traceback go to one `ERROR` log record on the
 `taxomesh.contrib.api.errors` logger. That log record reaches your handlers as any log record does
 ([Logging](python-api.md#logging)). On Django, the `django.request` log record of the same 500
-carries no traceback. [Mail the server errors](django-integration.md#mail-the-server-errors) sends
-the taxomesh log record by email.
+carries no traceback. For the taxomesh log record, see
+[Send the server errors by email](django-integration.md#send-the-server-errors-by-email).
 
 ← [Back to README](../README.md)

@@ -24,6 +24,7 @@ from taxomesh.adapters.repositories._external_id import bulk_lookup_by_external_
 from taxomesh.adapters.repositories._relation_types import require_relation_types
 from taxomesh.adapters.repositories._root_links import normalise_root_links
 from taxomesh.adapters.repositories._version import row_to_store
+from taxomesh.domain.constants import ROOT_CATEGORY_NAME
 from taxomesh.domain.info import RepositoryInfo
 from taxomesh.domain.models import (
     Category,
@@ -485,7 +486,8 @@ class FileRepositoryBase(ABC):
         """Store a category row: insert it, or replace the stored row with its identifier.
 
         The given row does not change. An update stores the version of the row that it replaces
-        plus one.
+        plus one. A write that stores the implicit root also restores the top-level invariant, as a
+        load does: each category that holds no parent link gains a link to the root.
 
         Args:
             category: The category row to store.
@@ -513,6 +515,12 @@ class FileRepositoryBase(ABC):
         )
         check_external_id_unique(category.category_id, category.external_id, self._categories, "category")
         self._categories[category.category_id] = stored
+        if stored.name == ROOT_CATEGORY_NAME:
+            # A load of the file that this write makes links each category with no parent to the root.
+            # Memory gets the same links, in the same write.
+            self._category_parent_links, self._item_parent_links = normalise_root_links(
+                self._categories, self._category_parent_links, self._item_parent_links
+            )
         self._flush()
         return stored
 

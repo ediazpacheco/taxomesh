@@ -24,6 +24,14 @@ tagged or published.
 - Five messages have a new text: a negative `--max-depth`, a graph too large to draw, a graph too
   large to serialize, a file that another writer changed, and a file that holds no mapping.
 
+### Fixed
+
+- A YAML or JSON file can hold categories and no implicit root: a file written by hand is such a
+  file. The first service that is built over it now lists its top level. In 1.0.0 to 1.0.3,
+  `roots()` and `graph().roots` of that service left out the categories of the file. Only a
+  repository built later over the same file listed them. The file repository now links each category
+  that holds no parent link to the root in the write that stores the root.
+
 ## [1.0.3] — 2026-10-21
 
 1.0.3 builds a row with metadata in less time. No public name or signature changes.
