@@ -17,9 +17,9 @@ tagged or published.
 
 - A YAML or JSON file can hold categories and no implicit root: a file written by hand is such a
   file. The first service that is built over it now lists its top level. In 1.0.0 to 1.0.3,
-  `roots()` and `graph().roots` stayed empty in that service. Only a repository built later over the
-  same file listed the top level. The file repository now links each category that holds no parent
-  link to the root in the write that stores the root.
+  `roots()` and `graph().roots` of that service left out the categories of the file. Only a
+  repository built later over the same file listed them. The file repository now links each category
+  that holds no parent link to the root in the write that stores the root.
 
 ## [1.0.3] — 2026-10-21
 
