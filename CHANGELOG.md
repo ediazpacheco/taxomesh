@@ -11,6 +11,16 @@ The full entries of that series are in
 The changes of 1.0.0 were first dated as 0.2.0 in this file, on 2026-10-12; that version was never
 tagged or published.
 
+## [Unreleased]
+
+### Fixed
+
+- A YAML or JSON file that holds categories and no implicit root, such as a file written by hand,
+  now lists its top level in the first service that is built over it. In 1.0.0 to 1.0.3, `roots()`
+  and `graph().roots` were empty there, until a second repository loaded the file. The file
+  repository now links each category that holds no parent link to the root in the write that stores
+  the root.
+
 ## [1.0.3] — 2026-10-21
 
 1.0.3 builds a row with metadata in less time. No public name or signature changes.

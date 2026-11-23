@@ -90,6 +90,6 @@ that check them on the shipped backends.
   no other parent link. A category with no link is not at the top level, and nothing raises. So a
   custom backend that loads a store written without these links first stores the root, then links
   each such category to it. The file backends link them when they load a file that holds the root,
-  and Django's migrations `0011` and `0012` do it once.
+  or in the write that stores it, and Django's migrations `0011` and `0012` do it once.
 
 ← [Back to README](../README.md)

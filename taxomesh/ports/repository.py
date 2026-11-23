@@ -40,7 +40,8 @@ class TaxomeshRepositoryBase(Protocol):
     at the top level: ``svc.categories.roots()`` and ``svc.graph().roots`` leave it out, and nothing
     raises. So a backend that loads a store written without these links first stores the implicit
     root, when the store holds none, and links each category that holds no parent link to it. The
-    file repositories link them when they load a file that holds the implicit root.
+    file repositories link them when they load a file that holds the implicit root, or in the write
+    that stores it.
     """
 
     # --- Atomicity boundary ---
