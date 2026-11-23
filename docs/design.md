@@ -51,7 +51,7 @@ its own default. `_config.py` imports the two constants only to report which pat
 resolves to. It never repeats their values. `tests/service/test_service_config.py` asserts that the
 backend gets no path argument and that `_config.py` writes no file path.
 
-**The port reports absence and the service raises.**
+**The port.** It reports absence, and the service raises:
 
 - The port, `TaxomeshRepositoryBase`, is a `typing.Protocol`, so a backend inherits nothing. mypy
   checks that a backend has the members of the port. The service checks them with `isinstance` when
@@ -404,8 +404,8 @@ absence of logic in a handler, or the imports of `contrib/api`.
 | A write's checks and writes are one step | `tests/service/test_concurrent_writes.py`, `tests/contrib/django/test_concurrent_writes.py` |
 | The handlers' names and contracts | `tests/contrib/test_api_handlers.py` |
 
-Tests enforce the rules listed here, so a change that breaks one of them fails the build. Every
-backend runs the tests of the behavior behind the names. They check the port's `None` on a miss, the
+Tests enforce the rules listed here, so a change that breaks one of them fails the build. The tests
+of the behavior behind the names run on every backend. They check the port's `None` on a miss, the
 answer of each `get*` member to an absent key, and what each `enabled` value selects. The port
 contract suite runs on the three adapters and the tests' `InMemoryRepository`, and so does each
 service test that uses the shared `service` fixture.
