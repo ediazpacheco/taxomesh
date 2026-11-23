@@ -1,7 +1,7 @@
 # Django Integration
 
-Use this page to keep the taxonomy in the database of a Django project, or to manage it in the
-Django admin. Your models get no taxonomy fields or tables: they link to taxomesh through
+This page says how to keep the taxonomy in the database of a Django project, and how to manage it
+in the Django admin. Your models get no taxonomy fields or tables: they reach taxomesh through
 `external_id`.
 
 ## Enable the app
@@ -60,7 +60,7 @@ a strict Content Security Policy, those pages cannot edit `metadata`. The admin 
   - `ItemCategoryAssignmentMixin` adds a *categories* field, which offers the enabled categories, to
     a model whose primary key is the external id of an item. To use another attribute than the
     primary key, set `taxomesh_external_id_attr`. With `fields` or `fieldsets`, the page shows the
-    field only where they name it; without them, it shows the field last. A save changes placements
+    field only where they name it. Without them, it shows the field last. A save changes placements
     only when the page shows the field. It changes no placement in a category that the field does
     not offer: a placement in a disabled category stays.
 
@@ -86,9 +86,9 @@ no setting applies to its rows.
    `admin.site.unregister(CategoryModel)`.
 3. Register yours with `admin.site.register(CategoryModel, YourAdmin)`.
 
-## Link your models to items
+## Connect your models to items
 
-This example keeps one item for each record of a Django model, linked by `external_id`.
+This example keeps one item for each record of a Django model, connected by `external_id`.
 
 ```python
 # content_catalog/taxomesh_bridge.py
@@ -138,9 +138,9 @@ class Content(models.Model):
 ```
 
 taxomesh does not make the `save` of your model and its own write atomic together: your application
-decides that.
+decides that. [Get the service](#get-the-service) says how a taxomesh write uses transactions.
 
-## Mail the server errors
+## Send the server errors by email
 
 The [HTTP error mapping](http-api-integration.md#error-mapping) logs each 500 as an `ERROR` log
 record, with its traceback. This setting sends that log record by email to the `ADMINS`. An outage

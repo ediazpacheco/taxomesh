@@ -169,7 +169,7 @@ category at the top level.
 
 ## External ids
 
-An external id links a category or an item to the record that it stands for in your system. You
+An external id connects a category or an item to the record that it stands for in your system. You
 give it as an `ExternalId`: a `str`, an `int` (not a `bool`), a `UUID` or `None`. taxomesh stores
 its `str()`, and writes and lookups convert it by the same rule.
 
@@ -265,7 +265,7 @@ external id are at most 256 characters, as the table above shows, and a descript
   external id. `None` for any other field is the wrong type and raises `TypeError`.
 - It reads the stored row, not a cached copy. So it keeps a change made through another service on
   the same repository, or on Django. On a file, a change made through another repository makes the
-  update raise `TaxomeshRepositoryError` ([Storage backends](repositories.md)).
+  update raise `TaxomeshRepositoryError` ([File backends](repositories.md#file-backends)).
 - It replaces `metadata`, and does not merge it.
 - Every check runs before the save, so a refused update stores nothing.
 - `expected_version` makes the update conditional. Pass the `version` of the row you read. If a
@@ -486,15 +486,15 @@ A relation is directed and typed: `relate(source, target, relation_type)`.
   `"incoming"` where it is the target, or `"both"`. `Direction.BOTH` and `"both"` are the same
   argument.
 - If an item can be at either end of a relation, read its relations with `"both"`. `"outgoing"`
-  leaves out the links that point at the item. `"both"` returns each stored link once, so a
-  relation stored in both directions is two links.
+  leaves out the links that point at the item. A relation stored in both directions is two links,
+  and `"both"` returns each of them once.
 - `relation_types` takes one type or a collection of them. `None` or an empty collection reads
   every type.
 
 `list_related` and `get_many_related` filter the related items by `enabled`. They skip a relation
 whose other end is not stored, and log a `WARNING` on the `taxomesh.application.collections.items`
-logger. In `get_many_related`, the items that you pass are the keys. An item is left out when it has
-no related item to return. Each value is a `RelatedItems`:
+logger. In `get_many_related`, the items that you pass are the keys. An item is left out when it is
+not stored, or has no related item to return. Each value is a `RelatedItems`:
 
 | Member | Returns |
 |---|---|
@@ -667,8 +667,8 @@ assert svc.info.repository.backend == svc.repository.describe().backend == "Yaml
 Each service caches in memory what its lookups, listings, relation reads and graphs read from
 storage. An entry lasts `cache_ttl` seconds: 5, unless the service is built with another value. `0`
 caches nothing, and a negative or NaN lifetime raises `TaxomeshValidationError`. Three forms read
-storage on every call: `len()`, a lookup of one tag (subscript, `get`, `in`), and a search filtered
-by category with `recursive=True`.
+storage on every call: `len()`, a read of one tag by key (subscript, `get`, `in`), and a search
+filtered by category with `recursive=True`.
 
 A write through a service clears the cache of that service, and of no other. A write reads what it
 changes from storage, never from the cache. Inside a transaction, which only Django has, a read is
@@ -687,7 +687,7 @@ Threads may share a service: its writes are never stale, and its reads may be st
 process, sees a write once its own cache entries expire. A listing reads its links, then the rows
 that they name. So it may raise the not-found error of a row that another writer deletes between the
 two reads. `list_related` and `get_many_related` skip that row instead, with a `WARNING`. A YAML or
-JSON file has one writer: [Storage backends](repositories.md) says why.
+JSON file has one writer: [File backends](repositories.md#file-backends) says why.
 
 ---
 
@@ -720,7 +720,7 @@ serializer raises, is a `TaxomeshError` too, in `taxomesh.contrib.api.errors`.
 
 - **Storage.** On Django, a storage failure in any read or write raises `TaxomeshRepositoryError`.
   A file repository raises it when it cannot read or write its file, and when another writer
-  changed the file ([Storage backends](repositories.md)).
+  changed the file ([File backends](repositories.md#file-backends)).
 - **Refused values.** When the model refuses a value that you pass, the member raises
   `TaxomeshValidationError`, with pydantic's error as its cause. So no `pydantic.ValidationError`
   reaches you for a value that you pass.
@@ -748,8 +748,8 @@ for call, error in (
 The library logs with the standard `logging` module, on loggers whose names start with `taxomesh`.
 `list_related` and `get_many_related` log a `WARNING` when they skip a relation. The HTTP error
 mapping logs an `ERROR` for each error that it maps to 500. The Django admin logs a `WARNING` when it
-cannot link an external id, and an `ERROR` when a graph view fails. To read the log records, attach a
-handler:
+cannot link an external id, and an `ERROR` when a graph view fails. No log record is written until
+your application configures logging, for example with a handler:
 
 ```python notest
 import logging

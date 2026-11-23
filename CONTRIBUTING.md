@@ -126,7 +126,7 @@ Each term has one meaning in the project's text.
 | collection | `svc.categories`, `svc.items` or `svc.tags`: the object that has the members for one kind of entity. The service builds the three. | "Container" only for the forms that the collections share with the graph snapshot. |
 | subject | The entity that a member acts on, given positionally, such as the item of `items.tag(item, tag)`. | A filter is not a subject. |
 | lookup | A member that finds rows by key and answers a miss without raising: `get`, `get_by_*` and `get_many*`, and on the port `find_*` and `map_*`. | "Batch lookup" for `get_many*` and `map_*`. |
-| listing | A `list*` member, or the tuple of rows that it returns. | |
+| listing | A `list*` member, or the tuple that it returns. | |
 | sort index | The position of a parent link, a placement or a relation, lower first: its `sort_index`. | |
 | category graph | The stored categories and their parent links. | |
 | graph snapshot | The `TaxomeshGraph` that `svc.graph()` returns: a read-only copy of the category graph. A later write does not change it. | "The graph" when the text is about `svc.graph()`. |
