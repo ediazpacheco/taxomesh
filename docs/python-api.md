@@ -748,8 +748,8 @@ for call, error in (
 The library logs with the standard `logging` module, on loggers whose names start with `taxomesh`.
 `list_related` and `get_many_related` log a `WARNING` when they skip a relation. The HTTP error
 mapping logs an `ERROR` for each error that it maps to 500. The Django admin logs a `WARNING` when it
-cannot link an external id, and an `ERROR` when a graph view fails. No log record is written until
-your application configures logging, for example with a handler:
+cannot build the URL of a record's admin page, and an `ERROR` when a graph view fails. No log record
+is written until your application configures a handler, for example:
 
 ```python notest
 import logging
